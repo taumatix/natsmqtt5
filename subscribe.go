@@ -22,10 +22,12 @@ func (c *conn) handleSubscribe(ctx context.Context, p *packet.Subscribe) error {
 
 	codes := make([]packet.ReasonCode, len(p.Subscriptions))
 	granted := make([]*subscription, len(p.Subscriptions))
+	replaced := make([]bool, len(p.Subscriptions))
 	for i, want := range p.Subscriptions {
-		sub, code := c.subscribeOne(ctx, want, subID)
+		sub, existed, code := c.subscribeOne(ctx, want, subID)
 		codes[i] = code
 		granted[i] = sub
+		replaced[i] = existed
 	}
 
 	if err := c.write(&packet.Suback{PacketID: p.PacketID, ReasonCodes: codes}); err != nil {
@@ -38,26 +40,28 @@ func (c *conn) handleSubscribe(ctx context.Context, p *packet.Subscribe) error {
 		if sub == nil {
 			continue
 		}
-		c.sendRetained(sub, p.Subscriptions[i].RetainHandling)
+		c.sendRetained(sub, p.Subscriptions[i].RetainHandling, replaced[i])
 	}
 	return nil
 }
 
-// subscribeOne installs a single subscription and returns the Reason Code for
-// it: the granted QoS on success, or a failure code from MQTT-5.0 Table 3-8.
-func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID int) (*subscription, packet.ReasonCode) {
+// subscribeOne installs a single subscription. It returns the subscription,
+// whether it replaced one the session already held — which Retain Handling 1
+// needs [MQTT-3.3.1-10] — and the Reason Code: the granted QoS on success, or
+// a failure code from MQTT-5.0 Table 3-8.
+func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID int) (*subscription, bool, packet.ReasonCode) {
 	if err := topic.ValidateFilter(want.Filter); err != nil {
 		c.logger.Debug("rejecting a subscription", "filter", want.Filter, "error", err)
-		return nil, packet.TopicFilterInvalid
+		return nil, false, packet.TopicFilterInvalid
 	}
 	share, _, err := topic.SplitShared(want.Filter)
 	if err != nil {
-		return nil, packet.TopicFilterInvalid
+		return nil, false, packet.TopicFilterInvalid
 	}
 	// "It is a Protocol Error to set the No Local bit to 1 on a Shared
 	// Subscription" [MQTT-3.8.3-4].
 	if share != "" && want.NoLocal {
-		return nil, packet.ProtocolError
+		return nil, false, packet.ProtocolError
 	}
 
 	if a := c.broker.opts.Authorizer; a != nil {
@@ -67,13 +71,13 @@ func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID
 		}
 		if err := a.Authorize(ctx, req); err != nil {
 			c.logger.Debug("subscription denied", "filter", want.Filter, "error", err)
-			return nil, packet.NotAuthorized
+			return nil, false, packet.NotAuthorized
 		}
 	}
 
 	subject, err := topic.FilterToSubject(want.Filter)
 	if err != nil {
-		return nil, packet.TopicFilterInvalid
+		return nil, false, packet.TopicFilterInvalid
 	}
 	full := topic.Prefix(c.broker.opts.SubjectPrefix, subject)
 
@@ -95,7 +99,8 @@ func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID
 	// Session, then it MUST replace that existing Subscription"
 	// [MQTT-3.8.4-3]. Replacing means tearing the NATS subscriptions down and
 	// building them again, since the options may have changed.
-	if old, ok := c.sess.removeSubscription(want.Filter); ok {
+	old, existed := c.sess.removeSubscription(want.Filter)
+	if existed {
 		unsubscribeAll(old)
 	}
 
@@ -110,11 +115,11 @@ func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID
 	if err := c.bindNATS(sub); err != nil {
 		c.logger.Warn("could not create the NATS subscription",
 			"filter", want.Filter, "subject", full, "error", err)
-		return nil, packet.ImplementationSpecificError
+		return nil, existed, packet.ImplementationSpecificError
 	}
 	c.sess.putSubscription(sub)
 
-	return sub, packet.ReasonCode(granted)
+	return sub, existed, packet.ReasonCode(granted)
 }
 
 // bindNATS creates the NATS subscriptions behind an MQTT filter. A filter
@@ -298,7 +303,7 @@ func (c *conn) deliver(d *delivery) error {
 
 // sendRetained delivers the retained messages matching a new subscription, as
 // the Retain Handling option directs (MQTT-5.0 §3.3.1.3).
-func (c *conn) sendRetained(sub *subscription, handling packet.RetainHandling) {
+func (c *conn) sendRetained(sub *subscription, handling packet.RetainHandling, replacedExisting bool) {
 	if c.broker.retain == nil || handling == packet.RetainSendNever {
 		return
 	}
@@ -307,9 +312,13 @@ func (c *conn) sendRetained(sub *subscription, handling packet.RetainHandling) {
 	if sub.share != "" {
 		return
 	}
-	// RetainSendOnNew would skip an existing subscription, but subscribeOne
-	// has already replaced any previous one with the same filter, so by this
-	// point the subscription is new either way.
+	// "If Retain Handling is set to 1 then if the subscription did not already
+	// exist, the Server MUST send all retained messages matching the Topic
+	// Filter of the subscription to the Client, and if the subscription did
+	// exist the Server MUST NOT send the retained messages" [MQTT-3.3.1-10].
+	if handling == packet.RetainSendOnNew && replacedExisting {
+		return
+	}
 
 	for _, r := range c.broker.retain.match(sub.filter) {
 		props := r.properties()

@@ -223,6 +223,27 @@ func TestRetainedMessages(t *testing.T) {
 		sub.expectNoMessage()
 	})
 
+	// "If Retain Handling is set to 1 then if the subscription did not already
+	// exist, the Server MUST send all retained messages ... and if the
+	// subscription did exist the Server MUST NOT send the retained messages"
+	// [MQTT-3.3.1-10].
+	t.Run("Retain Handling 1 sends once, then not on a repeat subscribe", func(t *testing.T) {
+		pub, _ := connectClient(t, addr, connectOpts("pub-rh1"))
+		pub.publish(&paho.Publish{Topic: "state/heater", QoS: 1, Retain: true, Payload: []byte("on")})
+
+		sub, _ := connectClient(t, addr, connectOpts("sub-rh1"))
+		sub.subscribe(paho.SubscribeOptions{Topic: "state/heater", QoS: 1, RetainHandling: 1})
+		assert.Equal(t, "on", sub.expectMessage().Payload, "first subscribe gets the retained message")
+
+		sub.subscribe(paho.SubscribeOptions{Topic: "state/heater", QoS: 1, RetainHandling: 1})
+		sub.expectNoMessage()
+
+		// Retain Handling 0 re-sends it even for an existing subscription
+		// [MQTT-3.3.1-9, MQTT-3.8.4-4].
+		sub.subscribe(paho.SubscribeOptions{Topic: "state/heater", QoS: 1, RetainHandling: 0})
+		assert.Equal(t, "on", sub.expectMessage().Payload)
+	})
+
 	t.Run("Retain Handling 2 suppresses them", func(t *testing.T) {
 		pub, _ := connectClient(t, addr, connectOpts("pub-rh"))
 		pub.publish(&paho.Publish{Topic: "state/fan", QoS: 1, Retain: true, Payload: []byte("off")})
