@@ -110,3 +110,27 @@ func TestVersionFlag(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, cfg.showVersion)
 }
+
+// The container image stamps the version with ldflags. Every other build has
+// to get it from what Go recorded, or `go install ...@v0.1.1` would report
+// "dev" for a binary that is demonstrably a release.
+func TestBinaryVersion(t *testing.T) {
+	t.Run("a stamped build reports the stamp", func(t *testing.T) {
+		stamped := version
+		t.Cleanup(func() { version = stamped })
+
+		version = "v9.9.9"
+		assert.Equal(t, "v9.9.9", binaryVersion())
+	})
+
+	t.Run("an unstamped build reports what Go recorded", func(t *testing.T) {
+		stamped := version
+		t.Cleanup(func() { version = stamped })
+
+		version = ""
+		// Under `go test` the recorded main module version is the one for this
+		// module, so the only safe claim is that it says something, and never
+		// the empty string a bare fmt.Println would produce.
+		assert.NotEmpty(t, binaryVersion())
+	})
+}

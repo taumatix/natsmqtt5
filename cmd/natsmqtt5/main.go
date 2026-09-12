@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -30,9 +31,23 @@ import (
 	"github.com/taumatix/natsmqtt5"
 )
 
-// version is stamped at build time with -ldflags "-X main.version=v1.2.3". It
-// is "dev" for a plain `go build` and for `go install` of a pseudo-version.
-var version = "dev"
+// version is stamped at build time with -ldflags "-X main.version=v1.2.3",
+// which is how the container image knows which release it is. Left empty for
+// every other build, where binaryVersion falls back to what Go recorded.
+var version = ""
+
+// binaryVersion is what -version reports. A `go install ...@v0.1.1` build
+// carries no ldflags but does record the module version, so reporting "dev"
+// for it would be a lie the user cannot check.
+func binaryVersion() string {
+	if version != "" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
+		return info.Main.Version
+	}
+	return "dev"
+}
 
 // envPrefix is prepended to every flag's environment variable twin.
 const envPrefix = "NATSMQTT5_"
@@ -56,7 +71,7 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) er
 		return err
 	}
 	if cfg.showVersion {
-		fmt.Fprintln(stdout, "natsmqtt5", version)
+		fmt.Fprintln(stdout, "natsmqtt5", binaryVersion())
 		return nil
 	}
 
@@ -73,7 +88,7 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) er
 	}
 	defer broker.Close()
 
-	cfg.broker.Logger.Info("starting", "version", version, "listen", cfg.broker.Listen, "nats", cfg.broker.NATSURL)
+	cfg.broker.Logger.Info("starting", "version", binaryVersion(), "listen", cfg.broker.Listen, "nats", cfg.broker.NATSURL)
 	if err := broker.Serve(ctx); err != nil {
 		return err
 	}
