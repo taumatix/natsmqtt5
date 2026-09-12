@@ -3,6 +3,7 @@ package natsmqtt5
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/nats-io/nats.go"
 
@@ -28,6 +29,26 @@ func (c *conn) handleSubscribe(ctx context.Context, p *packet.Subscribe) error {
 		codes[i] = code
 		granted[i] = sub
 		replaced[i] = existed
+	}
+
+	// A SUBACK tells the client its subscription is live, so the interest has
+	// to have reached the NATS server before the SUBACK reaches the client.
+	// nats.go buffers the SUB protocol and writes it from another goroutine, so
+	// without this round trip a publisher on a second broker can beat the SUB
+	// to the server and the message is lost with nothing to show for it.
+	if anyGranted(granted) {
+		if err := c.flushNATS(ctx); err != nil {
+			c.logger.Warn("could not confirm the subscriptions with NATS", "error", err)
+			for i, sub := range granted {
+				if sub == nil {
+					continue
+				}
+				c.sess.removeSubscription(sub.filter)
+				unsubscribeAll(sub)
+				granted[i] = nil
+				codes[i] = packet.ImplementationSpecificError
+			}
+		}
 	}
 
 	if err := c.write(&packet.Suback{PacketID: p.PacketID, ReasonCodes: codes}); err != nil {
@@ -120,6 +141,28 @@ func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID
 	c.sess.putSubscription(sub)
 
 	return sub, existed, packet.ReasonCode(granted)
+}
+
+func anyGranted(granted []*subscription) bool {
+	for _, sub := range granted {
+		if sub != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// natsFlushTimeout bounds the round trip that confirms a subscription reached
+// the NATS server. It is generous: exceeding it means the NATS connection is
+// in trouble, not that the server is briefly slow.
+const natsFlushTimeout = 5 * time.Second
+
+// flushNATS waits for everything the broker has handed to nats.go to reach the
+// server.
+func (c *conn) flushNATS(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, natsFlushTimeout)
+	defer cancel()
+	return c.broker.nc.FlushWithContext(ctx)
 }
 
 // bindNATS creates the NATS subscriptions behind an MQTT filter. A filter
