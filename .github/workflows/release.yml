@@ -28,9 +28,13 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
-          # v1.2.3 publishes 1.2.3, 1.2 and latest. A pre-release tag such as
-          # v1.2.3-rc1 publishes only itself, so latest never points at one.
+          # v1.2.3 publishes v1.2.3, 1.2.3, 1.2 and latest. Both spellings of
+          # the version exist because the Go module is v1.2.3 and Docker
+          # convention is 1.2.3, and neither audience should have to guess. A
+          # pre-release tag such as v1.2.3-rc1 publishes only itself, so latest
+          # never points at one.
           tags: |
+            type=raw,value=${{ github.ref_name }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}

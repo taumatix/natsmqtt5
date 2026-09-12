@@ -45,7 +45,7 @@ docker run --rm -p 1883:1883 \
 ```
 
 Images are published for `linux/amd64` and `linux/arm64` on every release, as
-`:v0.1.1`, `:0.1` and `:latest`. They are built from
+`:v0.1.1`, `:0.1.1`, `:0.1` and `:latest`. They are built from
 [distroless/static][distroless], so there is no shell and no package manager in
 them, and the broker runs as a non-root user.
 
