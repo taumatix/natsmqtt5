@@ -274,6 +274,7 @@ type Authenticator interface {
 // AuthenticatorFunc adapts a function to the Authenticator interface.
 type AuthenticatorFunc func(ctx context.Context, req *AuthRequest) (*AuthResult, error)
 
+// Authenticate calls f.
 func (f AuthenticatorFunc) Authenticate(ctx context.Context, req *AuthRequest) (*AuthResult, error) {
 	return f(ctx, req)
 }
@@ -342,6 +343,7 @@ type Authorizer interface {
 // AuthorizerFunc adapts a function to the Authorizer interface.
 type AuthorizerFunc func(ctx context.Context, req *AuthzRequest) error
 
+// Authorize calls f.
 func (f AuthorizerFunc) Authorize(ctx context.Context, req *AuthzRequest) error {
 	return f(ctx, req)
 }

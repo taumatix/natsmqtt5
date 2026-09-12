@@ -38,7 +38,7 @@ func (c *conn) handleSubscribe(ctx context.Context, p *packet.Subscribe) error {
 		if sub == nil {
 			continue
 		}
-		c.sendRetained(ctx, sub, p.Subscriptions[i].RetainHandling)
+		c.sendRetained(sub, p.Subscriptions[i].RetainHandling)
 	}
 	return nil
 }
@@ -298,7 +298,7 @@ func (c *conn) deliver(d *delivery) error {
 
 // sendRetained delivers the retained messages matching a new subscription, as
 // the Retain Handling option directs (MQTT-5.0 §3.3.1.3).
-func (c *conn) sendRetained(ctx context.Context, sub *subscription, handling packet.RetainHandling) {
+func (c *conn) sendRetained(sub *subscription, handling packet.RetainHandling) {
 	if c.broker.retain == nil || handling == packet.RetainSendNever {
 		return
 	}
@@ -326,5 +326,4 @@ func (c *conn) sendRetained(ctx context.Context, sub *subscription, handling pac
 			retain: true,
 		})
 	}
-	_ = ctx
 }
