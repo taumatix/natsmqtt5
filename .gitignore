@@ -1,0 +1,17 @@
+# Build output
+/natsmqtt5
+/bin/
+/dist/
+
+# Go test artefacts
+*.test
+*.out
+coverage.*
+
+# Fuzzing corpus found by CI, which belongs in testdata only when a case is
+# worth keeping as a regression.
+/**/testdata/fuzz/*/[0-9a-f]*
+
+# Local environment
+.env
+.DS_Store
