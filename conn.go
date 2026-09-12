@@ -277,16 +277,21 @@ func (c *conn) scheduleWill() {
 	if will == nil {
 		return
 	}
+
+	// "The Server delays publishing the Client's Will Message until the Will
+	// Delay Interval has passed or the Session ends, whichever happens first"
+	// (MQTT-5.0 §3.1.3.2.2). A Session Expiry Interval of zero ends the session
+	// as soon as the connection does, so the delay collapses to nothing however
+	// long the client asked for.
+	sess := c.sess
+	if expiry := time.Duration(sess.expiry()) * time.Second; expiry < delay {
+		delay = expiry
+	}
 	if delay == 0 {
-		c.broker.publishWill(c.sess, will)
+		c.broker.publishWill(sess, will)
 		return
 	}
 
-	sess := c.sess
-	expiry := time.Duration(sess.expiry()) * time.Second
-	if expiry > 0 && delay > expiry {
-		delay = expiry
-	}
 	go func() {
 		timer := time.NewTimer(delay)
 		defer timer.Stop()

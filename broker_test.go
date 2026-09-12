@@ -392,6 +392,34 @@ func TestLastWillAndTestament(t *testing.T) {
 	assert.Equal(t, "offline", got.Payload)
 }
 
+// "The Server delays publishing the Client's Will Message until the Will Delay
+// Interval has passed or the Session ends, whichever happens first"
+// (MQTT-5.0 §3.1.3.2.2). With a Session Expiry Interval of zero the session
+// ends with the connection, so a long Will Delay must not hold the message
+// back.
+func TestWillDelayCollapsesWhenTheSessionEnds(t *testing.T) {
+	addr := startBroker(t, startNATS(t))
+
+	watcher, _ := connectClient(t, addr, connectOpts("watcher"))
+	watcher.subscribe(paho.SubscribeOptions{Topic: "status/#", QoS: 1})
+
+	// Will Delay 300s, but Session Expiry Interval 0 (the default).
+	dying, _, err := tryConnect(t, addr, &paho.Connect{
+		ClientID:       "impatient",
+		CleanStart:     true,
+		KeepAlive:      30,
+		WillMessage:    &paho.WillMessage{Topic: "status/impatient", Payload: []byte("gone"), QoS: 1},
+		WillProperties: &paho.WillProperties{WillDelayInterval: natsmqtt5.Ptr(uint32(300))},
+	})
+	require.NoError(t, err)
+	require.NoError(t, dying.Client.Disconnect(&paho.Disconnect{ReasonCode: 0x04}))
+
+	// expectMessage times out in 5s, far below the 300s the client asked for.
+	got := watcher.expectMessage()
+	assert.Equal(t, "status/impatient", got.Topic)
+	assert.Equal(t, "gone", got.Payload)
+}
+
 // A clean DISCONNECT with reason 0x00 deletes the Will Message
 // [MQTT-3.1.2-8].
 func TestNormalDisconnectDropsTheWill(t *testing.T) {
