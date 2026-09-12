@@ -1,0 +1,9 @@
+# The build needs the Go sources and nothing else. Everything excluded here is
+# a file that would invalidate the build cache without changing the binary.
+.git
+.github
+.gitignore
+*.md
+compose.yaml
+Dockerfile
+.dockerignore

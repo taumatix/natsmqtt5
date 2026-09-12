@@ -1,0 +1,38 @@
+# A NATS server with JetStream, and an MQTT v5 broker in front of it.
+#
+#	docker compose up -d
+#	mosquitto_sub -V 5 -h localhost -p 1883 -t 'sensors/#' &
+#	mosquitto_pub -V 5 -h localhost -p 1883 -t sensors/7/temp -m 21.5
+#
+# To put the broker in front of a NATS server you already run, delete the nats
+# service and set NATSMQTT5_NATS to its URL.
+
+services:
+  nats:
+    image: nats:2-alpine
+    # JetStream stores the retained messages. Without it, set
+    # NATSMQTT5_NO_RETAINED=true on the broker and drop -js here.
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8222/healthz || exit 1"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  natsmqtt5:
+    image: ghcr.io/taumatix/natsmqtt5:v0.1.1
+    environment:
+      NATSMQTT5_NATS: nats://nats:4222
+    ports:
+      - "1883:1883"
+    # The broker exits if NATS is not there when it starts, so it waits for the
+    # health check rather than crash-looping.
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  nats-data:

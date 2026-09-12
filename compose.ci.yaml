@@ -1,0 +1,10 @@
+# Overrides compose.yaml to run the working tree instead of the published
+# image, which is how CI smoke-tests the quickstart people are told to run:
+#
+#	docker compose -f compose.yaml -f compose.ci.yaml up -d --build
+
+services:
+  natsmqtt5:
+    image: natsmqtt5:ci
+    build:
+      context: .
