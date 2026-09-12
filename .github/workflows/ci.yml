@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest supported Go and the current one. The broker embeds a NATS
+        # server in its tests, so the matrix also catches nats-server breaking
+        # on a newer toolchain.
+        go: ['1.25', 'stable']
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go }}
+          check-latest: true
+
+      - name: Verify go.mod and go.sum are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+  fuzz:
+    # The decoder parses bytes from unauthenticated peers, so every push gets a
+    # short fuzzing run on top of the seed corpus.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+          check-latest: true
+
+      - name: Fuzz the packet decoder
+        run: go test ./packet/ -run FuzzRead -fuzz FuzzRead -fuzztime 60s
+
+      - name: Fuzz the topic mapping
+        run: go test ./topic/ -run FuzzSubjectRoundTrip -fuzz FuzzSubjectRoundTrip -fuzztime 60s
