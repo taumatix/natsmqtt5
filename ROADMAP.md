@@ -46,6 +46,25 @@ consumer G" but has no concept of "unacked by member B".
 ownership, a private per-member copy of the message, and cleanup for every way
 the exchange can end — unsubscribe, disconnect, session expiry, takeover.
 
+## A PUBACK that means the message is safe
+
+**Today:** the broker hands a QoS 1 message to its NATS connection and
+acknowledges immediately. nats.go flushes that write from another goroutine, so
+a broker killed in the window between the two loses a message it has told the
+client it has. The subscribe path does not have this problem: a SUBACK waits for
+the NATS server to confirm the subscription, because a client cannot detect a
+lost subscription the way it can retry a publish.
+
+**Why it is not simply fixed:** flushing before every PUBACK costs a round trip
+to NATS per QoS 1 publish, which is the broker's throughput. Core NATS also has
+no acknowledgement of its own, so a flush proves the bytes left the broker, not
+that the server accepted them.
+
+**Shape:** publish QoS 1 and 2 through JetStream and acknowledge on the
+publish-ack, as an opt-in `Options.DurablePublish`. That buys a real
+end-to-end guarantee rather than a cheaper illusion, at a latency cost the
+deployment chooses.
+
 ## Enhanced authentication (AUTH packets)
 
 **Today:** a CONNECT with an Authentication Method is refused with
