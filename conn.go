@@ -115,6 +115,16 @@ func (c *conn) serve(ctx context.Context) {
 // negotiated interval; the broker closes the connection if nothing arrives
 // within 1.5 times it [MQTT-3.1.2-22].
 func (c *conn) readLoop(ctx context.Context, keepAlive time.Duration) error {
+	// "A Keep Alive value of 0 has the effect of turning off the Keep Alive
+	// mechanism" (MQTT-5.0 §3.1.2.10). The deadline the handshake set to bound
+	// the wait for CONNECT has to be cleared, or the connection would die when
+	// it expires.
+	if keepAlive == 0 {
+		if err := c.nc.SetReadDeadline(time.Time{}); err != nil {
+			return err
+		}
+	}
+
 	for {
 		if keepAlive > 0 {
 			if err := c.nc.SetReadDeadline(time.Now().Add(keepAlive)); err != nil {

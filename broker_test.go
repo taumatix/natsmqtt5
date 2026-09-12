@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/eclipse/paho.golang/paho"
+	"github.com/eclipse/paho.golang/paho/log"
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -389,6 +390,73 @@ func TestNormalDisconnectDropsTheWill(t *testing.T) {
 	require.NoError(t, leaving.Client.Disconnect(&paho.Disconnect{ReasonCode: 0}))
 	watcher.expectNoMessage()
 }
+
+// "A Keep Alive value of 0 has the effect of turning off the Keep Alive
+// mechanism" (MQTT-5.0 §3.1.2.10). The deadline the broker uses to bound the
+// wait for CONNECT must not survive into the connection's lifetime.
+func TestKeepAliveZeroDoesNotExpireTheConnection(t *testing.T) {
+	const connectTimeout = 400 * time.Millisecond
+	addr := startBroker(t, startNATS(t), func(o *natsmqtt5.Options) {
+		o.ConnectTimeout = connectTimeout
+	})
+
+	sub, _ := connectClient(t, addr, &paho.Connect{ClientID: "quiet", CleanStart: true, KeepAlive: 0})
+	sub.subscribe(paho.SubscribeOptions{Topic: "quiet/#", QoS: 1})
+
+	// Stay silent for well past the CONNECT timeout.
+	time.Sleep(3 * connectTimeout)
+
+	pub, _ := connectClient(t, addr, connectOpts("pub"))
+	pub.publish(&paho.Publish{Topic: "quiet/still-here", QoS: 1, Payload: []byte("alive")})
+
+	assert.Equal(t, "alive", sub.expectMessage().Payload,
+		"a client with Keep Alive 0 must not be disconnected for staying quiet")
+}
+
+// The broker closes a connection that goes quiet for longer than 1.5 times the
+// negotiated Keep Alive [MQTT-3.1.2-22].
+func TestKeepAliveTimeoutDisconnectsASilentClient(t *testing.T) {
+	addr := startBroker(t, startNATS(t), func(o *natsmqtt5.Options) {
+		o.ServerKeepAlive = 1 // the broker overrides the client's request
+	})
+
+	disconnected := make(chan *paho.Disconnect, 1)
+	conn := dial(t, addr)
+	client := paho.NewClient(paho.ClientConfig{
+		Conn:               conn,
+		ClientID:           "silent",
+		PingHandler:        noPinger{}, // never send PINGREQ
+		OnServerDisconnect: func(d *paho.Disconnect) { disconnected <- d },
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	connack, err := client.Connect(ctx, &paho.Connect{ClientID: "silent", CleanStart: true, KeepAlive: 60})
+	require.NoError(t, err)
+	require.NotNil(t, connack.Properties.ServerKeepAlive)
+	assert.Equal(t, uint16(1), *connack.Properties.ServerKeepAlive,
+		"the broker's Server Keep Alive replaces the client's value [MQTT-3.1.2-21]")
+
+	select {
+	case d := <-disconnected:
+		assert.Equal(t, byte(packet.KeepAliveTimeout), d.ReasonCode)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the broker did not disconnect a silent client")
+	}
+}
+
+// noPinger is a Pinger that never pings, so a test can let the keep-alive
+// clock run out.
+type noPinger struct{}
+
+func (noPinger) Run(ctx context.Context, _ net.Conn, _ uint16) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (noPinger) PacketSent()         {}
+func (noPinger) PingResp()           {}
+func (noPinger) SetDebug(log.Logger) {}
 
 // A client that reconnects with Clean Start 0 inside its Session Expiry
 // Interval resumes the session: CONNACK reports Session Present, and the
