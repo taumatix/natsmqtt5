@@ -244,6 +244,54 @@ func TestPersistentSessionIsDiscardedByCleanStart(t *testing.T) {
 	third.expectNoMessage()
 }
 
+// A Clean Start deletes the stored record before writing a fresh one, and that
+// deletion goes past this broker's own bucket watcher. A key-value delete
+// carries no value, so nothing in the event says who did it — and a broker that
+// treats every delete as "someone claimed your session" disconnects the client
+// that has just this moment connected, with 0x8E, for doing nothing wrong.
+//
+// Nothing is lost by ignoring deletes: a claim that takes a session away always
+// finishes by writing a record naming its new owner, and that write is what
+// carries the signal.
+func TestPersistentCleanStartDoesNotDisconnectTheNewConnection(t *testing.T) {
+	addr := startBroker(t, startNATS(t), persistent)
+
+	// Leave a stored record behind, so the Clean Start below has something to
+	// delete.
+	first, _ := connectClient(t, addr, durableConnect("wiper", 300))
+	first.subscribe(paho.SubscribeOptions{Topic: "wiper/#", QoS: 1})
+	require.NoError(t, first.Client.Disconnect(&paho.Disconnect{ReasonCode: 0}))
+
+	fresh, connack := connectClient(t, addr, connectOpts("wiper"))
+	require.False(t, connack.SessionPresent)
+	fresh.subscribe(paho.SubscribeOptions{Topic: "wiper/#", QoS: 1})
+
+	fresh.expectNoServerDisconnect()
+
+	pub, _ := connectClient(t, addr, connectOpts("pub"))
+	pub.publish(&paho.Publish{Topic: "wiper/a", QoS: 1, Payload: []byte("served")})
+	assert.Equal(t, "served", fresh.expectMessage().Payload)
+}
+
+// Ignoring deletions must not cost the signal they appeared to carry. A Clean
+// Start on another broker deletes the record and writes a fresh one, and it is
+// that write — naming its new owner — which has to reach the broker still
+// serving the client [MQTT-3.1.4-3].
+func TestPersistentCleanStartOnAnotherBrokerDisplacesTheOldConnection(t *testing.T) {
+	natsURL := startNATS(t)
+	addrA := startBroker(t, natsURL, persistent)
+	addrB := startBroker(t, natsURL, persistent)
+
+	onA, _ := connectClient(t, addrA, durableConnect("evictee", 300))
+	onA.subscribe(paho.SubscribeOptions{Topic: "evict/#", QoS: 1})
+
+	_, connack := connectClient(t, addrB, connectOpts("evictee"))
+	assert.False(t, connack.SessionPresent, "a Clean Start resumes nothing")
+
+	assert.Equal(t, byte(packet.SessionTakenOver), onA.expectServerDisconnect(),
+		"the broker that lost the Client Identifier must disconnect its client")
+}
+
 // A stored session past its Session Expiry Interval is gone, whichever broker
 // the client comes back to (MQTT-5.0 §3.1.2.11.2).
 func TestPersistentSessionExpires(t *testing.T) {

@@ -136,6 +136,80 @@ func TestADisplacedConnectionCannotWriteItsSuccessorsClaim(t *testing.T) {
 	assert.Equal(t, uint64(9), rev, "a late commit from a displaced connection must be ignored")
 }
 
+// fakeEntry is a key-value entry a test can hand straight to onUpdate, so the
+// decision can be examined without racing a real bucket to produce the event.
+type fakeEntry struct {
+	key   string
+	value []byte
+	op    jetstream.KeyValueOp
+}
+
+func (e fakeEntry) Bucket() string                  { return "test" }
+func (e fakeEntry) Key() string                     { return e.key }
+func (e fakeEntry) Value() []byte                   { return e.value }
+func (e fakeEntry) Revision() uint64                { return 1 }
+func (e fakeEntry) Created() time.Time              { return time.Time{} }
+func (e fakeEntry) Delta() uint64                   { return 0 }
+func (e fakeEntry) Operation() jetstream.KeyValueOp { return e.op }
+
+// What the watcher does with each kind of bucket event, which is the whole of
+// this broker's answer to "have I lost this session?".
+func TestOnUpdateDecidesWhoHasLostASession(t *testing.T) {
+	const mine, theirs = "broker-me", "broker-them"
+
+	for name, tc := range map[string]struct {
+		entry fakeEntry
+		want  string // the Client Identifier reported lost, "" for none
+	}{
+		// A Clean Start deletes the record before writing a fresh one, and a
+		// delete carries no value — nothing in the event says who did it. Acting
+		// on it means disconnecting the client that has just connected. Nothing
+		// is lost by ignoring deletes: a claim that takes a session away always
+		// finishes with a Put naming its new owner.
+		"a delete says nothing about who deleted it": {
+			entry: fakeEntry{key: sessionKey("c"), op: jetstream.KeyValueDelete},
+			want:  "",
+		},
+		"a purge says nothing either": {
+			entry: fakeEntry{key: sessionKey("c"), op: jetstream.KeyValuePurge},
+			want:  "",
+		},
+		"another broker's claim is a loss": {
+			entry: fakeEntry{
+				key:   sessionKey("c"),
+				value: encodeRecord(&sessionRecord{Version: sessionRecordVersion, ClientID: "c", Owner: theirs}),
+				op:    jetstream.KeyValuePut,
+			},
+			want: "c",
+		},
+		"our own write is not": {
+			entry: fakeEntry{
+				key:   sessionKey("c"),
+				value: encodeRecord(&sessionRecord{Version: sessionRecordVersion, ClientID: "c", Owner: mine}),
+				op:    jetstream.KeyValuePut,
+			},
+			want: "",
+		},
+		"a record we cannot read is not": {
+			entry: fakeEntry{key: sessionKey("c"), value: []byte("{"), op: jetstream.KeyValuePut},
+			want:  "",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var lost []string
+			s := &sessionStore{owner: mine, onLost: func(id string) { lost = append(lost, id) }}
+
+			s.onUpdate(tc.entry)
+
+			if tc.want == "" {
+				assert.Empty(t, lost, "nothing should have been reported lost")
+				return
+			}
+			assert.Equal(t, []string{tc.want}, lost)
+		})
+	}
+}
+
 // storeFixture is a session store against a real embedded NATS server.
 func storeFixture(t *testing.T, customise ...func(*Options)) (*sessionStore, chan string) {
 	t.Helper()
