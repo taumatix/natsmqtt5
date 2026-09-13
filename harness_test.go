@@ -102,11 +102,16 @@ type received struct {
 	Properties *paho.PublishProperties
 }
 
-// testClient is a Paho v5 client wired to collect the messages it receives.
+// testClient is a Paho v5 client wired to collect the messages it receives and
+// any DISCONNECT the broker sends it.
 type testClient struct {
 	*paho.Client
 	t        *testing.T
 	messages chan received
+	// disconnects collects server-sent DISCONNECTs. A broker disconnecting a
+	// client it should be serving is invisible from the message channel alone —
+	// it looks exactly like a message that never arrived.
+	disconnects chan *paho.Disconnect
 }
 
 // connectClient dials the broker and completes the MQTT handshake, failing the
@@ -128,10 +133,15 @@ func tryConnect(t *testing.T, addr string, cp *paho.Connect) (*testClient, *paho
 	nc, err := net.DialTimeout("tcp", addr, 5*time.Second)
 	require.NoError(t, err)
 
-	tc := &testClient{t: t, messages: make(chan received, 64)}
+	tc := &testClient{
+		t:           t,
+		messages:    make(chan received, 64),
+		disconnects: make(chan *paho.Disconnect, 4),
+	}
 	tc.Client = paho.NewClient(paho.ClientConfig{
-		Conn:     nc,
-		ClientID: cp.ClientID,
+		Conn:               nc,
+		ClientID:           cp.ClientID,
+		OnServerDisconnect: func(d *paho.Disconnect) { tc.disconnects <- d },
 		OnPublishReceived: []func(paho.PublishReceived) (bool, error){
 			func(pr paho.PublishReceived) (bool, error) {
 				select {
@@ -182,6 +192,31 @@ func (c *testClient) expectNoMessage() {
 	case m := <-c.messages:
 		c.t.Fatalf("expected no message, got %q on %q", m.Payload, m.Topic)
 	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// expectServerDisconnect waits for the broker to disconnect this client and
+// returns the Reason Code it gave.
+func (c *testClient) expectServerDisconnect() byte {
+	c.t.Helper()
+	select {
+	case d := <-c.disconnects:
+		return d.ReasonCode
+	case <-time.After(5 * time.Second):
+		c.t.Fatal("the broker never disconnected this client")
+		return 0
+	}
+}
+
+// expectNoServerDisconnect asserts the broker leaves this client alone. The
+// window has to outlast a round trip to NATS, since the disconnections worth
+// catching are triggered by something arriving from there.
+func (c *testClient) expectNoServerDisconnect() {
+	c.t.Helper()
+	select {
+	case d := <-c.disconnects:
+		c.t.Fatalf("the broker disconnected this client with reason 0x%02X", d.ReasonCode)
+	case <-time.After(time.Second):
 	}
 }
 

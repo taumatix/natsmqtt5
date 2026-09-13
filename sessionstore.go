@@ -408,16 +408,20 @@ func (s *sessionStore) watch(ctx context.Context) error {
 	return nil
 }
 
-// onUpdate reacts to one bucket change. A record now owned by someone else — or
-// deleted outright by a Clean Start elsewhere — is a session this broker has
-// lost. Deciding that here costs nothing when the session is not ours: onLost
-// looks it up and finds nothing.
+// onUpdate reacts to one bucket change. A record now naming a different broker
+// is a session this one has lost. Deciding that here costs nothing when the
+// session is not ours: onLost looks it up and finds nothing.
+//
+// Deletions are ignored, and the reason is the whole point of this function. A
+// key-value delete carries no value, so nothing in the event says which broker
+// performed it — and this broker performs them itself, on every Clean Start,
+// immediately before writing the fresh record. Treating a delete as a takeover
+// means disconnecting, with 0x8E, the client that has this moment connected.
+// Nothing is lost by ignoring them: a claim that takes a session away always
+// finishes by writing a record that names its new owner, and it is that write
+// which carries the signal.
 func (s *sessionStore) onUpdate(entry jetstream.KeyValueEntry) {
 	if entry.Operation() != jetstream.KeyValuePut {
-		clientID, err := clientIDFromKey(entry.Key())
-		if err == nil {
-			s.onLost(clientID)
-		}
 		return
 	}
 
@@ -474,7 +478,14 @@ func (s *sessionStore) sweep(ctx context.Context) error {
 		rec, err := decodeRecord(entry.Value())
 		if err != nil {
 			// An unreadable record can never be resumed, so it is only taking
-			// up space.
+			// up space. The key still names the client, which is the one thing
+			// an operator needs in order to go looking for what wrote it.
+			clientID, keyErr := clientIDFromKey(key)
+			if keyErr != nil {
+				clientID = key
+			}
+			s.logger.Warn("deleting an unreadable session record",
+				"client_id", clientID, "error", err)
 			_ = s.kv.Delete(ctx, key, jetstream.LastRevision(entry.Revision()))
 			continue
 		}
