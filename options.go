@@ -107,6 +107,30 @@ type Options struct {
 	// stream. Defaults to 1.
 	RetainedReplicas int
 
+	// PersistentSessions keeps session state in a JetStream key-value bucket
+	// instead of in the broker process, so a client reconnecting with Clean
+	// Start 0 resumes its subscriptions after a broker restart and on a broker
+	// that has never seen it. Brokers sharing a StreamPrefix share the bucket
+	// and arbitrate ownership between themselves, so exactly one of them serves
+	// a given Client Identifier [MQTT-3.1.4-3].
+	//
+	// It needs JetStream, and it caps the Client Identifier at
+	// MaxPersistentClientIDLen bytes.
+	//
+	// A resumed session carries its subscription set and nothing else.
+	// In-flight QoS 1 and QoS 2 messages are not stored, because resending
+	// them needs an offline queue the broker does not have; the Will Message is
+	// not stored because it belongs to the network connection rather than to
+	// the session (MQTT-5.0 §3.1.2.5). ROADMAP.md has both.
+	PersistentSessions bool
+	// SessionStorage selects file or memory storage for the session bucket.
+	// Defaults to file storage. Memory storage makes sessions survive a broker
+	// restart but not a NATS restart.
+	SessionStorage jetstream.StorageType
+	// SessionReplicas is the JetStream replica count for the session bucket.
+	// Defaults to 1.
+	SessionReplicas int
+
 	// Authenticator, when non-nil, decides whether a CONNECT is accepted. When
 	// nil every connection is accepted, which is only appropriate on a trusted
 	// network.
@@ -184,6 +208,9 @@ func (o Options) resolve() (*resolved, error) {
 	}
 	if r.RetainedReplicas == 0 {
 		r.RetainedReplicas = 1
+	}
+	if r.SessionReplicas == 0 {
+		r.SessionReplicas = 1
 	}
 
 	r.receiveMaximum = o.ReceiveMaximum

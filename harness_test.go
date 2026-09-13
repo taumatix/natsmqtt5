@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -47,6 +48,15 @@ func startNATS(t *testing.T) string {
 // test-specific defaults fill in the rest.
 func startBroker(t *testing.T, natsURL string, customise ...func(*natsmqtt5.Options)) string {
 	t.Helper()
+	addr, _ := startStoppableBroker(t, natsURL, customise...)
+	return addr
+}
+
+// startStoppableBroker is startBroker with a handle that shuts the broker down
+// early, which is how a test simulates a restart or a failover. Calling stop is
+// optional: the cleanup runs it if the test did not.
+func startStoppableBroker(t *testing.T, natsURL string, customise ...func(*natsmqtt5.Options)) (addr string, stop func()) {
+	t.Helper()
 
 	opts := natsmqtt5.Options{
 		NATSURL: natsURL,
@@ -64,18 +74,22 @@ func startBroker(t *testing.T, natsURL string, customise ...func(*natsmqtt5.Opti
 	served := make(chan error, 1)
 	go func() { served <- b.Serve(ctx) }()
 
-	t.Cleanup(func() {
-		cancel()
-		require.NoError(t, b.Close())
-		select {
-		case err := <-served:
-			require.NoError(t, err)
-		case <-time.After(10 * time.Second):
-			t.Error("Serve did not return within 10s of shutdown")
-		}
-	})
+	var once sync.Once
+	stop = func() {
+		once.Do(func() {
+			cancel()
+			require.NoError(t, b.Close())
+			select {
+			case err := <-served:
+				require.NoError(t, err)
+			case <-time.After(10 * time.Second):
+				t.Error("Serve did not return within 10s of shutdown")
+			}
+		})
+	}
+	t.Cleanup(stop)
 
-	return b.ListenAddr().String()
+	return b.ListenAddr().String(), stop
 }
 
 // received is one message a test client got, flattened into the fields the

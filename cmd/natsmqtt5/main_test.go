@@ -24,6 +24,7 @@ func TestParseConfigDefaults(t *testing.T) {
 	assert.Equal(t, natsmqtt5.DefaultListen, cfg.broker.Listen)
 	assert.Equal(t, natsmqtt5.DefaultSubjectPrefix, cfg.broker.SubjectPrefix)
 	assert.False(t, cfg.broker.DisableRetained)
+	assert.False(t, cfg.broker.PersistentSessions, "session persistence is opt-in")
 	require.NotNil(t, cfg.broker.MaximumQoS)
 	assert.Equal(t, uint8(2), *cfg.broker.MaximumQoS)
 }
@@ -32,14 +33,15 @@ func TestParseConfigDefaults(t *testing.T) {
 // to be reachable that way — including the bool and int ones.
 func TestParseConfigFromEnvironment(t *testing.T) {
 	cfg, err := parseConfig(nil, env(map[string]string{
-		"NATSMQTT5_NATS":              "nats://nats:4222",
-		"NATSMQTT5_LISTEN":            "0.0.0.0:8883",
-		"NATSMQTT5_SUBJECT_PREFIX":    "mqtt5",
-		"NATSMQTT5_STREAM_PREFIX":     "MQTT5",
-		"NATSMQTT5_NO_RETAINED":       "true",
-		"NATSMQTT5_MAX_QOS":           "1",
-		"NATSMQTT5_SERVER_KEEP_ALIVE": "60",
-		"NATSMQTT5_LOG_LEVEL":         "debug",
+		"NATSMQTT5_NATS":                "nats://nats:4222",
+		"NATSMQTT5_LISTEN":              "0.0.0.0:8883",
+		"NATSMQTT5_SUBJECT_PREFIX":      "mqtt5",
+		"NATSMQTT5_STREAM_PREFIX":       "MQTT5",
+		"NATSMQTT5_NO_RETAINED":         "true",
+		"NATSMQTT5_PERSISTENT_SESSIONS": "true",
+		"NATSMQTT5_MAX_QOS":             "1",
+		"NATSMQTT5_SERVER_KEEP_ALIVE":   "60",
+		"NATSMQTT5_LOG_LEVEL":           "debug",
 	}), io.Discard)
 	require.NoError(t, err)
 
@@ -48,6 +50,7 @@ func TestParseConfigFromEnvironment(t *testing.T) {
 	assert.Equal(t, "mqtt5", cfg.broker.SubjectPrefix)
 	assert.Equal(t, "MQTT5", cfg.broker.StreamPrefix)
 	assert.True(t, cfg.broker.DisableRetained)
+	assert.True(t, cfg.broker.PersistentSessions)
 	require.NotNil(t, cfg.broker.MaximumQoS)
 	assert.Equal(t, uint8(1), *cfg.broker.MaximumQoS)
 	assert.Equal(t, uint16(60), cfg.broker.ServerKeepAlive)

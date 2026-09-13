@@ -2,9 +2,23 @@
 # image, which is how CI smoke-tests the quickstart people are told to run:
 #
 #	docker compose -f compose.yaml -f compose.ci.yaml up -d --build
+#
+# With both brokers, which is what proves a session crosses a container
+# boundary:
+#
+#	NATSMQTT5_PERSISTENT_SESSIONS=true \
+#	  docker compose -f compose.yaml -f compose.ci.yaml --profile cluster up -d --build
 
 services:
   natsmqtt5:
+    image: natsmqtt5:ci
+    build:
+      context: .
+
+  natsmqtt5-b:
+    # Repeated from compose.yaml rather than inherited, so that a run without
+    # --profile cluster cannot start a second broker by accident.
+    profiles: ["cluster"]
     image: natsmqtt5:ci
     build:
       context: .

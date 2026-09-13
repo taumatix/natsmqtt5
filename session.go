@@ -1,6 +1,7 @@
 package natsmqtt5
 
 import (
+	"sort"
 	"sync"
 	"time"
 
@@ -46,16 +47,25 @@ type outbound struct {
 // session is the MQTT Session State the broker holds for a Client Identifier
 // (MQTT-5.0 §4.1).
 //
-// v0.1.0 keeps sessions in the broker process. They survive a client
+// By default a session lives in the broker process: it survives a client
 // reconnecting to the same broker within the Session Expiry Interval, but not
-// a broker restart, and they are not shared between brokers. Subscriptions and
+// a broker restart, and it is not shared between brokers. Subscriptions and
 // retained messages do travel through NATS, so a client reconnecting to a
 // different broker still reaches the same publishers and subscribers; it just
 // has to re-subscribe.
+//
+// With Options.PersistentSessions the subscription set is mirrored into a
+// JetStream key-value bucket, and rec and rev below are this session's half of
+// that mirror.
 type session struct {
 	clientID string
 	identity string
 	username string
+
+	// persistMu serialises writes of the durable record, so two changes cannot
+	// present their revisions to JetStream out of order. It is always taken
+	// before mu and never held across a call that takes mu twice.
+	persistMu sync.Mutex
 
 	mu sync.Mutex
 	// conn is the connection currently serving this session, or nil while the
@@ -81,6 +91,19 @@ type session struct {
 	disconnectedAt time.Time
 	// discarded marks a session that must not be resumed.
 	discarded bool
+
+	// rec is the durable record backing this session, nil when the broker does
+	// not persist sessions. rev is the JetStream revision this broker's
+	// ownership of the record rests on.
+	rec *sessionRecord
+	rev uint64
+	// claimGen counts claims of the record. A connection remembers the
+	// generation it claimed under and may only write the record while that is
+	// still current, which is what stops a connection being displaced on this
+	// broker from handing back the record its successor has just claimed — the
+	// two run concurrently, and the displaced one holds a revision that has
+	// since been superseded by a claim, not invalidated by one.
+	claimGen uint64
 }
 
 func newSession(clientID string) *session {
@@ -290,4 +313,58 @@ func (s *session) expiry() uint32 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.expirySeconds
+}
+
+// bindRecord attaches the durable record this broker has just claimed and
+// returns the generation the claiming connection must present to write it.
+func (s *session) bindRecord(rec *sessionRecord, rev uint64) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rec, s.rev = rec, rev
+	s.claimGen++
+	return s.claimGen
+}
+
+// snapshot folds the session's live state into a copy of its record, together
+// with the revision the write must present. It returns nil when the broker does
+// not persist this session, or when gen is no longer the current claim — that
+// is, when another connection has taken the record over since.
+//
+// The copy matters: the caller writes it to JetStream without holding the
+// session lock, and the live session keeps changing underneath.
+func (s *session) snapshot(gen uint64) (*sessionRecord, uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.rec == nil || gen != s.claimGen {
+		return nil, 0
+	}
+
+	subs := make([]storedSubscription, 0, len(s.subs))
+	for _, sub := range s.subs {
+		subs = append(subs, storedSubscription{
+			Filter:     sub.filter,
+			Opts:       sub.opts,
+			GrantedQoS: sub.grantedQoS,
+			ID:         sub.id,
+		})
+	}
+	// Map iteration order is random, so without this the same subscription set
+	// serialises differently on every write and no two records can be compared.
+	sort.Slice(subs, func(i, j int) bool { return subs[i].Filter < subs[j].Filter })
+
+	cp := *s.rec
+	cp.Subscriptions = subs
+	cp.ExpirySeconds = s.expirySeconds
+	return &cp, s.rev
+}
+
+// commitRecord records the state and revision a successful write leaves behind,
+// unless the record was claimed again while the write was in flight.
+func (s *session) commitRecord(gen uint64, rec *sessionRecord, rev uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if gen != s.claimGen {
+		return
+	}
+	s.rec, s.rev = rec, rev
 }

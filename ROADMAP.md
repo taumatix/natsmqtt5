@@ -4,31 +4,52 @@ Ordered by how much they limit real deployments, not by how interesting they
 are to build. Each entry says what breaks today, so it can be judged on its
 own.
 
-## Persistent sessions
-
-**Today:** a session lives in the broker process. Reconnecting to the same
-broker inside the Session Expiry Interval resumes subscriptions; reconnecting
-to a different broker, or after a restart, does not.
-
-**Why it matters:** it is the one place where "run several brokers for
-availability" is not yet true end to end. Live traffic and retained messages
-already survive a broker going away; a client's subscription set does not.
-
-**Shape:** session state in a JetStream key-value bucket keyed by Client
-Identifier, holding the subscription set, the Will and the expiry deadline.
-Ownership needs arbitration so two brokers cannot both believe they serve one
-Client Identifier — most likely a create-only compare-and-set on a claim key,
-the same trick `$MQTT_sess` uses in `nats-server`.
-
 ## Offline message queue, and QoS 1/2 retransmission on reconnect
 
 **Today:** messages published while a session is disconnected are dropped for
 it, and an unacknowledged QoS 1 or QoS 2 message is not resent after a
-reconnect. MQTT-5.0 §4.4 expects both for a session that persists.
+reconnect. MQTT-5.0 §4.4 expects both for a session that persists — and now
+that `Options.PersistentSessions` makes a session genuinely persist, this is
+the largest remaining gap between what the broker stores and what a client is
+entitled to assume it stored.
 
-**Depends on:** persistent sessions. A durable JetStream consumer per session,
-filtered to the session's subject set, is the natural fit, with the consumer's
-ack state carrying the in-flight set.
+**Shape:** a durable JetStream consumer per session, filtered to the session's
+subject set, with the consumer's ack state carrying the in-flight set. That
+makes the in-flight Packet Identifiers worth persisting into the session
+record, which today they deliberately are not: recording that a message was
+in flight without being able to resend it would be a promise the broker cannot
+keep.
+
+## Expiring a detached session that is never resumed
+
+**Today:** a session whose client disconnects with a non-zero Session Expiry
+Interval keeps its NATS subscriptions on the broker that held it until either
+the client comes back or the broker stops. `session.expired` is only consulted
+on reconnect, so a workload that churns through Client Identifiers grows the
+broker's subscription set without bound. This predates persistent sessions and
+is not caused by them; the durable records now have a sweep and the in-memory
+sessions still do not.
+
+**Shape:** the same sweep the session store already runs, extended to walk
+`Broker.sessions` and discard the expired ones. It is a few lines; the work is
+in the test, which has to prove the NATS subscriptions actually go away.
+
+## The Will Message of a broker that was killed
+
+**Today:** a Will is published by the broker holding the connection. A broker
+that shuts down cleanly publishes its clients' Wills; one killed outright does
+not, whether or not sessions are persisted.
+
+**Why it is not simply fixed:** the Will is not in the session record on
+purpose. It belongs to the network connection (MQTT-5.0 §3.1.2.5), and a broker
+reading a record cannot distinguish a connection that has ended from an owner
+that is merely busy — so a broker acting on someone else's stored Will would
+announce live clients as dead, which is worse than the silence it replaces.
+
+**Shape:** a lease the owning broker renews while a connection is open, so that
+a lease which stops being renewed is evidence the connection ended rather than
+a guess. The Will then becomes safe to store, and its Delay Interval becomes
+enforceable across a broker's death.
 
 ## QoS 2 on shared subscriptions
 

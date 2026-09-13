@@ -100,17 +100,28 @@ jobs:
           go-version: 'stable'
           check-latest: true
 
-      - name: Start NATS and the broker
-        run: docker compose -f compose.yaml -f compose.ci.yaml up -d
+      # Two brokers, so the smoke tests cover the cross-broker session as well
+      # as the single-broker quickstart. They are separate containers sharing
+      # only a NATS server, which the in-process suite cannot reproduce.
+      - name: Start NATS and both brokers
+        env:
+          NATSMQTT5_PERSISTENT_SESSIONS: 'true'
+        run: docker compose -f compose.yaml -f compose.ci.yaml --profile cluster up -d
 
-      - name: Wait for the broker
-        run: .github/scripts/wait-for-tcp.sh 127.0.0.1 1883 60
+      - name: Wait for the brokers
+        run: |
+          .github/scripts/wait-for-tcp.sh 127.0.0.1 1883 60
+          .github/scripts/wait-for-tcp.sh 127.0.0.1 1884 60
 
-      - name: Smoke test the running image
+      # smoke.sh fails if a named test skipped rather than ran, because the
+      # smoke tests skip by design when no broker address is set — without the
+      # check, a misconfigured step would go green having tested nothing.
+      - name: Smoke test the running images
         env:
           NATSMQTT5_SMOKE_ADDR: 127.0.0.1:1883
-        run: go test -run TestSmoke -count=1 -v .
+          NATSMQTT5_SMOKE_ADDR_B: 127.0.0.1:1884
+        run: .github/scripts/smoke.sh TestSmoke TestSmokeSessionMovesBetweenBrokers
 
       - name: Logs
         if: always()
-        run: docker compose -f compose.yaml -f compose.ci.yaml logs
+        run: docker compose -f compose.yaml -f compose.ci.yaml --profile cluster logs

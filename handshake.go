@@ -147,12 +147,47 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 		}
 	}
 
+	if err := c.checkClientID(clientID); err != nil {
+		return err
+	}
+
 	// Displace any connection already using this Client Identifier
 	// [MQTT-3.1.4-3], and decide whether we may resume its session.
 	sess, resumed := c.broker.takeOverSession(clientID, cp.CleanStart)
-	if !resumed {
+
+	// With persistence on, the durable record decides ownership, and it may
+	// hold a session this broker has no memory of.
+	var (
+		stored []storedSubscription
+		rec    *sessionRecord
+		rev    uint64
+	)
+	if c.broker.persistsSessions() {
+		var (
+			present bool
+			err     error
+		)
+		rec, rev, present, err = c.broker.store.claim(ctx, clientID, identity, username, cp.CleanStart)
+		if err != nil {
+			c.refuse(packet.ImplementationSpecificError, "the session store is unavailable")
+			return fmt.Errorf("claiming the session for %q: %w", clientID, err)
+		}
+		// A stored session this broker has no memory of is still a session that
+		// is present, and its subscriptions have to be rebuilt. One it does
+		// remember already has them live.
+		if sess == nil && present {
+			stored = rec.Subscriptions
+			resumed = true
+		}
+	}
+
+	if sess == nil {
 		sess = newSession(clientID)
 	}
+	if rec != nil {
+		c.claimGen = sess.bindRecord(rec, rev)
+	}
+
 	sess.identity, sess.username = identity, username
 	sess.setExpiry(c.sessionExpiry(props))
 
@@ -161,6 +196,12 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 	}
 	c.sess = sess
 	c.broker.registerSession(sess)
+
+	if resumed {
+		if err := c.resumeSubscriptions(ctx, stored); err != nil {
+			return err
+		}
+	}
 
 	if cp.Will != nil {
 		var delay time.Duration
@@ -180,6 +221,127 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 	}
 	c.connected.Store(true)
 	return nil
+}
+
+// checkClientID enforces the length limit persistence imposes. MQTT-5.0
+// §3.1.3.1 lets a server state which Client Identifiers it accepts and answer
+// 0x85 for the rest, which is a better outcome than accepting an identifier
+// whose session could never be stored.
+func (c *conn) checkClientID(clientID string) error {
+	if !c.broker.persistsSessions() || len(clientID) <= MaxPersistentClientIDLen {
+		return nil
+	}
+	c.refuse(packet.ClientIdentifierNotValid,
+		fmt.Sprintf("this broker stores sessions and accepts a Client Identifier of at most %d bytes",
+			MaxPersistentClientIDLen))
+	return fmt.Errorf("client identifier of %d bytes exceeds the %d this broker stores",
+		len(clientID), MaxPersistentClientIDLen)
+}
+
+// resumeSubscriptions makes a resumed session's subscription set live again.
+//
+// stored is empty when the session came from this broker's memory, in which
+// case its NATS subscriptions were never torn down and there is nothing to
+// rebuild — only the durable record to bring back in line with what this broker
+// actually holds.
+func (c *conn) resumeSubscriptions(ctx context.Context, stored []storedSubscription) error {
+	if len(stored) == 0 {
+		c.broker.persistSession(c)
+		return nil
+	}
+
+	dropped := false
+	for _, st := range stored {
+		if !c.mayResume(ctx, st) {
+			dropped = true
+			continue
+		}
+		sub, err := c.rebuild(st)
+		if err != nil {
+			// Every filter in the record was validated when the client first
+			// subscribed, so reaching here means the record is corrupt or NATS
+			// refused the subscription. Either way the session cannot be served
+			// as the CONNACK is about to promise.
+			c.sess.discard()
+			c.refuse(packet.ImplementationSpecificError, "the stored subscriptions could not be restored")
+			return fmt.Errorf("restoring subscription %q for %q: %w", st.Filter, c.sess.clientID, err)
+		}
+		c.sess.putSubscription(sub)
+	}
+
+	// Same round trip as a SUBSCRIBE, for the same reason: the CONNACK is about
+	// to tell the client its session is present, so the interest has to have
+	// reached the NATS server before the client can publish against it.
+	if err := c.flushNATS(ctx); err != nil {
+		c.sess.discard()
+		c.refuse(packet.ImplementationSpecificError, "the stored subscriptions could not be confirmed with NATS")
+		return fmt.Errorf("confirming the restored subscriptions for %q: %w", c.sess.clientID, err)
+	}
+	if dropped {
+		// Write the reduced set back, so a filter this connection may not have
+		// stops being carried forward to the next one.
+		c.broker.persistSession(c)
+	}
+	return nil
+}
+
+// mayResume re-runs the Authorizer over a stored subscription.
+//
+// A session is identified by its Client Identifier alone, and a stored one can
+// be claimed by any connection the Authenticator lets use that identifier —
+// across brokers and across restarts, not merely within one broker's memory.
+// Restoring a filter unchecked would let a narrowed permission be outlived by
+// the subscription it was meant to remove.
+//
+// A denied filter is dropped rather than refused, because a CONNACK has no
+// per-filter Reason Code to carry the refusal. The client is free to subscribe
+// again, and will get an honest 0x87 in the SUBACK when it does.
+func (c *conn) mayResume(ctx context.Context, st storedSubscription) bool {
+	a := c.broker.opts.Authorizer
+	if a == nil {
+		return true
+	}
+	err := a.Authorize(ctx, &AuthzRequest{
+		Action:   ActionSubscribe,
+		ClientID: c.sess.clientID,
+		Identity: c.sess.identity,
+		Username: c.sess.username,
+		Topic:    st.Filter,
+		QoS:      st.Opts.QoS,
+	})
+	if err != nil {
+		c.logger.Warn("dropping a stored subscription this connection may not have",
+			"client_id", c.sess.clientID, "filter", st.Filter, "error", err)
+		return false
+	}
+	return true
+}
+
+// rebuild turns a stored subscription back into a live one. The subject and the
+// share name are recomputed rather than read, so a broker whose SubjectPrefix
+// differs from the one that stored the record subscribes where it now belongs.
+func (c *conn) rebuild(st storedSubscription) (*subscription, error) {
+	share, _, err := topic.SplitShared(st.Filter)
+	if err != nil {
+		return nil, err
+	}
+	subject, err := topic.FilterToSubject(st.Filter)
+	if err != nil {
+		return nil, err
+	}
+
+	sub := &subscription{
+		filter:     st.Filter,
+		subject:    topic.Prefix(c.broker.opts.SubjectPrefix, subject),
+		share:      share,
+		opts:       st.Opts,
+		grantedQoS: st.GrantedQoS,
+		id:         st.ID,
+	}
+	if err := c.bindNATS(sub); err != nil {
+		return nil, err
+	}
+	return sub, nil
 }
 
 // checkWill rejects a CONNECT whose Will Message the broker cannot honour,
