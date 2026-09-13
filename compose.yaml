@@ -32,7 +32,7 @@ services:
       retries: 15
 
   natsmqtt5:
-    image: ghcr.io/taumatix/natsmqtt5:v0.1.1
+    image: ghcr.io/taumatix/natsmqtt5:v0.2.0
     environment:
       NATSMQTT5_NATS: nats://nats:4222
       NATSMQTT5_PERSISTENT_SESSIONS: ${NATSMQTT5_PERSISTENT_SESSIONS:-false}
@@ -49,7 +49,7 @@ services:
     # A second broker against the same NATS server. Started only by
     # `--profile cluster`, so the quickstart above stays one broker.
     profiles: ["cluster"]
-    image: ghcr.io/taumatix/natsmqtt5:v0.1.1
+    image: ghcr.io/taumatix/natsmqtt5:v0.2.0
     environment:
       NATSMQTT5_NATS: nats://nats:4222
       NATSMQTT5_PERSISTENT_SESSIONS: ${NATSMQTT5_PERSISTENT_SESSIONS:-false}

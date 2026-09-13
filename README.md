@@ -45,11 +45,11 @@ As a container, against a NATS server you already run:
 ```sh
 docker run --rm -p 1883:1883 \
   -e NATSMQTT5_NATS=nats://your-nats-server:4222 \
-  ghcr.io/taumatix/natsmqtt5:v0.1.1
+  ghcr.io/taumatix/natsmqtt5:v0.2.0
 ```
 
 Images are published for `linux/amd64` and `linux/arm64` on every release, as
-`:v0.1.1`, `:0.1.1`, `:0.1` and `:latest`. They are built from
+`:v0.2.0`, `:0.2.0`, `:0.2` and `:latest`. They are built from
 [distroless/static][distroless], so there is no shell and no package manager in
 them, and the broker runs as a non-root user.
 
@@ -57,7 +57,7 @@ If you have no NATS server yet, [compose.yaml](compose.yaml) starts one with
 JetStream enabled and the broker in front of it:
 
 ```sh
-curl -O https://raw.githubusercontent.com/taumatix/natsmqtt5/v0.1.1/compose.yaml
+curl -O https://raw.githubusercontent.com/taumatix/natsmqtt5/v0.2.0/compose.yaml
 docker compose up -d
 mosquitto_pub -V 5 -h localhost -p 1883 -t sensors/7/temp -m 21.5
 ```
@@ -65,21 +65,21 @@ mosquitto_pub -V 5 -h localhost -p 1883 -t sensors/7/temp -m 21.5
 Every flag has an environment variable twin — upper-case, `-` becomes `_`,
 behind a `NATSMQTT5_` prefix — so `-subject-prefix` is
 `NATSMQTT5_SUBJECT_PREFIX`. An explicit flag beats the environment. Run
-`docker run --rm ghcr.io/taumatix/natsmqtt5:v0.1.1 -h` for the full list.
+`docker run --rm ghcr.io/taumatix/natsmqtt5:v0.2.0 -h` for the full list.
 
 [distroless]: https://github.com/GoogleContainerTools/distroless
 
 As a binary:
 
 ```sh
-go install github.com/taumatix/natsmqtt5/cmd/natsmqtt5@v0.1.1
+go install github.com/taumatix/natsmqtt5/cmd/natsmqtt5@v0.2.0
 natsmqtt5 -nats nats://localhost:4222 -listen :1883
 ```
 
 As a library:
 
 ```sh
-go get github.com/taumatix/natsmqtt5@v0.1.1
+go get github.com/taumatix/natsmqtt5@v0.2.0
 ```
 
 Requires Go 1.25 or newer, and a NATS server with JetStream enabled (or
