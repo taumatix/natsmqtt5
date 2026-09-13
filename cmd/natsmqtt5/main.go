@@ -36,7 +36,7 @@ import (
 // every other build, where binaryVersion falls back to what Go recorded.
 var version = ""
 
-// binaryVersion is what -version reports. A `go install ...@v0.1.1` build
+// binaryVersion is what -version reports. A `go install ...@v0.2.0` build
 // carries no ldflags but does record the module version, so reporting "dev"
 // for it would be a lie the user cannot check.
 func binaryVersion() string {
