@@ -6,6 +6,7 @@ import (
 
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestSmoke drives a broker that is already running somewhere else — the
@@ -44,4 +45,47 @@ func TestSmoke(t *testing.T) {
 	retained := late.expectMessage()
 	assert.Equal(t, "v1", retained.Payload)
 	assert.True(t, retained.Retain, "a retained message must arrive with the flag set")
+}
+
+// TestSmokeSessionMovesBetweenBrokers is the same claim as
+// TestPersistentSessionSurvivesABrokerRestart, made against two brokers in
+// separate containers rather than two in one process. In-process the session
+// store shares a Go heap with everything it coordinates; here the only thing
+// the two brokers have in common is the NATS server, which is the arrangement a
+// deployment actually has.
+//
+//	NATSMQTT5_SMOKE_ADDR=127.0.0.1:1883 NATSMQTT5_SMOKE_ADDR_B=127.0.0.1:1884 \
+//	  go test -run TestSmokeSessionMovesBetweenBrokers -count=1 .
+func TestSmokeSessionMovesBetweenBrokers(t *testing.T) {
+	addrA, addrB := os.Getenv("NATSMQTT5_SMOKE_ADDR"), os.Getenv("NATSMQTT5_SMOKE_ADDR_B")
+	if addrA == "" || addrB == "" {
+		t.Skip("set NATSMQTT5_SMOKE_ADDR and NATSMQTT5_SMOKE_ADDR_B to two brokers sharing a NATS server")
+	}
+
+	const clientID = "smoke-roamer"
+
+	// The JetStream volume outlives a `docker compose down`, so start by
+	// clearing anything a previous run left: a Clean Start deletes the stored
+	// record, and a Session Expiry Interval of zero means this connection
+	// leaves none of its own behind.
+	wipe, _ := connectClient(t, addrA, connectOpts(clientID))
+	require.NoError(t, wipe.Client.Disconnect(&paho.Disconnect{ReasonCode: 0}))
+
+	onA, connack := connectClient(t, addrA, durableConnect(clientID, 300))
+	require.False(t, connack.SessionPresent, "the run started from a clean session")
+	onA.subscribe(paho.SubscribeOptions{Topic: "smoke/roam/#", QoS: 1})
+	require.NoError(t, onA.Client.Disconnect(&paho.Disconnect{ReasonCode: 0}))
+
+	onB, connack := connectClient(t, addrB, durableConnect(clientID, 300))
+	assert.True(t, connack.SessionPresent,
+		"the second broker must resume a session it has never served")
+
+	// Published through the first broker, received on the second, on a
+	// subscription that was never made there.
+	pub, _ := connectClient(t, addrA, connectOpts("smoke-roam-pub"))
+	pub.publish(&paho.Publish{Topic: "smoke/roam/x", QoS: 1, Payload: []byte("crossed")})
+
+	got := onB.expectMessage()
+	assert.Equal(t, "smoke/roam/x", got.Topic)
+	assert.Equal(t, "crossed", got.Payload)
 }

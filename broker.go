@@ -26,6 +26,8 @@ type Broker struct {
 	ownsNC bool
 	js     jetstream.JetStream
 	retain *retainedStore
+	// store is nil unless Options.PersistentSessions is set.
+	store  *sessionStore
 	logger *slog.Logger
 
 	listener net.Listener
@@ -80,20 +82,32 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 		b.ownsNC = true
 	}
 
-	if !r.DisableRetained {
+	if !r.DisableRetained || r.PersistentSessions {
 		js, err := jetstream.New(b.nc)
 		if err != nil {
 			b.closeNATS()
 			return nil, fmt.Errorf("natsmqtt5: initialising JetStream: %w", err)
 		}
 		b.js = js
-		if b.retain, err = newRetainedStore(ctx, js, r, b.logger); err != nil {
+	}
+	if !r.DisableRetained {
+		var err error
+		if b.retain, err = newRetainedStore(ctx, b.js, r, b.logger); err != nil {
 			b.closeNATS()
 			return nil, fmt.Errorf("natsmqtt5: setting up the retained-message store: %w", err)
 		}
 	}
+	if r.PersistentSessions {
+		var err error
+		if b.store, err = newSessionStore(ctx, b.js, b.nc, r, b.logger, b.sessionLost); err != nil {
+			b.closeRetain()
+			b.closeNATS()
+			return nil, fmt.Errorf("natsmqtt5: setting up the session store: %w", err)
+		}
+	}
 
 	if err := b.listen(); err != nil {
+		b.closeSessionStore()
 		b.closeRetain()
 		b.closeNATS()
 		return nil, err
@@ -191,7 +205,11 @@ func (b *Broker) Close() error {
 		b.listener.Close()
 	}
 	b.drainConns()
+	// Waiting for the connections means every session has been through finish
+	// and has released its stored record, so a broker that shuts down cleanly
+	// leaves no record claiming it is still being served.
 	b.wg.Wait()
+	b.closeSessionStore()
 	b.closeRetain()
 	b.closeNATS()
 	return nil
@@ -226,6 +244,13 @@ func (b *Broker) drainConns() {
 
 	for _, c := range conns {
 		c.shutdown(packet.ServerShuttingDown, "broker shutting down")
+	}
+}
+
+func (b *Broker) closeSessionStore() {
+	if b.store != nil {
+		b.store.close()
+		b.store = nil
 	}
 }
 
@@ -289,4 +314,93 @@ func (b *Broker) releaseSession(s *session) {
 	if cur, ok := b.sessions[s.clientID]; ok && cur == s {
 		delete(b.sessions, s.clientID)
 	}
+}
+
+// persistsSessions reports whether session state is mirrored into JetStream.
+func (b *Broker) persistsSessions() bool { return b.store != nil }
+
+// persistSession writes the session's current subscription set to JetStream.
+//
+// A failure is logged and not reported to the client. The subscriptions are
+// live on this broker either way, so refusing them would turn a JetStream
+// hiccup into an outage for a client that would otherwise be served exactly as
+// a broker without persistence would serve it. The one failure that matters —
+// the compare-and-swap losing to another broker — is already being handled by
+// the bucket watcher, which disconnects this client with 0x8E.
+func (b *Broker) persistSession(c *conn) {
+	if b.store == nil {
+		return
+	}
+	s := c.sess
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+
+	rec, rev := s.snapshot(c.claimGen)
+	if rec == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
+	defer cancel()
+
+	newRev, err := b.store.save(ctx, rec, rev)
+	if err != nil {
+		b.logger.Warn("could not store the session state",
+			"client_id", s.clientID, "error", err)
+		return
+	}
+	s.commitRecord(c.claimGen, rec, newRev)
+}
+
+// releaseStoredSession hands the record back when the connection ends, so that
+// the next broker to read it knows nobody is serving the session and when it
+// stops being resumable.
+//
+// A connection that was displaced rather than closed has nothing to hand back:
+// snapshot refuses it, because the claim it wrote under is no longer the
+// current one.
+func (b *Broker) releaseStoredSession(c *conn) {
+	if b.store == nil {
+		return
+	}
+	s := c.sess
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+
+	rec, rev := s.snapshot(c.claimGen)
+	if rec == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
+	defer cancel()
+
+	newRev, err := b.store.release(ctx, rec, rev)
+	if err != nil {
+		// Losing the compare-and-swap here is the ordinary outcome of a client
+		// that moved to another broker: that broker owns the record now and
+		// there is nothing to hand back.
+		b.logger.Debug("could not release the stored session",
+			"client_id", s.clientID, "error", err)
+		return
+	}
+	s.commitRecord(c.claimGen, rec, newRev)
+}
+
+// sessionLost runs when another broker claims a Client Identifier this one is
+// holding. The client is told 0x8E [MQTT-3.1.4-3] and the session is torn down,
+// which also unsubscribes it from NATS — without that, a session that moved
+// away would leave this broker subscribed to its subjects for good.
+func (b *Broker) sessionLost(clientID string) {
+	b.mu.Lock()
+	s, ok := b.sessions[clientID]
+	if ok {
+		delete(b.sessions, clientID)
+	}
+	b.mu.Unlock()
+	if !ok {
+		return
+	}
+
+	b.logger.Info("another broker claimed this session", "client_id", clientID)
+	s.takeOver()
+	s.discard()
 }

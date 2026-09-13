@@ -119,6 +119,7 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 		natsUser      = fs.String("nats-user", "", "NATS username")
 		natsPass      = fs.String("nats-password", "", "NATS password")
 		noRetained    = fs.Bool("no-retained", false, "disable retained messages, so JetStream is not required")
+		persistSess   = fs.Bool("persistent-sessions", false, "keep session state in JetStream, so it survives a restart and moves between brokers")
 		maxQoS        = fs.Int("max-qos", 2, "highest QoS the broker accepts (0, 1 or 2)")
 		keepAlive     = fs.Int("server-keep-alive", 0, "override the client's Keep Alive, in seconds; 0 leaves it to the client")
 		logLevel      = fs.String("log-level", "info", "debug, info, warn or error")
@@ -162,14 +163,15 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 
 	return &config{
 		broker: natsmqtt5.Options{
-			NATSURL:         *natsURL,
-			NATSOptions:     natsOpts,
-			Listen:          *listen,
-			SubjectPrefix:   *subjectPrefix,
-			StreamPrefix:    *streamPrefix,
-			DisableRetained: *noRetained,
-			MaximumQoS:      natsmqtt5.Ptr(uint8(*maxQoS)),
-			ServerKeepAlive: uint16(*keepAlive),
+			NATSURL:            *natsURL,
+			NATSOptions:        natsOpts,
+			Listen:             *listen,
+			SubjectPrefix:      *subjectPrefix,
+			StreamPrefix:       *streamPrefix,
+			DisableRetained:    *noRetained,
+			PersistentSessions: *persistSess,
+			MaximumQoS:         natsmqtt5.Ptr(uint8(*maxQoS)),
+			ServerKeepAlive:    uint16(*keepAlive),
 		},
 		level:       level,
 		showVersion: *showVersion,

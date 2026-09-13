@@ -45,6 +45,10 @@ type conn struct {
 	writeMu sync.Mutex
 
 	sess *session
+	// claimGen is the session-record claim this connection made. Only writes
+	// presenting the session's current generation are allowed, so a connection
+	// displaced by a later CONNECT cannot write over its successor's claim.
+	claimGen uint64
 
 	// clientMaxPacketSize is the client's Maximum Packet Size, or 0 for no
 	// limit. A packet over it is discarded rather than sent [MQTT-3.1.2-25].
@@ -100,6 +104,12 @@ func (c *conn) serve(ctx context.Context) {
 	keepAlive, err := c.handshake(ctx)
 	if err != nil {
 		c.logger.Debug("mqtt handshake failed", "error", err)
+		// A handshake can fail after the session has been set up — a CONNACK
+		// the client is no longer there to read, or stored subscriptions that
+		// could not be restored. finish is a no-op before that point, and the
+		// work it does after it is what stops a claimed session record
+		// outliving the connection that claimed it.
+		c.finish(err)
 		return
 	}
 	c.logger = c.logger.With("client_id", c.sess.clientID)
@@ -249,6 +259,9 @@ func (c *conn) finish(cause error) {
 	}
 
 	c.sess.detach(c)
+	// Hand the durable record back before tearing the session down, so the
+	// snapshot it writes still describes the session that existed.
+	c.broker.releaseStoredSession(c)
 	if c.sess.expiry() == 0 {
 		c.sess.discard()
 		c.broker.releaseSession(c.sess)

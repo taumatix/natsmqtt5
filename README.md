@@ -29,6 +29,10 @@ MQTT v5 clients ──TCP/TLS──▶ natsmqtt5 ──▶ your existing NATS se
   publisher reaches MQTT subscribers and vice versa, with no bridge.
 - **Scales horizontally by adding brokers.** Two brokers against one NATS server
   are one logical broker: a client on either reaches subscribers on both.
+- **Keeps sessions across brokers, if you ask it to.** With
+  `PersistentSessions`, a client that reconnects with Clean Start 0 resumes its
+  subscriptions on a broker that has never served it, and after a restart. Off
+  by default; see [Persistent sessions](#persistent-sessions).
 - **Embeds as a library.** `natsmqtt5.New` returns a `*Broker` you run inside
   your own process, sharing your `*nats.Conn` if you want.
 
@@ -147,6 +151,7 @@ authentication is a few lines.
 | Filter wildcard `#` | `>`, plus a second subscription on the parent |
 | Shared subscription `$share/g/f` | Queue group on the subject for `f` |
 | Retained message | JetStream stream, `MaxMsgsPerSubject: 1` |
+| Session state (opt-in) | JetStream key-value bucket, one key per Client Identifier |
 | v5 properties | NATS headers (`Mqtt5-Content-Type`, `Mqtt5-User`, …) |
 
 `#` gets two NATS subscriptions because MQTT's `#` matches the parent level
@@ -159,19 +164,65 @@ must differ.
 A NATS message with no `Mqtt5-*` headers is delivered as a QoS 0 message with
 no properties, which is what makes plain `nats pub` reach MQTT subscribers.
 
-## What v0.1.1 does not do
+## Persistent sessions
+
+By default a session lives in the broker process: a client reconnecting to the
+*same* broker within its Session Expiry Interval resumes its subscriptions, and
+one reconnecting to a different broker, or after a restart, has to subscribe
+again.
+
+Turn that off with one setting:
+
+```go
+natsmqtt5.Options{PersistentSessions: true}
+```
+
+or `-persistent-sessions` / `NATSMQTT5_PERSISTENT_SESSIONS=true` for the binary
+and the image. Every broker that should share sessions needs it set, and needs
+the same `StreamPrefix`, since that names the bucket.
+
+The subscription set is mirrored into a JetStream key-value bucket
+(`MQTT5_sessions` by default), keyed by Client Identifier. A CONNECT claims the
+record with a compare-and-swap on its revision, so of two brokers racing for one
+Client Identifier exactly one wins — and the loser disconnects its client with
+`0x8E Session taken over` rather than serving it in parallel [MQTT-3.1.4-3].
+That claim is also what makes the `Session Present` flag mean something across a
+restart.
+
+[compose.yaml](compose.yaml) runs two brokers this way:
+
+```sh
+NATSMQTT5_PERSISTENT_SESSIONS=true docker compose --profile cluster up -d
+```
+
+What it costs and what it does not cover:
+
+- One JetStream write per CONNECT, SUBSCRIBE, UNSUBSCRIBE and DISCONNECT. None
+  of those are the throughput path; PUBLISH is untouched.
+- **The Client Identifier is capped at 128 bytes** (`MaxPersistentClientIDLen`),
+  because it becomes part of a NATS subject. A longer one is refused with
+  `0x85 Client Identifier not valid`. Without persistence there is no limit.
+- **In-flight QoS 1 and QoS 2 messages are not persisted**, so a message
+  awaiting its PUBACK when the broker dies is not resent — see the offline
+  queue below, which is the feature that would make resending meaningful.
+- **The Will Message is not persisted.** A Will belongs to the network
+  connection (MQTT-5.0 §3.1.2.5), and a broker reading a record cannot tell a
+  connection that has ended from an owner that is merely busy, so publishing
+  from there would announce live clients as dead. A broker that shuts down
+  cleanly still publishes its clients' Wills; one killed outright does not.
+- **A session whose broker was killed outright is resumed whenever its client
+  comes back**, however long that takes. Expiry is measured from the moment a
+  session is released, and a `kill -9` records no release. A background sweep
+  reclaims such a record once it is older than `MaxSessionExpiry` and its broker
+  has stopped answering.
+
+## What it does not do
 
 Stated plainly, because a broker you cannot trust the limits of is worse than
 one with fewer features:
 
-- **Sessions do not survive a broker restart, and are not shared between
-  brokers.** A session is held in the broker process. A client reconnecting to
-  the *same* broker within its Session Expiry Interval resumes its
-  subscriptions; reconnecting to a *different* broker, or after a restart, gets
-  a fresh session and must subscribe again. Retained messages and live traffic
-  are unaffected — those go through NATS.
 - **No offline message queue.** Messages published while a session is
-  disconnected are not stored for it.
+  disconnected are not stored for it, whether or not the session is persisted.
 - **No QoS 1/2 retransmission on reconnect**, which follows from the above.
 - **Shared subscriptions are granted QoS 1 at most.** A QoS 2 request on a
   `$share/` filter is answered with `Granted QoS 1` in the SUBACK, which

@@ -51,6 +51,12 @@ func (c *conn) handleSubscribe(ctx context.Context, p *packet.Subscribe) error {
 		}
 	}
 
+	// The subscription set has changed, so the durable copy has to change with
+	// it or a restart would resume a set the client never asked for.
+	if anyGranted(granted) {
+		c.broker.persistSession(c)
+	}
+
 	if err := c.write(&packet.Suback{PacketID: p.PacketID, ReasonCodes: codes}); err != nil {
 		return err
 	}
@@ -218,6 +224,7 @@ func queueGroup(sub *subscription) string {
 
 func (c *conn) handleUnsubscribe(p *packet.Unsubscribe) error {
 	codes := make([]packet.ReasonCode, len(p.Filters))
+	removed := false
 	for i, filter := range p.Filters {
 		sub, ok := c.sess.removeSubscription(filter)
 		if !ok {
@@ -227,6 +234,10 @@ func (c *conn) handleUnsubscribe(p *packet.Unsubscribe) error {
 		}
 		unsubscribeAll(sub)
 		codes[i] = packet.Success
+		removed = true
+	}
+	if removed {
+		c.broker.persistSession(c)
 	}
 	return c.write(&packet.Unsuback{PacketID: p.PacketID, ReasonCodes: codes})
 }
