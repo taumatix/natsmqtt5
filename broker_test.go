@@ -504,6 +504,7 @@ func (noPinger) Run(ctx context.Context, _ net.Conn, _ uint16) error {
 }
 
 func (noPinger) PacketSent()         {}
+func (noPinger) PacketReceived()     {}
 func (noPinger) PingResp()           {}
 func (noPinger) SetDebug(log.Logger) {}
 
