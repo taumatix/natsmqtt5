@@ -3,8 +3,8 @@ module github.com/taumatix/natsmqtt5
 go 1.25.0
 
 require (
-	github.com/eclipse/paho.golang v0.22.0
-	github.com/nats-io/nats-server/v2 v2.12.15
+	github.com/eclipse/paho.golang v0.23.0
+	github.com/nats-io/nats-server/v2 v2.14.5
 	github.com/nats-io/nats.go v1.53.1
 	github.com/nats-io/nuid v1.0.1
 	github.com/stretchr/testify v1.12.1
