@@ -11,6 +11,11 @@ unrelated message bus.
 
 [issue3369]: https://github.com/nats-io/nats-server/issues/3369
 
+> **Built against:** MQTT 5.0 (OASIS, 2019-03-07) and `nats-server` v2.14.5, checked 2026-09-19.
+> The nats-server pin is a deliberate hold — v2.15.0 needs Go 1.26 and this module's floor is
+> 1.25 ([#11](https://github.com/taumatix/natsmqtt5/issues/11)). See [UPSTREAM.md](UPSTREAM.md),
+> and [ROADMAP.md](ROADMAP.md) for where the broker knowingly does not yet conform.
+
 ```
 MQTT v5 clients ──TCP/TLS──▶ natsmqtt5 ──▶ your existing NATS server
                              (a NATS client, not a fork)
