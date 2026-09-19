@@ -125,6 +125,64 @@ func TestPersistentSessionResumesOnTheSameBrokerWithoutARestart(t *testing.T) {
 	assert.Equal(t, "still subscribed", second.expectMessage().Payload)
 }
 
+// Retransmission on resume and session persistence are separate features that
+// share a handshake. With persistence on, negotiate takes the branch that
+// claims the durable record, and an unacknowledged message still has to come
+// back [MQTT-4.4.0-1] — this is the configuration a real deployment runs, so it
+// is worth pinning rather than inferring from the two features separately.
+func TestPersistentSessionStillResendsWhatWasUnacknowledged(t *testing.T) {
+	addr := startBroker(t, startNATS(t), persistent)
+
+	sub, _ := connectClient(t, addr, durableConnect("persist-resend", 300), manualAck)
+	sub.subscribe(paho.SubscribeOptions{Topic: "persist/resend", QoS: 1})
+
+	pub, _ := connectClient(t, addr, connectOpts("pub"))
+	pub.publish(&paho.Publish{Topic: "persist/resend", QoS: 1, Payload: []byte("owed")})
+	first := sub.expectMessage()
+	require.Equal(t, "owed", first.Payload)
+	sub.dropConnection()
+
+	resumed, connack := connectClient(t, addr, durableConnect("persist-resend", 300), manualAck)
+	require.True(t, connack.SessionPresent)
+
+	got := resumed.expectMessage()
+	assert.Equal(t, "owed", got.Payload)
+	assert.Equal(t, first.PacketID, got.PacketID)
+	assert.True(t, got.Dup)
+}
+
+// The boundary of that guarantee, written down as a test so it cannot drift
+// into being assumed wider than it is: the durable record carries the
+// subscription set and not the in-flight set, so a session resumed on a broker
+// that never held the connection has nothing to resend. The subscription is
+// restored and new messages arrive; the one that was in flight is lost.
+//
+// Closing this is a roadmap entry, not an oversight. Storing Packet Identifiers
+// without the payloads to go with them would be a record that promises a resend
+// the broker cannot perform.
+func TestPersistentSessionOnAnotherBrokerHasNothingToResend(t *testing.T) {
+	natsURL := startNATS(t)
+	addrA := startBroker(t, natsURL, persistent)
+	addrB := startBroker(t, natsURL, persistent)
+
+	sub, _ := connectClient(t, addrA, durableConnect("persist-move", 300), manualAck)
+	sub.subscribe(paho.SubscribeOptions{Topic: "persist/move", QoS: 1})
+
+	pub, _ := connectClient(t, addrA, connectOpts("pub"))
+	pub.publish(&paho.Publish{Topic: "persist/move", QoS: 1, Payload: []byte("left behind")})
+	require.Equal(t, "left behind", sub.expectMessage().Payload)
+	sub.dropConnection()
+
+	moved, connack := connectClient(t, addrB, durableConnect("persist-move", 300), manualAck)
+	require.True(t, connack.SessionPresent, "the stored session must still be resumed")
+	moved.expectNoMessage()
+
+	// The subscription did come back, so what is missing is the in-flight set
+	// and nothing else.
+	pub.publish(&paho.Publish{Topic: "persist/move", QoS: 1, Payload: []byte("after the move")})
+	assert.Equal(t, "after the move", moved.expectMessage().Payload)
+}
+
 // A second CONNECT for the same Client Identifier on the same broker displaces
 // the first [MQTT-3.1.4-3], and the displaced connection tears down on its own
 // goroutine while the new one is already claiming the record. The record must

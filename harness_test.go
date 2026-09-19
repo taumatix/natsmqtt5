@@ -100,6 +100,15 @@ type received struct {
 	QoS        byte
 	Retain     bool
 	Properties *paho.PublishProperties
+	// Dup is the DUP flag, which is how a client tells a retransmission from a
+	// first attempt (MQTT-5.0 §3.3.1.1).
+	Dup bool
+	// PacketID matters to a retransmission test: a resend "MUST use the
+	// original Packet Identifier" [MQTT-4.4.0-1].
+	PacketID uint16
+	// Ack sends the acknowledgement this message is owed. It only does anything
+	// under manualAck, where nothing is acknowledged until a test says so.
+	Ack func() error
 }
 
 // testClient is a Paho v5 client wired to collect the messages it receives and
@@ -107,6 +116,7 @@ type received struct {
 type testClient struct {
 	*paho.Client
 	t        *testing.T
+	nc       net.Conn
 	messages chan received
 	// disconnects collects server-sent DISCONNECTs. A broker disconnecting a
 	// client it should be serving is invisible from the message channel alone —
@@ -116,9 +126,9 @@ type testClient struct {
 
 // connectClient dials the broker and completes the MQTT handshake, failing the
 // test if the CONNACK carries an error Reason Code.
-func connectClient(t *testing.T, addr string, cp *paho.Connect) (*testClient, *paho.Connack) {
+func connectClient(t *testing.T, addr string, cp *paho.Connect, customise ...func(*paho.ClientConfig)) (*testClient, *paho.Connack) {
 	t.Helper()
-	tc, connack, err := tryConnect(t, addr, cp)
+	tc, connack, err := tryConnect(t, addr, cp, customise...)
 	require.NoError(t, err)
 	require.False(t, connack.ReasonCode >= 0x80,
 		"CONNACK refused the connection with reason 0x%02X", connack.ReasonCode)
@@ -126,8 +136,10 @@ func connectClient(t *testing.T, addr string, cp *paho.Connect) (*testClient, *p
 }
 
 // tryConnect is connectClient without the success assertion, for tests that
-// expect a refusal.
-func tryConnect(t *testing.T, addr string, cp *paho.Connect) (*testClient, *paho.Connack, error) {
+// expect a refusal. Any customise function is applied to the Paho client
+// configuration before it connects, which is how a test asks for manual
+// acknowledgement.
+func tryConnect(t *testing.T, addr string, cp *paho.Connect, customise ...func(*paho.ClientConfig)) (*testClient, *paho.Connack, error) {
 	t.Helper()
 
 	nc, err := net.DialTimeout("tcp", addr, 5*time.Second)
@@ -135,10 +147,11 @@ func tryConnect(t *testing.T, addr string, cp *paho.Connect) (*testClient, *paho
 
 	tc := &testClient{
 		t:           t,
+		nc:          nc,
 		messages:    make(chan received, 64),
 		disconnects: make(chan *paho.Disconnect, 4),
 	}
-	tc.Client = paho.NewClient(paho.ClientConfig{
+	cfg := paho.ClientConfig{
 		Conn:               nc,
 		ClientID:           cp.ClientID,
 		OnServerDisconnect: func(d *paho.Disconnect) { tc.disconnects <- d },
@@ -151,6 +164,9 @@ func tryConnect(t *testing.T, addr string, cp *paho.Connect) (*testClient, *paho
 					QoS:        pr.Packet.QoS,
 					Retain:     pr.Packet.Retain,
 					Properties: pr.Packet.Properties,
+					Dup:        pr.Packet.Duplicate(),
+					PacketID:   pr.Packet.PacketID,
+					Ack:        func() error { return pr.Client.Ack(pr.Packet) },
 				}:
 				default:
 					t.Errorf("test client %q dropped a message on %q: buffer full", cp.ClientID, pr.Packet.Topic)
@@ -158,7 +174,11 @@ func tryConnect(t *testing.T, addr string, cp *paho.Connect) (*testClient, *paho
 				return true, nil
 			},
 		},
-	})
+	}
+	for _, fn := range customise {
+		fn(&cfg)
+	}
+	tc.Client = paho.NewClient(cfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -169,6 +189,25 @@ func tryConnect(t *testing.T, addr string, cp *paho.Connect) (*testClient, *paho
 	}
 	t.Cleanup(func() { _ = tc.Client.Disconnect(&paho.Disconnect{ReasonCode: 0}) })
 	return tc, connack, nil
+}
+
+// dropConnection closes the socket under the client without sending a
+// DISCONNECT, which is what a lost network looks like to the broker.
+//
+// A clean DISCONNECT with a non-zero Session Expiry Interval would leave the
+// same arrears — §4.4 says nothing about how the previous connection ended —
+// but it is the lost network that the feature exists for, and it is the one a
+// deployment hits.
+func (c *testClient) dropConnection() {
+	c.t.Helper()
+	require.NoError(c.t, c.nc.Close())
+}
+
+// manualAck stops the Paho client acknowledging anything by itself, so a test
+// can leave a QoS 1 delivery unacknowledged. Paho only sends the PUBACK when
+// Client.Ack is called, which these tests never do.
+func manualAck(cfg *paho.ClientConfig) {
+	cfg.EnableManualAcknowledgment = true
 }
 
 // expectMessage waits for one message and fails the test if none arrives.

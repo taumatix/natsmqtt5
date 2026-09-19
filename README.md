@@ -215,9 +215,12 @@ What it costs and what it does not cover:
 - **The Client Identifier is capped at 128 bytes** (`MaxPersistentClientIDLen`),
   because it becomes part of a NATS subject. A longer one is refused with
   `0x85 Client Identifier not valid`. Without persistence there is no limit.
-- **In-flight QoS 1 and QoS 2 messages are not persisted**, so a message
-  awaiting its PUBACK when the broker dies is not resent — see the offline
-  queue below, which is the feature that would make resending meaningful.
+- **In-flight QoS 1 and QoS 2 messages are not persisted.** A client that
+  reconnects to the broker still holding its session gets its unacknowledged
+  messages back; one whose session is restored from the store — after a restart,
+  or on another broker — does not, because the record carries the subscription
+  set and not the in-flight set. Storing Packet Identifiers without the payloads
+  to go with them would promise a resend the broker could not perform.
 - **The Will Message is not persisted.** A Will belongs to the network
   connection (MQTT-5.0 §3.1.2.5), and a broker reading a record cannot tell a
   connection that has ended from an owner that is merely busy, so publishing
@@ -236,7 +239,12 @@ one with fewer features:
 
 - **No offline message queue.** Messages published while a session is
   disconnected are not stored for it, whether or not the session is persisted.
-- **No QoS 1/2 retransmission on reconnect**, which follows from the above.
+- **Retransmission on reconnect reaches as far as the broker's memory.** A
+  client that reconnects with Clean Start 0 to a broker still holding its
+  session is resent the PUBLISH and PUBREL packets that connection left
+  unacknowledged, with their original Packet Identifiers [MQTT-4.4.0-1]. A
+  session restored from the store instead — after a restart, or on another
+  broker — has nothing to resend.
 - **Shared subscriptions are granted QoS 1 at most.** A QoS 2 request on a
   `$share/` filter is answered with `Granted QoS 1` in the SUBACK, which
   [MQTT-3.8.4-7] permits. Exactly-once delivery to *one* member of a group needs
