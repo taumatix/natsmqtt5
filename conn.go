@@ -325,27 +325,48 @@ func (c *conn) scheduleWill() {
 // Packet Size: an oversized packet is discarded and the broker behaves as if
 // it had been sent [MQTT-3.1.2-25].
 func (c *conn) write(p packet.Packet) error {
+	_, err := c.writeReportingDiscard(p)
+	return err
+}
+
+// writePublish is write for a PUBLISH at QoS 1 or 2, reporting whether the
+// packet reached the socket.
+//
+// The caller has to know, because a discarded one will never be acknowledged.
+// "Where a Packet is too large to send, the Server MUST discard it without
+// sending it and then behave as if it had completed sending that Application
+// Message" [MQTT-3.1.2-25] — so the exchange ends there. Waiting for the
+// acknowledgement instead would strand a Packet Identifier and a send-quota
+// slot for the life of the session, and a session that is resumed would resend
+// the same undeliverable packet on every resumption.
+func (c *conn) writePublish(p *packet.Publish) (sent bool, err error) {
+	discarded, err := c.writeReportingDiscard(p)
+	return !discarded, err
+}
+
+func (c *conn) writeReportingDiscard(p packet.Packet) (discarded bool, err error) {
 	raw, err := packet.Encode(p)
 	if err != nil {
-		return fmt.Errorf("encoding %s: %w", p.Type(), err)
+		return false, fmt.Errorf("encoding %s: %w", p.Type(), err)
 	}
 	if c.clientMaxPacketSize > 0 && uint32(len(raw)) > c.clientMaxPacketSize {
+		// [MQTT-3.1.2-24]: the server must not send it.
 		c.logger.Warn("discarding a packet larger than the client's Maximum Packet Size",
 			"type", p.Type().String(), "size", len(raw), "limit", c.clientMaxPacketSize)
-		return nil
+		return true, nil
 	}
 
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	select {
 	case <-c.done:
-		return net.ErrClosed
+		return false, net.ErrClosed
 	default:
 	}
 	if _, err := c.nc.Write(raw); err != nil {
-		return fmt.Errorf("writing %s: %w", p.Type(), err)
+		return false, fmt.Errorf("writing %s: %w", p.Type(), err)
 	}
-	return nil
+	return false, nil
 }
 
 // sendDisconnect sends a server DISCONNECT, best effort. It is a no-op before

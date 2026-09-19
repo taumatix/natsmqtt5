@@ -42,6 +42,21 @@ type outbound struct {
 	// (QoS 1), true once PUBREL has gone out and we expect PUBCOMP.
 	awaitingPubcomp bool
 	publish         *packet.Publish
+	// seq counts sends, so the in-flight set can be put back in the order it
+	// went out. Packet Identifiers cannot do that job: they cycle through
+	// 1..65535 and wrap.
+	seq uint64
+	// quotaHeld records that this entry holds a slot in the current
+	// connection's send quota, so that its acknowledgement returns that slot
+	// and an acknowledgement for anything else does not.
+	//
+	// It has to be per entry rather than a bare count, because the quota is per
+	// connection and the in-flight set is per session: an entry carried into a
+	// new connection was paid for on the old one. Without this, a client that
+	// reconnects and then acknowledges what it received before gets a slot
+	// back for each — and the broker exceeds the Receive Maximum that same
+	// client just advertised.
+	quotaHeld bool
 }
 
 // session is the MQTT Session State the broker holds for a Client Identifier
@@ -78,6 +93,9 @@ type session struct {
 	// (MQTT-5.0 §2.2.1).
 	nextPacketID uint16
 	inflight     map[uint16]*outbound
+	// sendSeq numbers sends so that unacknowledged returns the in-flight set in
+	// the order it left.
+	sendSeq uint64
 	// receivedQoS2 holds the Packet Identifiers of QoS 2 PUBLISH packets that
 	// have been accepted and not yet released, so a redelivered PUBLISH is
 	// acknowledged without being forwarded twice (MQTT-5.0 §4.3.3).
@@ -123,6 +141,16 @@ func (s *session) attach(c *conn) *conn {
 	prev := s.conn
 	s.conn = c
 	s.disconnectedAt = time.Time{}
+
+	// "The send quota and Receive Maximum value are not preserved across
+	// Network Connections, and are re-initialized with each new Network
+	// Connection ... They are not part of the session state" (MQTT-5.0 §4.9).
+	// So nothing carried into this connection holds a slot in its quota until a
+	// resend takes one. This runs during the handshake, before the CONNACK, so
+	// no acknowledgement can be in flight against the new quota yet.
+	for _, o := range s.inflight {
+		o.quotaHeld = false
+	}
 	return prev
 }
 
@@ -207,25 +235,82 @@ func (s *session) nextID() (uint16, bool) {
 func (s *session) trackInflight(o *outbound) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.sendSeq++
+	o.seq = s.sendSeq
 	s.inflight[o.packetID] = o
 }
 
-// completeInflight removes the entry for id and reports whether one existed.
-func (s *session) completeInflight(id uint16) (*outbound, bool) {
+// unacknowledged returns the in-flight set in the order it was sent, which is
+// the order it has to be resent in [MQTT-4.6.0-5].
+//
+// The entries are copies. The caller resends without holding the lock, and the
+// live entries keep changing underneath as acknowledgements arrive — including
+// being deleted, which is why a copy is safer than a slice of pointers. The
+// packet each copy points at is not copied and must not be modified.
+func (s *session) unacknowledged() []outbound {
+	s.mu.Lock()
+	out := make([]outbound, 0, len(s.inflight))
+	for _, o := range s.inflight {
+		out = append(out, *o)
+	}
+	s.mu.Unlock()
+
+	// Sorted outside the lock: the slice is the caller's already, and the lock
+	// is also taken on the NATS dispatcher path for every delivered message.
+	sort.Slice(out, func(i, j int) bool { return out[i].seq < out[j].seq })
+	return out
+}
+
+// takeQuotaSlot records that the entry for id now holds a slot in the current
+// connection's send quota, and reports whether the entry was still there to
+// record it against.
+func (s *session) takeQuotaSlot(id uint16) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	o, ok := s.inflight[id]
 	if ok {
-		delete(s.inflight, id)
+		o.quotaHeld = true
 	}
-	return o, ok
+	return ok
 }
 
-func (s *session) inflightEntry(id uint16) (*outbound, bool) {
+// awaitPubcomp records that PUBREL has gone out for id, so the broker now
+// expects PUBCOMP rather than PUBREC (MQTT-5.0 §4.3.3). What turns on it is
+// which packet a resend after a reconnect has to be: past the PUBREC the client
+// owns the message, so it is the PUBREL that is repeated and not the PUBLISH
+// [MQTT-4.4.0-1].
+func (s *session) awaitPubcomp(id uint16) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if o, ok := s.inflight[id]; ok {
+		o.awaitingPubcomp = true
+	}
+}
+
+// completeInflight removes the entry for id and reports whether one existed.
+func (s *session) completeInflight(id uint16) (outbound, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	o, ok := s.inflight[id]
-	return o, ok
+	if !ok {
+		return outbound{}, false
+	}
+	delete(s.inflight, id)
+	return *o, true
+}
+
+// inflightEntry returns a copy of the entry for id. It is a copy for the same
+// reason unacknowledged returns copies: awaitingPubcomp is mutable state that
+// two goroutines reach — the connection serving the session and, for as long as
+// a displaced connection is still draining its socket, that one too.
+func (s *session) inflightEntry(id uint16) (outbound, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	o, ok := s.inflight[id]
+	if !ok {
+		return outbound{}, false
+	}
+	return *o, true
 }
 
 // markQoS2Received records a QoS 2 Packet Identifier and reports whether it

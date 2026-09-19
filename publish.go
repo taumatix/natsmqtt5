@@ -158,7 +158,7 @@ func (c *conn) handlePuback(p *packet.Puback) error {
 			fmt.Sprintf("PUBACK for Packet Identifier %d, which is a QoS 2 exchange", p.Ack.PacketID))
 		return errors.New("PUBACK for a QoS 2 message")
 	}
-	c.releaseQuota()
+	c.releaseQuotaFor(o)
 	return nil
 }
 
@@ -172,12 +172,26 @@ func (c *conn) handlePubrec(p *packet.Pubrec) error {
 			ReasonCode: packet.PacketIdentifierNotFound,
 		}})
 	}
-	if p.Ack.ReasonCode.IsError() {
+	if o.qos != packet.QoS2 {
+		// The mirror of the check handlePuback makes, down to ending the
+		// exchange before the disconnect: letting it through would move a QoS 1
+		// exchange on to expecting a PUBCOMP that its client has no reason to
+		// send, and a resumed session would then resend a PUBREL for it on
+		// every resumption [MQTT-4.4.0-1].
 		c.sess.completeInflight(p.Ack.PacketID)
-		c.releaseQuota()
+		c.sendDisconnect(packet.ProtocolError,
+			fmt.Sprintf("PUBREC for Packet Identifier %d, which is a QoS 1 exchange", p.Ack.PacketID))
+		return errors.New("PUBREC for a QoS 1 message")
+	}
+	if p.Ack.ReasonCode.IsError() {
+		// "If PUBACK or PUBREC is received containing a Reason Code of 0x80 or
+		// greater the corresponding PUBLISH packet is treated as acknowledged,
+		// and MUST NOT be retransmitted" [MQTT-4.4.0-2].
+		done, _ := c.sess.completeInflight(p.Ack.PacketID)
+		c.releaseQuotaFor(done)
 		return nil
 	}
-	o.awaitingPubcomp = true
+	c.sess.awaitPubcomp(p.Ack.PacketID)
 	return c.write(&packet.Pubrel{Ack: packet.Ack{PacketID: p.Ack.PacketID}})
 }
 
@@ -195,13 +209,25 @@ func (c *conn) handlePubrel(p *packet.Pubrel) error {
 
 // handlePubcomp is stage 3 of a broker-to-client QoS 2 delivery.
 func (c *conn) handlePubcomp(p *packet.Pubcomp) error {
-	if _, ok := c.sess.completeInflight(p.Ack.PacketID); !ok {
+	o, ok := c.sess.completeInflight(p.Ack.PacketID)
+	if !ok {
 		c.sendDisconnect(packet.ProtocolError,
 			fmt.Sprintf("PUBCOMP for unknown Packet Identifier %d", p.Ack.PacketID))
 		return fmt.Errorf("PUBCOMP for unknown packet id %d", p.Ack.PacketID)
 	}
-	c.releaseQuota()
+	c.releaseQuotaFor(o)
 	return nil
+}
+
+// releaseQuotaFor returns the send-quota slot a completed exchange was holding,
+// if it was holding one on this connection. An exchange begun on an earlier
+// connection is not: the quota was re-initialised when this one started
+// (MQTT-5.0 §4.9), and a resend takes a fresh slot or, in the case of a PUBREL,
+// none at all.
+func (c *conn) releaseQuotaFor(o outbound) {
+	if o.quotaHeld {
+		c.releaseQuota()
+	}
 }
 
 func (c *conn) releaseQuota() {

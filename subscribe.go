@@ -310,7 +310,16 @@ func (c *conn) enqueue(d *delivery) {
 // deliverLoop turns queued messages into PUBLISH packets. It runs on its own
 // goroutine so that the receive-quota wait cannot block control packets such
 // as PINGRESP, which would make a slow client look dead.
+//
+// It opens by resending whatever the last connection left unacknowledged, so
+// that a resumed session's arrears go out before anything published since.
 func (c *conn) deliverLoop() {
+	if err := c.retransmit(); err != nil {
+		c.logger.Debug("could not resend the unacknowledged messages", "error", err)
+		c.close()
+		return
+	}
+
 	for {
 		select {
 		case <-c.done:
@@ -351,8 +360,21 @@ func (c *conn) deliver(d *delivery) error {
 		return fmt.Errorf("no free Packet Identifier for %q", d.topic)
 	}
 	pub.PacketID = id
-	c.sess.trackInflight(&outbound{packetID: id, qos: d.qos, publish: pub})
-	return c.write(pub)
+	c.sess.trackInflight(&outbound{packetID: id, qos: d.qos, publish: pub, quotaHeld: true})
+	sent, err := c.writePublish(pub)
+	if err != nil {
+		return err
+	}
+	if !sent {
+		// Discarded for exceeding the client's Maximum Packet Size, so no
+		// acknowledgement is coming. The server must "behave as if it had
+		// completed sending that Application Message" [MQTT-3.1.2-25]: the
+		// exchange ends here, rather than holding a Packet Identifier and a
+		// send-quota slot until the session does.
+		c.sess.completeInflight(id)
+		c.releaseQuota()
+	}
+	return nil
 }
 
 // sendRetained delivers the retained messages matching a new subscription, as

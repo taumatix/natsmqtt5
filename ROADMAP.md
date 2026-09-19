@@ -4,21 +4,80 @@ Ordered by how much they limit real deployments, not by how interesting they
 are to build. Each entry says what breaks today, so it can be judged on its
 own.
 
-## Offline message queue, and QoS 1/2 retransmission on reconnect
+## Re-authorising an in-memory session on resume
+
+**Today:** `handshake.mayResume` re-runs `Options.Authorizer` over every
+subscription it restores from the durable record, because a session is keyed by
+Client Identifier alone and whoever the Authenticator lets use that identifier
+inherits it. A session resumed from *this broker's memory* gets no such check:
+`resumeSubscriptions` takes its `len(stored) == 0` early return, and the NATS
+subscriptions that were never torn down go on delivering. So a permission
+revoked between two connections does not take effect until the session expires.
+
+**Why it is now worth more:** retransmission on resume means a resumed session
+hands over the previous connection's undelivered payloads at CONNACK time,
+before the client has sent anything. The subscription staying live was already
+the larger leak — it covers every *future* message, not just the buffered ones —
+but the two share one fix and one test.
+
+**Shape:** run `mayResume` over the session's live `subs` map on the in-memory
+branch too, unsubscribing the denied filters before `deliverLoop` starts, and
+drop any in-flight entry whose topic no longer matches a surviving filter.
+`Options.Authenticator` should also document that an implementation must bind
+the authenticated principal to `req.ClientID`, or assign one with
+`AssignClientID`, since the session key is the Client Identifier.
+
+## Offline message queue: a durable consumer per session
 
 **Today:** messages published while a session is disconnected are dropped for
-it, and an unacknowledged QoS 1 or QoS 2 message is not resent after a
-reconnect. MQTT-5.0 §4.4 expects both for a session that persists — and now
-that `Options.PersistentSessions` makes a session genuinely persist, this is
-the largest remaining gap between what the broker stores and what a client is
-entitled to assume it stored.
+it, whether or not the session is persisted. The broker now resends what it was
+already holding when a connection died (MQTT-5.0 §4.4), but a message published
+into the gap was never held by anything — core NATS fans out to whoever is
+subscribed at the time and keeps nothing.
 
 **Shape:** a durable JetStream consumer per session, filtered to the session's
-subject set, with the consumer's ack state carrying the in-flight set. That
-makes the in-flight Packet Identifiers worth persisting into the session
-record, which today they deliberately are not: recording that a message was
-in flight without being able to resend it would be a promise the broker cannot
-keep.
+subject set, delivering on resume from where the session left off. This is the
+entry the other two below depend on, and the largest of the three.
+
+## Retransmission that survives a broker restart
+
+**Today:** the resend on resume reaches as far as this broker's memory. A
+session restored from the JetStream record — after a restart, or on another
+broker — has an empty in-flight set, so its unacknowledged messages are lost
+even though its subscriptions come back. `TestPersistentSessionOnAnotherBroker
+HasNothingToResend` pins that boundary so it cannot quietly be assumed wider.
+
+**Why it is not simply fixed:** the record is a JetStream KV value and the
+payloads do not belong in it. Persisting Packet Identifiers alone would record
+that a message was in flight without being able to resend it — a promise the
+broker cannot keep, which is why they were left out in the first place.
+
+**Shape:** once the offline queue exists, the unacknowledged set is the durable
+consumer's ack-pending set and the payloads are already in the stream. What
+still has to go in the record is the Packet Identifier each pending message was
+sent under, so a resend after a restart reuses the original one
+[MQTT-4.4.0-1].
+
+## A late acknowledgement can get a client disconnected
+
+**Today:** `conn.resend` re-reads the live in-flight entry immediately before
+writing, so the long window — the wait for send quota — is closed. A
+microsecond one is not: an acknowledgement that lands between that read and the
+write leaves the broker resending a completed exchange, and the client's
+acknowledgement of *that* arrives for a Packet Identifier the session no longer
+holds, which `handlePuback` answers with `0x82 Protocol Error`. A conforming
+client is disconnected for the broker's mistake, and its next reconnect can hit
+the same window.
+
+**Reaching it** needs an acknowledgement for a message received on the previous
+connection to arrive during that window — either from a client that flushes
+owed acknowledgements on reconnect, or from a displaced connection still
+decoding packets its socket had already buffered.
+
+**Shape:** keep the set of Packet Identifiers this connection resent, and answer
+an unmatched acknowledgement for one of them by ignoring it rather than by
+disconnecting. Making the read and the write atomic is the other option and the
+worse one: it means holding the session lock across a socket write.
 
 ## Expiring a detached session that is never resumed
 
@@ -142,3 +201,16 @@ many hosted deployments need.
 
 **Shape:** an `http.Handler` that upgrades and hands the connection to the same
 `conn` state machine, so it is a transport change and nothing more.
+
+## CI has no vulnerability scan and no linter
+
+**Today:** `.github/workflows/ci.yml` runs `gofmt`, `go vet`, `go build`,
+`go test -race` across two Go versions and two operating systems, fuzzes the
+decoder and the topic mapping, and smoke-tests the container image. It does not
+run `govulncheck`, so a known CVE in a dependency of a library other people
+import goes unnoticed, and it does not run `golangci-lint`.
+
+**Why it is last:** neither limits a deployment today, and adding a linter to
+nine thousand existing lines will produce a batch of findings that has to be
+worked through rather than merged. `govulncheck` is the half worth doing first
+and on its own.
