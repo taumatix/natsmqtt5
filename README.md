@@ -46,12 +46,12 @@ MQTT v5 clients ──TCP/TLS──▶ natsmqtt5 ──▶ your existing NATS se
 ## Install
 
 > **The published image is not public yet, so the `docker run` below fails with
-> `denied` (checked 2026-09-14).** The image exists — every release pushes it —
-> but the GitHub package is still private, and making it public needs an
-> admin action that cannot be done from this repository. Tracked in
-> [#7](https://github.com/taumatix/natsmqtt5/issues/7). Until it is resolved,
-> use the `go install` instructions below, which work today. This note goes
-> away when the package does.
+> `denied` (checked 2026-09-21).** The image exists — every release pushes it —
+> but the GitHub package is still private, and there is no API that can change
+> that: package visibility is settable only by a human in the GitHub web UI.
+> Tracked in [#7](https://github.com/taumatix/natsmqtt5/issues/7). Until it is
+> resolved, use the `go install` instructions below, which work today. This
+> note goes away when the package does.
 
 As a container, against a NATS server you already run:
 
