@@ -7,22 +7,38 @@ controls. This file says which versions it was built and checked against.
 - name: mqtt-specification
   kind: literal
   value: "MQTT Version 5.0, OASIS Standard, 2019-03-07"
-  checked: 2026-09-19
-  note: the normative reference; source clauses are cited inline as MQTT-5.0 §x.y.z
+  checked: 2026-09-21
+  note: >-
+    the normative reference; source clauses are cited inline as MQTT-5.0 §x.y.z.
+    Re-read at docs.oasis-open.org on 2026-09-21: still the current revision, no
+    later version and no errata published.
 
 - name: nats-server
   kind: github-release
   repo: nats-io/nats-server
   tag: v2.14.5
-  checked: 2026-09-19
+  checked: 2026-09-21
   hold: "issue #11 — v2.15.0 needs Go 1.26, this module's floor is 1.25, dependency is test-only"
   note: held deliberately; the gap is still reported, it just does not raise the alarm
+
+- name: nats-go
+  kind: github-release
+  repo: nats-io/nats.go
+  tag: v1.53.1
+  checked: 2026-09-21
+  hold: >-
+    issue #11 — v1.54.0 declares go 1.26.0, and taking it rewrites this module's
+    directive from 1.25.0 to 1.26.0 (probed, not assumed). Unlike nats-server this
+    one is a RUNTIME dependency, so the hold now costs users a real version.
+  note: >-
+    the NATS client the broker is built on; in the shipped build, not just the tests.
+    Added as a pin on 2026-09-21 when it hit the same Go 1.26 floor as nats-server.
 
 - name: paho-golang
   kind: github-release
   repo: eclipse-paho/paho.golang
   tag: v0.23.0
-  checked: 2026-09-19
+  checked: 2026-09-21
   note: the third-party MQTT client the end-to-end tests drive the broker with
 ```
 
@@ -39,6 +55,16 @@ requirement to 1.26, and this module's floor is Go 1.25; taking the bump would d
 1.25 to buy a test-only dependency upgrade. The dependency is test-only — the broker speaks to
 whatever NATS server it is pointed at — so the trade is not worth making unilaterally. Tracked as
 issue #11; it stays pinned until that is decided.
+
+**As of 2026-09-21 the same wall now blocks `nats.go`, and that changes the cost of the hold.**
+`nats.go` v1.54.0 declares `go 1.26.0`. Running `go get github.com/nats-io/nats.go@v1.54.0` in a
+throwaway copy of this module rewrote the directive `go 1.25.0 => go 1.26.0`, exactly as
+nats-server's bump did — so the choice is the same choice, but the dependency is not: **`nats.go`
+is linked into the shipped library**, not confined to the tests. Issue #11's reasoning for holding
+("the update buys us nothing a user can observe") no longer covers this half. Holding now means
+users run a NATS client one minor version behind, and raising the floor still drops everyone on
+Go 1.25. Nothing is broken either way; the decision is recorded on issue #11 rather than taken in
+a maintenance pass, because raising a language floor is a compatibility break.
 
 **`paho.golang` is the independent client** the end-to-end tests use. That independence is the
 point: a test that drives the broker with its own encoder proves self-consistency, not
