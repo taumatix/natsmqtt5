@@ -29,7 +29,9 @@ controls. This file says which versions it was built and checked against.
   hold: >-
     issue #11 — v1.54.0 declares go 1.26.0, and taking it rewrites this module's
     directive from 1.25.0 to 1.26.0 (probed, not assumed). Unlike nats-server this
-    one is a RUNTIME dependency, so the hold now costs users a real version.
+    one is a RUNTIME dependency, so the hold now costs users a real version — and
+    since 2026-09-21 it also pins golang.org/x/crypto at v0.55.0, whose two
+    x/crypto/ssh DoS advisories are fixed only in v0.56.0, which needs Go 1.26 too.
   note: >-
     the NATS client the broker is built on; in the shipped build, not just the tests.
     Added as a pin on 2026-09-21 when it hit the same Go 1.26 floor as nats-server.
@@ -63,8 +65,32 @@ nats-server's bump did — so the choice is the same choice, but the dependency 
 is linked into the shipped library**, not confined to the tests. Issue #11's reasoning for holding
 ("the update buys us nothing a user can observe") no longer covers this half. Holding now means
 users run a NATS client one minor version behind, and raising the floor still drops everyone on
-Go 1.25. Nothing is broken either way; the decision is recorded on issue #11 rather than taken in
-a maintenance pass, because raising a language floor is a compatibility break.
+Go 1.25. The decision is recorded on issue #11 rather than taken in a maintenance pass, because
+raising a language floor is a compatibility break.
+
+**Later the same day the hold acquired a second cost, and this one is a security patch.**
+`govulncheck ./...` reports three advisories in required-but-uncalled modules, all in
+`golang.org/x/crypto` v0.55.0; two of them — [GO-2026-6354][g54] and [GO-2026-6355][g55],
+`x/crypto/ssh` connection deadlocks reachable by a malicious peer — are **fixed in v0.56.0**.
+`x/crypto` v0.56.0 declares `go 1.26.0`, and `go get golang.org/x/crypto@v0.56.0` in a throwaway
+copy printed `go: upgraded go 1.25.0 => 1.26.0`. So there is no patched `x/crypto` reachable from a
+Go 1.25 floor: the whole `golang.org/x` ecosystem has moved past it.
+
+Two qualifiers keep this honest, and they cut in opposite directions. It is **not exploitable
+here** — `govulncheck` puts the affected symbols (`Dial`, `NewClientConn`, `NewServerConn`) outside
+this module's call graph, and nothing in the broker speaks SSH; `x/crypto` arrives transitively
+through `nats-server`. But it is **unpatchable**, which is the part that does not improve on its
+own: every future `x/crypto` advisory lands the same way for as long as the floor stays at 1.25.
+
+The fact issue #11 asked for is now available too. Go's release policy is that "each major Go
+release is supported until there are two newer major releases"; Go 1.25.0 shipped 2025-08-12, 1.26.0
+on 2026-02-10 and 1.27.0 on 2026-08-19 (go.dev/doc/devel/release, read 2026-09-21). Two newer major
+releases exist, so **Go 1.25 has itself been out of upstream security support since 2026-08-19**.
+The floor is protecting a toolchain that stopped receiving security fixes a month ago. That is an
+argument, not a decision — it still belongs to issue #11.
+
+[g54]: https://pkg.go.dev/vuln/GO-2026-6354
+[g55]: https://pkg.go.dev/vuln/GO-2026-6355
 
 **`paho.golang` is the independent client** the end-to-end tests use. That independence is the
 point: a test that drives the broker with its own encoder proves self-consistency, not

@@ -16,8 +16,16 @@ unrelated message bus.
 > v2.15.0 declare `go 1.26.0`, and taking either would raise this module's floor from Go 1.25 and
 > drop anyone building on it ([#11](https://github.com/taumatix/natsmqtt5/issues/11)). `nats.go` is
 > in the shipped build, so that hold costs you a NATS client one minor version behind — nothing is
-> broken, but it is a version you did not choose. See [UPSTREAM.md](UPSTREAM.md), and
-> [ROADMAP.md](ROADMAP.md) for where the broker knowingly does not yet conform.
+> broken, but it is a version you did not choose. **As of 2026-09-21 it also costs you a security
+> patch:** the hold keeps `golang.org/x/crypto` at v0.55.0, which carries two `x/crypto/ssh` DoS
+> advisories ([GO-2026-6354][g54], [GO-2026-6355][g55]) fixed in v0.56.0 — and v0.56.0 declares
+> `go 1.26.0` too, so there is no patched version reachable from a Go 1.25 floor. `govulncheck`
+> reports them as *not called* by this module, so it is not an exploitable path here; it is an
+> unpatchable one. See [UPSTREAM.md](UPSTREAM.md), and [ROADMAP.md](ROADMAP.md) for where the
+> broker knowingly does not yet conform.
+
+[g54]: https://pkg.go.dev/vuln/GO-2026-6354
+[g55]: https://pkg.go.dev/vuln/GO-2026-6355
 
 ```
 MQTT v5 clients ──TCP/TLS──▶ natsmqtt5 ──▶ your existing NATS server
