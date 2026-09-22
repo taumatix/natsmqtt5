@@ -4,6 +4,15 @@
 #	mosquitto_sub -V 5 -h localhost -p 1883 -t 'sensors/#' &
 #	mosquitto_pub -V 5 -h localhost -p 1883 -t sensors/7/temp -m 21.5
 #
+# That pulls an image which is published but not yet public, so it fails with
+# `denied` (checked 2026-09-22). No API can change that for any caller —
+# package visibility is set in the GitHub web UI, by a human, and nowhere else.
+# Tracked in https://github.com/taumatix/natsmqtt5/issues/7. Until it is
+# resolved, build the image locally under the same tag and compose works
+# unchanged:
+#
+#	docker build -t ghcr.io/taumatix/natsmqtt5:v0.2.0 .
+#
 # To put the broker in front of a NATS server you already run, delete the nats
 # service and set NATSMQTT5_NATS to its URL.
 #
