@@ -303,6 +303,7 @@ func (c *conn) reauthoriseLive(ctx context.Context) {
 	if c.broker.opts.Authorizer == nil {
 		return
 	}
+	denied := false
 	for _, sub := range c.sess.subscriptions() {
 		if c.mayResume(ctx, sub.filter, sub.opts.QoS) {
 			continue
@@ -314,6 +315,24 @@ func (c *conn) reauthoriseLive(ctx context.Context) {
 		if removed, ok := c.sess.removeSubscription(sub.filter); ok {
 			unsubscribeAll(removed)
 		}
+		denied = true
+	}
+	if !denied {
+		return
+	}
+
+	// The subscription is only half of what a denied filter leaves behind: the
+	// messages it already earned are still in the in-flight set, and
+	// retransmission would hand them to this connection at CONNACK time
+	// [MQTT-4.4.0-1].
+	surviving := c.sess.subscriptions()
+	filters := make([]string, 0, len(surviving))
+	for _, sub := range surviving {
+		filters = append(filters, sub.filter)
+	}
+	if taken := c.sess.withdrawInflight(filters); len(taken) > 0 {
+		c.logger.Warn("withdrawing unacknowledged messages this connection may not receive",
+			"client_id", c.sess.clientID, "packet_ids", taken)
 	}
 }
 

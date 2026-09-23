@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/taumatix/natsmqtt5"
+	"github.com/taumatix/natsmqtt5/packet"
 )
 
 // A session is keyed by its Client Identifier alone, so whoever the
@@ -84,4 +85,79 @@ func TestInMemorySessionKeepsSubscriptionsThatAreStillPermitted(t *testing.T) {
 	pub, _ := connectClient(t, addr, connectOpts("pub"))
 	pub.publish(&paho.Publish{Topic: "secret/a", QoS: 1, Payload: []byte("still mine")})
 	assert.Equal(t, "still mine", second.expectMessage().Payload)
+}
+
+// Retransmission on resume hands the previous connection's undelivered payloads
+// over at CONNACK time, before the client has sent anything. A payload on a
+// filter this connection may no longer have must not be among them — and one on
+// a filter it still has must.
+func TestWithdrawnFilterTakesItsUnacknowledgedMessagesWithIt(t *testing.T) {
+	var deny atomic.Bool
+	addr := startBroker(t, startNATS(t), narrowingAuthorizer(&deny))
+
+	raw := dialRaw(t, addr)
+	require.False(t, raw.connect(rawConnect("withdrawn-q1", 300)).SessionPresent)
+	raw.subscribe("secret/#", packet.QoS1)
+	raw.subscribe("public/#", packet.QoS1)
+
+	pub, _ := connectClient(t, addr, connectOpts("pub"))
+	pub.publish(&paho.Publish{Topic: "secret/a", QoS: 1, Payload: []byte("classified")})
+	pub.publish(&paho.Publish{Topic: "public/a", QoS: 1, Payload: []byte("fine")})
+
+	// Received and deliberately left unacknowledged, in the order they were
+	// sent — which is the order a resend has to use [MQTT-4.6.0-5], so a broker
+	// that resent the withdrawn one would be caught by the first read below.
+	classified := raw.expectPublish()
+	require.Equal(t, "secret/a", classified.Topic)
+	require.Equal(t, "public/a", raw.expectPublish().Topic)
+	raw.drop()
+
+	deny.Store(true)
+
+	resumed := dialRaw(t, addr)
+	require.True(t, resumed.connect(rawConnect("withdrawn-q1", 300)).SessionPresent)
+
+	again := resumed.expectPublish()
+	assert.Equal(t, "public/a", again.Topic, "the permitted filter's arrears must still come back")
+	assert.True(t, again.Dup)
+	resumed.expectNothing()
+
+	// The client flushes the acknowledgement it still owed from the previous
+	// connection. The broker sent it that message, so answering with
+	// 0x82 Protocol Error and disconnecting would punish the client for the
+	// broker's own withdrawal.
+	resumed.send(&packet.Puback{Ack: packet.Ack{PacketID: classified.PacketID}})
+	resumed.expectNothing()
+}
+
+// The exception, and the reason the withdrawal is not simply "drop everything
+// that no longer matches": past its PUBREC the client owns the message
+// [MQTT-4.3.3-8], so what is outstanding is a PUBREL carrying no payload.
+// Withholding it would leave the client waiting for a PUBCOMP forever and its
+// Packet Identifier unusable, to prevent a disclosure that already happened.
+func TestAWithdrawnFilterStillOwesItsPubrel(t *testing.T) {
+	var deny atomic.Bool
+	addr := startBroker(t, startNATS(t), narrowingAuthorizer(&deny))
+
+	raw := dialRaw(t, addr)
+	require.False(t, raw.connect(rawConnect("withdrawn-q2", 300)).SessionPresent)
+	raw.subscribe("secret/#", packet.QoS2)
+
+	pub, _ := connectClient(t, addr, connectOpts("pub"))
+	pub.publish(&paho.Publish{Topic: "secret/a", QoS: 2, Payload: []byte("exactly once")})
+
+	first := raw.expectPublish()
+	require.Equal(t, packet.QoS2, first.QoS)
+	raw.send(&packet.Pubrec{Ack: packet.Ack{PacketID: first.PacketID}})
+	require.Equal(t, first.PacketID, raw.expectPubrel().PacketID)
+	raw.drop()
+
+	deny.Store(true)
+
+	resumed := dialRaw(t, addr)
+	require.True(t, resumed.connect(rawConnect("withdrawn-q2", 300)).SessionPresent)
+	assert.Equal(t, first.PacketID, resumed.expectPubrel().PacketID)
+
+	resumed.send(&packet.Pubcomp{Ack: packet.Ack{PacketID: first.PacketID}})
+	resumed.expectNothing()
 }

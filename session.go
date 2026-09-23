@@ -8,6 +8,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/topic"
 )
 
 // subscription is one entry in a session's subscription set. A Session cannot
@@ -100,6 +101,12 @@ type session struct {
 	// have been accepted and not yet released, so a redelivered PUBLISH is
 	// acknowledged without being forwarded twice (MQTT-5.0 §4.3.3).
 	receivedQoS2 map[uint16]struct{}
+	// withdrawn holds the Packet Identifiers of in-flight messages the broker
+	// took back rather than resent, because the filter that earned them was
+	// denied on resume. The client was sent those messages and may still owe an
+	// acknowledgement for them, so one has to be ignored rather than answered
+	// with a protocol error.
+	withdrawn map[uint16]struct{}
 
 	will          *packet.Will
 	willDelay     time.Duration
@@ -130,6 +137,7 @@ func newSession(clientID string) *session {
 		subs:         make(map[string]*subscription),
 		inflight:     make(map[uint16]*outbound),
 		receivedQoS2: make(map[uint16]struct{}),
+		withdrawn:    make(map[uint16]struct{}),
 	}
 }
 
@@ -311,6 +319,55 @@ func (s *session) inflightEntry(id uint16) (outbound, bool) {
 		return outbound{}, false
 	}
 	return *o, true
+}
+
+// withdrawInflight takes back the unacknowledged messages whose Topic Name
+// matches none of filters, and returns the Packet Identifiers it took. It is
+// how a subscription denied on resume stops the payloads it earned from being
+// put back on the wire by the retransmission that follows.
+//
+// An entry past its PUBREC is left alone. The client took ownership of that
+// message when it sent the PUBREC [MQTT-4.3.3-8], so what is outstanding is a
+// PUBREL carrying no payload; withholding it would leave the client waiting for
+// a PUBCOMP forever, and its Packet Identifier unusable, to prevent a
+// disclosure that has already happened.
+//
+// It runs during the handshake, where attach has just cleared every entry's
+// claim on the send quota and the delivery goroutine has not started, so no
+// entry it removes is holding a slot that would have to be returned.
+func (s *session) withdrawInflight(filters []string) []uint16 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var taken []uint16
+	for id, o := range s.inflight {
+		if o.awaitingPubcomp || matchesAny(filters, o.publish.Topic) {
+			continue
+		}
+		delete(s.inflight, id)
+		s.withdrawn[id] = struct{}{}
+		taken = append(taken, id)
+	}
+	return taken
+}
+
+// forgetWithdrawn reports whether id names a message the broker took back, and
+// forgets it if so. The acknowledgement that asks is the last one owed for it.
+func (s *session) forgetWithdrawn(id uint16) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.withdrawn[id]
+	delete(s.withdrawn, id)
+	return ok
+}
+
+func matchesAny(filters []string, name string) bool {
+	for _, f := range filters {
+		if topic.Match(f, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // markQoS2Received records a QoS 2 Packet Identifier and reports whether it
