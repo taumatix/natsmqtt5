@@ -199,3 +199,15 @@ func Match(filter, name string) bool {
 	}
 	return len(f) == len(n)
 }
+
+// MatchAny reports whether any of the filters matches the Topic Name. An empty
+// filter set matches nothing, which is the answer a session with no
+// subscriptions left should give.
+func MatchAny(filters []string, name string) bool {
+	for _, f := range filters {
+		if Match(f, name) {
+			return true
+		}
+	}
+	return false
+}

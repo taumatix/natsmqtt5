@@ -8,6 +8,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/topic"
 )
 
 // subscription is one entry in a session's subscription set. A Session cannot
@@ -100,6 +101,12 @@ type session struct {
 	// have been accepted and not yet released, so a redelivered PUBLISH is
 	// acknowledged without being forwarded twice (MQTT-5.0 §4.3.3).
 	receivedQoS2 map[uint16]struct{}
+	// withdrawn holds the Packet Identifiers of in-flight messages the broker
+	// took back rather than resent, because the filter that earned them was
+	// denied on resume. The client was sent those messages and may still owe an
+	// acknowledgement for them, so one has to be ignored rather than answered
+	// with a protocol error.
+	withdrawn map[uint16]struct{}
 
 	will          *packet.Will
 	willDelay     time.Duration
@@ -130,6 +137,7 @@ func newSession(clientID string) *session {
 		subs:         make(map[string]*subscription),
 		inflight:     make(map[uint16]*outbound),
 		receivedQoS2: make(map[uint16]struct{}),
+		withdrawn:    make(map[uint16]struct{}),
 	}
 }
 
@@ -217,6 +225,11 @@ func unsubscribeAll(sub *subscription) {
 // nextID allocates a Packet Identifier that is not currently in flight. It
 // returns false when all 65535 identifiers are in use, which the caller turns
 // into back-pressure rather than a protocol error.
+//
+// A withdrawn identifier counts as in use. The client was sent that message and
+// still owes an acknowledgement for it, so handing the identifier to a new
+// message would let that acknowledgement complete the new one — which is then
+// silently never resent.
 func (s *session) nextID() (uint16, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -225,7 +238,9 @@ func (s *session) nextID() (uint16, bool) {
 		if s.nextPacketID == 0 {
 			s.nextPacketID = 1
 		}
-		if _, busy := s.inflight[s.nextPacketID]; !busy {
+		_, busy := s.inflight[s.nextPacketID]
+		_, owed := s.withdrawn[s.nextPacketID]
+		if !busy && !owed {
 			return s.nextPacketID, true
 		}
 	}
@@ -313,6 +328,56 @@ func (s *session) inflightEntry(id uint16) (outbound, bool) {
 	return *o, true
 }
 
+// withdrawInflight takes back the unacknowledged messages a denied filter
+// earned, and returns the Packet Identifiers it took. It is how a subscription
+// denied on resume stops the payloads it earned from being put back on the wire
+// by the retransmission that follows.
+//
+// An entry has to match a denied filter and no surviving one. "Matches no
+// surviving filter" alone is not the same test and would take back messages the
+// broker MUST resend [MQTT-4.4.0-1]: handleUnsubscribe deliberately leaves the
+// in-flight set alone, so a message earned by a filter the client has since
+// unsubscribed from matches nothing live and is still owed.
+//
+// An entry past its PUBREC is left alone. The client took ownership of that
+// message when it sent the PUBREC [MQTT-4.3.3-8], so what is outstanding is a
+// PUBREL carrying no payload; withholding it would leave the client waiting for
+// a PUBCOMP forever, and its Packet Identifier unusable, to prevent a
+// disclosure that has already happened.
+//
+// It runs during the handshake, where attach has just cleared every entry's
+// claim on the send quota and the delivery goroutine has not started, so no
+// entry it removes is holding a slot that would have to be returned.
+func (s *session) withdrawInflight(denied, surviving []string) []uint16 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var taken []uint16
+	for id, o := range s.inflight {
+		if o.awaitingPubcomp {
+			continue
+		}
+		name := o.publish.Topic
+		if !topic.MatchAny(denied, name) || topic.MatchAny(surviving, name) {
+			continue
+		}
+		delete(s.inflight, id)
+		s.withdrawn[id] = struct{}{}
+		taken = append(taken, id)
+	}
+	return taken
+}
+
+// forgetWithdrawn reports whether id names a message the broker took back, and
+// forgets it if so. The acknowledgement that asks is the last one owed for it.
+func (s *session) forgetWithdrawn(id uint16) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.withdrawn[id]
+	delete(s.withdrawn, id)
+	return ok
+}
+
 // markQoS2Received records a QoS 2 Packet Identifier and reports whether it
 // was already present, i.e. whether this PUBLISH is a redelivery that must not
 // be forwarded a second time (MQTT-5.0 §4.3.3).
@@ -340,6 +405,19 @@ func (s *session) subscription(filter string) (*subscription, bool) {
 	defer s.mu.Unlock()
 	sub, ok := s.subs[filter]
 	return sub, ok
+}
+
+// subscriptions returns the session's live subscription set. The slice is the
+// caller's, so it can be walked while the set is being changed; the
+// subscriptions it points at are the live ones and must not be modified.
+func (s *session) subscriptions() []*subscription {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*subscription, 0, len(s.subs))
+	for _, sub := range s.subs {
+		out = append(out, sub)
+	}
+	return out
 }
 
 func (s *session) putSubscription(sub *subscription) {
@@ -386,6 +464,26 @@ func (s *session) hasConn() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.conn != nil
+}
+
+// setPrincipal records who the connection now serving this session
+// authenticated as. It is guarded like every other mutable field, and for a
+// sharper reason than most: a connection displaced by this one goes on decoding
+// the packets its socket had already buffered, so it can be inside
+// subscribeOne reading these two while the CONNECT that displaced it writes
+// them. An unsynchronised string assignment can be observed half-written.
+func (s *session) setPrincipal(identity, username string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.identity, s.username = identity, username
+}
+
+// principal returns the identity and User Name every authorisation decision is
+// made against.
+func (s *session) principal() (identity, username string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.identity, s.username
 }
 
 func (s *session) setExpiry(seconds uint32) {

@@ -43,9 +43,10 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 	}
 
 	if a := c.broker.opts.Authorizer; a != nil {
+		identity, username := c.sess.principal()
 		req := &AuthzRequest{
-			Action: ActionPublish, ClientID: c.sess.clientID, Identity: c.sess.identity,
-			Username: c.sess.username, Topic: topicName, QoS: p.QoS, Retain: p.Retain,
+			Action: ActionPublish, ClientID: c.sess.clientID, Identity: identity,
+			Username: username, Topic: topicName, QoS: p.QoS, Retain: p.Retain,
 		}
 		if err := a.Authorize(ctx, req); err != nil {
 			c.logger.Debug("publish denied", "topic", topicName, "error", err)
@@ -149,6 +150,9 @@ func (c *conn) rejectPublish(p *packet.Publish, code packet.ReasonCode, reason s
 func (c *conn) handlePuback(p *packet.Puback) error {
 	o, ok := c.sess.completeInflight(p.Ack.PacketID)
 	if !ok {
+		if c.sess.forgetWithdrawn(p.Ack.PacketID) {
+			return nil
+		}
 		c.sendDisconnect(packet.ProtocolError,
 			fmt.Sprintf("PUBACK for unknown Packet Identifier %d", p.Ack.PacketID))
 		return fmt.Errorf("PUBACK for unknown packet id %d", p.Ack.PacketID)
@@ -211,6 +215,12 @@ func (c *conn) handlePubrel(p *packet.Pubrel) error {
 func (c *conn) handlePubcomp(p *packet.Pubcomp) error {
 	o, ok := c.sess.completeInflight(p.Ack.PacketID)
 	if !ok {
+		// A withdrawn QoS 2 exchange reaches here by way of handlePubrec, which
+		// answers an identifier it no longer holds with 0x92 and leaves the
+		// client owing the PUBCOMP that closes it (MQTT-5.0 §3.6.2.1).
+		if c.sess.forgetWithdrawn(p.Ack.PacketID) {
+			return nil
+		}
 		c.sendDisconnect(packet.ProtocolError,
 			fmt.Sprintf("PUBCOMP for unknown Packet Identifier %d", p.Ack.PacketID))
 		return fmt.Errorf("PUBCOMP for unknown packet id %d", p.Ack.PacketID)

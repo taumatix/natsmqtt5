@@ -188,7 +188,7 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 		c.claimGen = sess.bindRecord(rec, rev)
 	}
 
-	sess.identity, sess.username = identity, username
+	sess.setPrincipal(identity, username)
 	sess.setExpiry(c.sessionExpiry(props))
 
 	if prev := sess.attach(c); prev != nil && prev != c {
@@ -242,17 +242,30 @@ func (c *conn) checkClientID(clientID string) error {
 //
 // stored is empty when the session came from this broker's memory, in which
 // case its NATS subscriptions were never torn down and there is nothing to
-// rebuild — only the durable record to bring back in line with what this broker
-// actually holds.
+// rebuild — only the Authorizer to re-run over the live set, and the durable
+// record to bring back in line with what this broker actually holds. It is also
+// empty for a durable record that holds no subscriptions, which reaches the
+// same branch and finds nothing to walk.
+//
+// Only the in-memory branch withdraws in-flight messages, and that is safe
+// because a non-empty stored implies negotiate found no session in memory: the
+// session it is working on was built by newSession moments earlier and its
+// in-flight set is empty. A future change that reconciles a record against a
+// live session breaks that, and has to withdraw on both branches.
 func (c *conn) resumeSubscriptions(ctx context.Context, stored []storedSubscription) error {
 	if len(stored) == 0 {
+		// Order matters: the reduced set is what gets written, so a filter this
+		// connection may not have stops being carried forward. Reversing these
+		// leaves the denied filter in the record, where the next broker to
+		// claim the session restores it.
+		c.reauthoriseLive(ctx)
 		c.broker.persistSession(c)
 		return nil
 	}
 
 	dropped := false
 	for _, st := range stored {
-		if !c.mayResume(ctx, st) {
+		if !c.mayResume(ctx, st.Filter, st.Opts.QoS) {
 			dropped = true
 			continue
 		}
@@ -285,33 +298,118 @@ func (c *conn) resumeSubscriptions(ctx context.Context, stored []storedSubscript
 	return nil
 }
 
-// mayResume re-runs the Authorizer over a stored subscription.
+// reauthoriseLive re-runs the Authorizer over the subscriptions a session
+// resumed from this broker's memory already holds, and tears down the ones this
+// connection may not have.
 //
-// A session is identified by its Client Identifier alone, and a stored one can
-// be claimed by any connection the Authenticator lets use that identifier —
-// across brokers and across restarts, not merely within one broker's memory.
-// Restoring a filter unchecked would let a narrowed permission be outlived by
-// the subscription it was meant to remove.
+// The stored branch gets this for free by rebuilding each filter; the in-memory
+// branch does not, because nothing was ever torn down. Without it a permission
+// narrowed between two connections would not take effect until the session
+// expired: the NATS subscriptions go on delivering into whatever connection the
+// session is attached to, and this is the connection they would deliver into.
+//
+// It runs during the handshake, before the CONNACK and before the delivery
+// goroutine starts, so a denied filter stops delivering ahead of the client
+// being told its session is present. One window is left open and is not closed
+// here: sess.attach has already pointed the session's NATS handlers at this
+// connection, so a message that reached the NATS client before the unsubscribe
+// took effect is already in c.deliveries. dropQueued empties those.
+func (c *conn) reauthoriseLive(ctx context.Context) {
+	if c.broker.opts.Authorizer == nil {
+		// Checked here as well as in mayResume, to skip the subscriptions
+		// snapshot on the path every broker without an Authorizer takes.
+		return
+	}
+
+	// Both sets are collected in one pass. Reading the session twice would let
+	// a SUBSCRIBE from the connection this CONNECT displaced — which goes on
+	// decoding the packets its socket had already buffered, see retransmit.go —
+	// land between the two, and a filter that appeared only in the second read
+	// would count as surviving without ever having been put past the Authorizer.
+	var denied, surviving []string
+	for _, sub := range c.sess.subscriptions() {
+		if c.mayResume(ctx, sub.filter, sub.opts.QoS) {
+			surviving = append(surviving, sub.filter)
+			continue
+		}
+		denied = append(denied, sub.filter)
+		// The same two steps handleUnsubscribe takes, in the same order.
+		// Neither order closes the delivery window on its own: a message is
+		// delivered against the *subscription and never against the session's
+		// map, so removing first does not stop a delivery and unsubscribing
+		// first does not stop one already in the NATS client's hands. That is
+		// what dropQueued below is for.
+		if removed, ok := c.sess.removeSubscription(sub.filter); ok {
+			unsubscribeAll(removed)
+		}
+	}
+	if len(denied) == 0 {
+		return
+	}
+
+	c.dropQueued(surviving)
+
+	// The subscription is only half of what a denied filter leaves behind: the
+	// messages it already earned are still in the in-flight set, and
+	// retransmission would hand them to this connection at CONNACK time
+	// [MQTT-4.4.0-1].
+	if taken := c.sess.withdrawInflight(denied, surviving); len(taken) > 0 {
+		c.logger.Warn("withdrawing unacknowledged messages this connection may not receive",
+			"client_id", c.sess.clientID, "packet_ids", taken)
+	}
+}
+
+// dropQueued discards the deliveries already queued for this connection that no
+// surviving filter matches.
+//
+// The queue is this connection's own and nothing is reading it yet —
+// deliverLoop starts after the handshake returns — so draining and refilling it
+// keeps the order the survivors arrived in. A message enqueued by a NATS
+// dispatcher that was already inside onNATSMessage when the unsubscribe landed
+// can still slip in behind them; that window is one message wide and closing it
+// means checking every delivery against the session on the hot path.
+func (c *conn) dropQueued(surviving []string) {
+	for queued := len(c.deliveries); queued > 0; queued-- {
+		select {
+		case d := <-c.deliveries:
+			if topic.MatchAny(surviving, d.topic) {
+				c.deliveries <- d
+			}
+		default:
+			return
+		}
+	}
+}
+
+// mayResume re-runs the Authorizer over one filter of a resumed session.
+//
+// A session is identified by its Client Identifier alone, and it can be claimed
+// by any connection the Authenticator lets use that identifier — across
+// brokers and across restarts, and equally within one broker's memory. Resuming
+// a filter unchecked would let a narrowed permission be outlived by the
+// subscription it was meant to remove.
 //
 // A denied filter is dropped rather than refused, because a CONNACK has no
 // per-filter Reason Code to carry the refusal. The client is free to subscribe
 // again, and will get an honest 0x87 in the SUBACK when it does.
-func (c *conn) mayResume(ctx context.Context, st storedSubscription) bool {
+func (c *conn) mayResume(ctx context.Context, filter string, qos packet.QoS) bool {
 	a := c.broker.opts.Authorizer
 	if a == nil {
 		return true
 	}
+	identity, username := c.sess.principal()
 	err := a.Authorize(ctx, &AuthzRequest{
 		Action:   ActionSubscribe,
+		Resume:   true,
 		ClientID: c.sess.clientID,
-		Identity: c.sess.identity,
-		Username: c.sess.username,
-		Topic:    st.Filter,
-		QoS:      st.Opts.QoS,
+		Identity: identity,
+		Username: username,
+		Topic:    filter,
+		QoS:      qos,
 	})
 	if err != nil {
-		c.logger.Warn("dropping a stored subscription this connection may not have",
-			"client_id", c.sess.clientID, "filter", st.Filter, "error", err)
+		c.logger.Warn("dropping a subscription this connection may not resume",
+			"client_id", c.sess.clientID, "filter", filter, "error", err)
 		return false
 	}
 	return true
