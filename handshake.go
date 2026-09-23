@@ -242,17 +242,18 @@ func (c *conn) checkClientID(clientID string) error {
 //
 // stored is empty when the session came from this broker's memory, in which
 // case its NATS subscriptions were never torn down and there is nothing to
-// rebuild — only the durable record to bring back in line with what this broker
-// actually holds.
+// rebuild — only the Authorizer to re-run over the live set, and the durable
+// record to bring back in line with what this broker actually holds.
 func (c *conn) resumeSubscriptions(ctx context.Context, stored []storedSubscription) error {
 	if len(stored) == 0 {
+		c.reauthoriseLive(ctx)
 		c.broker.persistSession(c)
 		return nil
 	}
 
 	dropped := false
 	for _, st := range stored {
-		if !c.mayResume(ctx, st) {
+		if !c.mayResume(ctx, st.Filter, st.Opts.QoS) {
 			dropped = true
 			continue
 		}
@@ -285,18 +286,49 @@ func (c *conn) resumeSubscriptions(ctx context.Context, stored []storedSubscript
 	return nil
 }
 
-// mayResume re-runs the Authorizer over a stored subscription.
+// reauthoriseLive re-runs the Authorizer over the subscriptions a session
+// resumed from this broker's memory already holds, and tears down the ones this
+// connection may not have.
 //
-// A session is identified by its Client Identifier alone, and a stored one can
-// be claimed by any connection the Authenticator lets use that identifier —
-// across brokers and across restarts, not merely within one broker's memory.
-// Restoring a filter unchecked would let a narrowed permission be outlived by
-// the subscription it was meant to remove.
+// The stored branch gets this for free by rebuilding each filter; the in-memory
+// branch does not, because nothing was ever torn down. Without it a permission
+// narrowed between two connections would not take effect until the session
+// expired: the NATS subscriptions go on delivering into whatever connection the
+// session is attached to, and this is the connection they would deliver into.
+//
+// It runs during the handshake, before the CONNACK and before the delivery
+// goroutine starts, so a denied filter stops delivering before the client is
+// told its session is present.
+func (c *conn) reauthoriseLive(ctx context.Context) {
+	if c.broker.opts.Authorizer == nil {
+		return
+	}
+	for _, sub := range c.sess.subscriptions() {
+		if c.mayResume(ctx, sub.filter, sub.opts.QoS) {
+			continue
+		}
+		// Remove before unsubscribing, in the order handleUnsubscribe uses: a
+		// message already in the NATS client's hands is delivered against the
+		// subscription, not against the session's map, so the reverse order
+		// would leave a window with neither guard in place.
+		if removed, ok := c.sess.removeSubscription(sub.filter); ok {
+			unsubscribeAll(removed)
+		}
+	}
+}
+
+// mayResume re-runs the Authorizer over one filter of a resumed session.
+//
+// A session is identified by its Client Identifier alone, and it can be claimed
+// by any connection the Authenticator lets use that identifier — across
+// brokers and across restarts, and equally within one broker's memory. Resuming
+// a filter unchecked would let a narrowed permission be outlived by the
+// subscription it was meant to remove.
 //
 // A denied filter is dropped rather than refused, because a CONNACK has no
 // per-filter Reason Code to carry the refusal. The client is free to subscribe
 // again, and will get an honest 0x87 in the SUBACK when it does.
-func (c *conn) mayResume(ctx context.Context, st storedSubscription) bool {
+func (c *conn) mayResume(ctx context.Context, filter string, qos packet.QoS) bool {
 	a := c.broker.opts.Authorizer
 	if a == nil {
 		return true
@@ -306,12 +338,12 @@ func (c *conn) mayResume(ctx context.Context, st storedSubscription) bool {
 		ClientID: c.sess.clientID,
 		Identity: c.sess.identity,
 		Username: c.sess.username,
-		Topic:    st.Filter,
-		QoS:      st.Opts.QoS,
+		Topic:    filter,
+		QoS:      qos,
 	})
 	if err != nil {
-		c.logger.Warn("dropping a stored subscription this connection may not have",
-			"client_id", c.sess.clientID, "filter", st.Filter, "error", err)
+		c.logger.Warn("dropping a subscription this connection may not resume",
+			"client_id", c.sess.clientID, "filter", filter, "error", err)
 		return false
 	}
 	return true

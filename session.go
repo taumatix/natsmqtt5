@@ -342,6 +342,19 @@ func (s *session) subscription(filter string) (*subscription, bool) {
 	return sub, ok
 }
 
+// subscriptions returns the session's live subscription set. The slice is the
+// caller's, so it can be walked while the set is being changed; the
+// subscriptions it points at are the live ones and must not be modified.
+func (s *session) subscriptions() []*subscription {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*subscription, 0, len(s.subs))
+	for _, sub := range s.subs {
+		out = append(out, sub)
+	}
+	return out
+}
+
 func (s *session) putSubscription(sub *subscription) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
