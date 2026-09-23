@@ -17,7 +17,7 @@ controls. This file says which versions it was built and checked against.
   kind: github-release
   repo: nats-io/nats-server
   tag: v2.14.5
-  checked: 2026-09-21
+  checked: 2026-09-23
   hold: "issue #11 — v2.15.0 needs Go 1.26, this module's floor is 1.25, dependency is test-only"
   note: held deliberately; the gap is still reported, it just does not raise the alarm
 
@@ -25,7 +25,7 @@ controls. This file says which versions it was built and checked against.
   kind: github-release
   repo: nats-io/nats.go
   tag: v1.53.1
-  checked: 2026-09-21
+  checked: 2026-09-23
   hold: >-
     issue #11 — v1.54.0 declares go 1.26.0, and taking it rewrites this module's
     directive from 1.25.0 to 1.26.0 (probed, not assumed). Unlike nats-server this
@@ -40,7 +40,7 @@ controls. This file says which versions it was built and checked against.
   kind: github-release
   repo: eclipse-paho/paho.golang
   tag: v0.23.0
-  checked: 2026-09-21
+  checked: 2026-09-23
   note: the third-party MQTT client the end-to-end tests drive the broker with
 ```
 
@@ -105,7 +105,11 @@ warning, not a build failure.
 ## How this file is kept honest
 
 `checked` is bumped on every maintenance pass whether or not anything moved — an unrefreshed
-date cannot be told apart from an unchecked one. Drift is reported by:
+date cannot be told apart from an unchecked one, and it moves only as far as that pass actually
+verified. The three `github-release` pins read 2026-09-23 because the drift checker queried them
+that day; `mqtt-specification` still reads 2026-09-21 because nobody has re-opened the OASIS
+document since, and a date copied across from its neighbours would be a claim rather than a check.
+Drift is reported by:
 
     /Users/taumatix/bootstrap/bin/check-upstream-drift.py <checkout>
 

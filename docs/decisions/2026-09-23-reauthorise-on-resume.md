@@ -84,7 +84,11 @@ rule from §4.8.2.
   branch, and it is why the log line names the filter and the client.
 - **A withdrawn identifier is remembered for the life of the session**, one `uint16` each, bounded
   by the 65535 identifiers that exist. The entry is deleted when the client acknowledges it, so the
-  set only grows for clients that never do.
+  set only grows for clients that never do. `nextID` treats a withdrawn identifier as in use, which
+  is what the first draft got wrong: an identifier still owed an acknowledgement, handed to a new
+  message, lets the late acknowledgement complete the wrong one. The wire tests cannot reach it —
+  identifiers are handed out in order, so a reuse is 65535 sends away — so it is pinned by
+  `TestNextIDSkipsAWithdrawnIdentifier` against the session type directly.
 - **Nothing re-authorises a session that stays connected.** A permission revoked while the client
   is online still takes effect no earlier than its next reconnect. That is unchanged by this work
   and is what the "re-authorise on delivery" alternative above would address.

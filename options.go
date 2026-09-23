@@ -294,6 +294,25 @@ type AuthResult struct {
 // Returning a nil error accepts the connection. Returning an error rejects it;
 // wrap or return a *ConnectError to choose the CONNACK Reason Code, otherwise
 // the broker answers 0x87 (Not authorized) and does not disclose the reason.
+//
+// # The Client Identifier is the session key
+//
+// A Session is identified by its Client Identifier alone (MQTT-5.0 §4.1), so
+// every connection an implementation accepts under a given identifier inherits
+// that session: its subscriptions, its unacknowledged messages and its QoS 2
+// receive state. An implementation that authenticates a principal but lets it
+// choose any ClientID therefore lets it read another principal's session.
+//
+// So an implementation must either refuse a CONNECT whose AuthRequest.ClientID
+// is not one the authenticated principal owns, or ignore it and return an
+// AuthResult.AssignClientID derived from the principal. Nothing downstream can
+// make up for this: the Authorizer decides topics, not sessions.
+//
+// The broker re-runs the Authorizer over a resumed session's Topic Filters, so
+// a permission narrowed between two connections takes effect on the second one
+// rather than when the session expires. That bounds the damage; it does not
+// replace binding the identifier, because the filters a principal is allowed
+// are usually not what distinguishes it from the session's rightful owner.
 type Authenticator interface {
 	Authenticate(ctx context.Context, req *AuthRequest) (*AuthResult, error)
 }

@@ -80,3 +80,47 @@ func TestAwaitPubcomp(t *testing.T) {
 	_, ok = s.inflightEntry(4)
 	assert.False(t, ok)
 }
+
+// withdrawInflight takes back the entries no surviving filter matches, and
+// leaves alone both the ones that still match and the ones the client already
+// owns.
+func TestWithdrawInflight(t *testing.T) {
+	s := newSession("withdraw")
+	s.trackInflight(&outbound{packetID: 1, qos: packet.QoS1, publish: &packet.Publish{Topic: "secret/a"}})
+	s.trackInflight(&outbound{packetID: 2, qos: packet.QoS1, publish: &packet.Publish{Topic: "public/a"}})
+	s.trackInflight(&outbound{
+		packetID: 3, qos: packet.QoS2, awaitingPubcomp: true,
+		publish: &packet.Publish{Topic: "secret/b"},
+	})
+
+	assert.Equal(t, []uint16{1}, s.withdrawInflight([]string{"public/#"}))
+
+	_, ok := s.inflightEntry(1)
+	assert.False(t, ok, "the unmatched entry must be gone")
+	_, ok = s.inflightEntry(2)
+	assert.True(t, ok, "a matched entry must be left alone")
+	_, ok = s.inflightEntry(3)
+	assert.True(t, ok, "an entry past its PUBREC owes a PUBREL, which carries no payload")
+
+	assert.True(t, s.forgetWithdrawn(1), "a late acknowledgement for 1 must be recognised")
+	assert.False(t, s.forgetWithdrawn(1), "and recognised only once")
+	assert.False(t, s.forgetWithdrawn(2))
+}
+
+// A withdrawn Packet Identifier is still owed an acknowledgement, so it must
+// not be handed to a new message. Reallocating it would let the late
+// acknowledgement for the withdrawn message complete the new one, which is then
+// silently never resent.
+//
+// The wire tests cannot reach this: nextID hands out 1..65535 in order, so a
+// reused identifier is 65535 sends away.
+func TestNextIDSkipsAWithdrawnIdentifier(t *testing.T) {
+	s := newSession("reuse")
+	s.trackInflight(&outbound{packetID: 7, qos: packet.QoS1, publish: &packet.Publish{Topic: "secret/a"}})
+	require.Equal(t, []uint16{7}, s.withdrawInflight(nil))
+
+	s.nextPacketID = 6
+	id, ok := s.nextID()
+	require.True(t, ok)
+	assert.Equal(t, uint16(8), id, "7 is still owed an acknowledgement")
+}

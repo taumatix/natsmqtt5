@@ -147,6 +147,11 @@ opts := natsmqtt5.Options{
 				// Choose the CONNACK Reason Code the client sees.
 				return nil, &natsmqtt5.ConnectError{Code: packet.BadUserNameOrPassword}
 			}
+			// A Session is keyed by its Client Identifier alone, so an
+			// authenticated user must not be free to choose any.
+			if !strings.HasPrefix(req.ClientID, req.Username+"/") {
+				return nil, &natsmqtt5.ConnectError{Code: packet.ClientIdentifierNotValid}
+			}
 			return &natsmqtt5.AuthResult{Identity: req.Username}, nil
 		}),
 
@@ -162,6 +167,15 @@ opts := natsmqtt5.Options{
 
 `AuthRequest` carries the TLS `ConnectionState`, so client-certificate
 authentication is a few lines.
+
+The Client Identifier check above is not decoration. A Session is identified by
+its Client Identifier alone (MQTT-5.0 §4.1), so an `Authenticator` that verifies
+a principal but accepts any identifier lets that principal inherit another's
+session — its subscriptions, its unacknowledged messages and its QoS 2 receive
+state. Bind the identifier to the principal, or assign one with
+`AuthResult.AssignClientID`. The broker re-runs the `Authorizer` over a resumed
+session's filters, so a permission narrowed between two connections takes effect
+on the second one; that bounds the damage rather than removing the need.
 
 ## How MQTT maps onto NATS
 

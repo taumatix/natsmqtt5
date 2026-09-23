@@ -41,6 +41,13 @@ func Example_authentication() {
 				if want, ok := passwords[req.Username]; !ok || want != string(req.Password) {
 					return nil, &natsmqtt5.ConnectError{Code: packet.BadUserNameOrPassword}
 				}
+				// A Session is keyed by its Client Identifier alone, so an
+				// authenticated user must not be free to choose any: without
+				// this, alice connecting as "bob-sensor" inherits bob's
+				// session and everything it is subscribed to.
+				if !strings.HasPrefix(req.ClientID, req.Username+"/") {
+					return nil, &natsmqtt5.ConnectError{Code: packet.ClientIdentifierNotValid}
+				}
 				return &natsmqtt5.AuthResult{Identity: req.Username}, nil
 			}),
 

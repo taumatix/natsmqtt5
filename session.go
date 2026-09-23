@@ -225,6 +225,11 @@ func unsubscribeAll(sub *subscription) {
 // nextID allocates a Packet Identifier that is not currently in flight. It
 // returns false when all 65535 identifiers are in use, which the caller turns
 // into back-pressure rather than a protocol error.
+//
+// A withdrawn identifier counts as in use. The client was sent that message and
+// still owes an acknowledgement for it, so handing the identifier to a new
+// message would let that acknowledgement complete the new one — which is then
+// silently never resent.
 func (s *session) nextID() (uint16, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -233,7 +238,8 @@ func (s *session) nextID() (uint16, bool) {
 		if s.nextPacketID == 0 {
 			s.nextPacketID = 1
 		}
-		if _, busy := s.inflight[s.nextPacketID]; !busy {
+		_, busy := s.inflight[s.nextPacketID]
+		if _, owed := s.withdrawn[s.nextPacketID]; !busy && !owed {
 			return s.nextPacketID, true
 		}
 	}
