@@ -361,6 +361,17 @@ func (a Action) String() string {
 // AuthzRequest describes an operation for an Authorizer.
 type AuthzRequest struct {
 	Action Action
+	// Resume distinguishes a filter being re-checked because a session is
+	// being resumed from one the client has just asked for in a SUBSCRIBE. It
+	// is only ever set with ActionSubscribe.
+	//
+	// The two are otherwise identical, and an implementation that audit-logs,
+	// meters or rate-limits subscriptions needs to tell them apart: the client
+	// performed no action, and the same filters come back on every reconnect.
+	// It is also the cheap way out of the latency this check adds to a CONNACK
+	// — an implementation may answer a resume from a cache it would not trust
+	// for a fresh SUBSCRIBE.
+	Resume bool
 	// ClientID is the session's Client Identifier, after any assignment.
 	ClientID string
 	// Identity is the AuthResult.Identity from authentication, if any.
@@ -381,7 +392,30 @@ type AuthzRequest struct {
 //
 // A denied publish is answered with 0x87 (Not authorized) in the PUBACK or
 // PUBREC, or dropped silently at QoS 0, as MQTT-5.0 §3.3.4 requires. A denied
-// subscription is answered with 0x87 in the SUBACK for that filter.
+// SUBSCRIBE is answered with 0x87 in the SUBACK for that filter.
+//
+// # It is also called while a session is being resumed
+//
+// A session is keyed by its Client Identifier alone, so the broker puts every
+// filter of a resumed session back past the Authorizer before answering the
+// CONNECT — once per live filter, with AuthzRequest.Resume set. That is what
+// makes a permission narrowed between two connections take effect on the
+// second one rather than when the session expires.
+//
+// Two consequences an implementation has to plan for:
+//
+// A slow Authorizer delays the CONNACK in proportion to how many filters the
+// session holds. The ctx carries no deadline of the broker's making.
+//
+// A denial there is silent and it is final. There is no per-filter Reason Code
+// in a CONNACK, so the filter is torn down, logged at warn level, and the
+// client is told SessionPresent: true with no indication that anything is
+// missing. With Options.PersistentSessions the reduced set is written straight
+// back to the durable record. An error returned because the policy store could
+// not be reached is therefore indistinguishable from a decision to deny, and
+// costs the client its subscription permanently — an implementation that cannot
+// decide should say so by failing the connection from the Authenticator, not by
+// returning an error from here.
 type Authorizer interface {
 	Authorize(ctx context.Context, req *AuthzRequest) error
 }

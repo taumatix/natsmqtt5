@@ -188,7 +188,7 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 		c.claimGen = sess.bindRecord(rec, rev)
 	}
 
-	sess.identity, sess.username = identity, username
+	sess.setPrincipal(identity, username)
 	sess.setExpiry(c.sessionExpiry(props))
 
 	if prev := sess.attach(c); prev != nil && prev != c {
@@ -243,9 +243,21 @@ func (c *conn) checkClientID(clientID string) error {
 // stored is empty when the session came from this broker's memory, in which
 // case its NATS subscriptions were never torn down and there is nothing to
 // rebuild — only the Authorizer to re-run over the live set, and the durable
-// record to bring back in line with what this broker actually holds.
+// record to bring back in line with what this broker actually holds. It is also
+// empty for a durable record that holds no subscriptions, which reaches the
+// same branch and finds nothing to walk.
+//
+// Only the in-memory branch withdraws in-flight messages, and that is safe
+// because a non-empty stored implies negotiate found no session in memory: the
+// session it is working on was built by newSession moments earlier and its
+// in-flight set is empty. A future change that reconciles a record against a
+// live session breaks that, and has to withdraw on both branches.
 func (c *conn) resumeSubscriptions(ctx context.Context, stored []storedSubscription) error {
 	if len(stored) == 0 {
+		// Order matters: the reduced set is what gets written, so a filter this
+		// connection may not have stops being carried forward. Reversing these
+		// leaves the denied filter in the record, where the next broker to
+		// claim the session restores it.
 		c.reauthoriseLive(ctx)
 		c.broker.persistSession(c)
 		return nil
@@ -297,42 +309,75 @@ func (c *conn) resumeSubscriptions(ctx context.Context, stored []storedSubscript
 // session is attached to, and this is the connection they would deliver into.
 //
 // It runs during the handshake, before the CONNACK and before the delivery
-// goroutine starts, so a denied filter stops delivering before the client is
-// told its session is present.
+// goroutine starts, so a denied filter stops delivering ahead of the client
+// being told its session is present. One window is left open and is not closed
+// here: sess.attach has already pointed the session's NATS handlers at this
+// connection, so a message that reached the NATS client before the unsubscribe
+// took effect is already in c.deliveries. dropQueued empties those.
 func (c *conn) reauthoriseLive(ctx context.Context) {
 	if c.broker.opts.Authorizer == nil {
+		// Checked here as well as in mayResume, to skip the subscriptions
+		// snapshot on the path every broker without an Authorizer takes.
 		return
 	}
-	denied := false
+
+	// Both sets are collected in one pass. Reading the session twice would let
+	// a SUBSCRIBE from the connection this CONNECT displaced — which goes on
+	// decoding the packets its socket had already buffered, see retransmit.go —
+	// land between the two, and a filter that appeared only in the second read
+	// would count as surviving without ever having been put past the Authorizer.
+	var denied, surviving []string
 	for _, sub := range c.sess.subscriptions() {
 		if c.mayResume(ctx, sub.filter, sub.opts.QoS) {
+			surviving = append(surviving, sub.filter)
 			continue
 		}
-		// Remove before unsubscribing, in the order handleUnsubscribe uses: a
-		// message already in the NATS client's hands is delivered against the
-		// subscription, not against the session's map, so the reverse order
-		// would leave a window with neither guard in place.
+		denied = append(denied, sub.filter)
+		// The same two steps handleUnsubscribe takes, in the same order.
+		// Neither order closes the delivery window on its own: a message is
+		// delivered against the *subscription and never against the session's
+		// map, so removing first does not stop a delivery and unsubscribing
+		// first does not stop one already in the NATS client's hands. That is
+		// what dropQueued below is for.
 		if removed, ok := c.sess.removeSubscription(sub.filter); ok {
 			unsubscribeAll(removed)
 		}
-		denied = true
 	}
-	if !denied {
+	if len(denied) == 0 {
 		return
 	}
+
+	c.dropQueued(surviving)
 
 	// The subscription is only half of what a denied filter leaves behind: the
 	// messages it already earned are still in the in-flight set, and
 	// retransmission would hand them to this connection at CONNACK time
 	// [MQTT-4.4.0-1].
-	surviving := c.sess.subscriptions()
-	filters := make([]string, 0, len(surviving))
-	for _, sub := range surviving {
-		filters = append(filters, sub.filter)
-	}
-	if taken := c.sess.withdrawInflight(filters); len(taken) > 0 {
+	if taken := c.sess.withdrawInflight(denied, surviving); len(taken) > 0 {
 		c.logger.Warn("withdrawing unacknowledged messages this connection may not receive",
 			"client_id", c.sess.clientID, "packet_ids", taken)
+	}
+}
+
+// dropQueued discards the deliveries already queued for this connection that no
+// surviving filter matches.
+//
+// The queue is this connection's own and nothing is reading it yet —
+// deliverLoop starts after the handshake returns — so draining and refilling it
+// keeps the order the survivors arrived in. A message enqueued by a NATS
+// dispatcher that was already inside onNATSMessage when the unsubscribe landed
+// can still slip in behind them; that window is one message wide and closing it
+// means checking every delivery against the session on the hot path.
+func (c *conn) dropQueued(surviving []string) {
+	for queued := len(c.deliveries); queued > 0; queued-- {
+		select {
+		case d := <-c.deliveries:
+			if topic.MatchAny(surviving, d.topic) {
+				c.deliveries <- d
+			}
+		default:
+			return
+		}
 	}
 }
 
@@ -352,11 +397,13 @@ func (c *conn) mayResume(ctx context.Context, filter string, qos packet.QoS) boo
 	if a == nil {
 		return true
 	}
+	identity, username := c.sess.principal()
 	err := a.Authorize(ctx, &AuthzRequest{
 		Action:   ActionSubscribe,
+		Resume:   true,
 		ClientID: c.sess.clientID,
-		Identity: c.sess.identity,
-		Username: c.sess.username,
+		Identity: identity,
+		Username: username,
 		Topic:    filter,
 		QoS:      qos,
 	})

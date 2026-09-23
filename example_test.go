@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nuid"
 
 	"github.com/taumatix/natsmqtt5"
 	"github.com/taumatix/natsmqtt5/packet"
@@ -45,7 +46,20 @@ func Example_authentication() {
 				// authenticated user must not be free to choose any: without
 				// this, alice connecting as "bob-sensor" inherits bob's
 				// session and everything it is subscribed to.
-				if !strings.HasPrefix(req.ClientID, req.Username+"/") {
+				//
+				// A zero-length identifier is the client asking the server to
+				// assign one [MQTT-3.1.3-6], so it is answered rather than
+				// refused.
+				if req.ClientID == "" {
+					return &natsmqtt5.AuthResult{
+						Identity:       req.Username,
+						AssignClientID: req.Username + "/" + nuid.Next(),
+					}, nil
+				}
+				// Equality on the first segment, not a prefix test: a user
+				// named "a" passes HasPrefix("a/b/sensor", "a/") and would
+				// inherit the session of the user named "a/b".
+				if owner, _, found := strings.Cut(req.ClientID, "/"); !found || owner != req.Username {
 					return nil, &natsmqtt5.ConnectError{Code: packet.ClientIdentifierNotValid}
 				}
 				return &natsmqtt5.AuthResult{Identity: req.Username}, nil

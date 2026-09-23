@@ -148,8 +148,10 @@ opts := natsmqtt5.Options{
 				return nil, &natsmqtt5.ConnectError{Code: packet.BadUserNameOrPassword}
 			}
 			// A Session is keyed by its Client Identifier alone, so an
-			// authenticated user must not be free to choose any.
-			if !strings.HasPrefix(req.ClientID, req.Username+"/") {
+			// authenticated user must not be free to choose any. Equality on
+			// the first segment, not a prefix test: user "a" passes
+			// HasPrefix("a/b/sensor", "a/") and would inherit "a/b"'s session.
+			if owner, _, found := strings.Cut(req.ClientID, "/"); !found || owner != req.Username {
 				return nil, &natsmqtt5.ConnectError{Code: packet.ClientIdentifierNotValid}
 			}
 			return &natsmqtt5.AuthResult{Identity: req.Username}, nil
@@ -172,10 +174,18 @@ The Client Identifier check above is not decoration. A Session is identified by
 its Client Identifier alone (MQTT-5.0 §4.1), so an `Authenticator` that verifies
 a principal but accepts any identifier lets that principal inherit another's
 session — its subscriptions, its unacknowledged messages and its QoS 2 receive
-state. Bind the identifier to the principal, or assign one with
-`AuthResult.AssignClientID`. The broker re-runs the `Authorizer` over a resumed
-session's filters, so a permission narrowed between two connections takes effect
-on the second one; that bounds the damage rather than removing the need.
+state. Bind the identifier to the principal, or — for a client that sends a
+zero-length identifier to have one assigned [MQTT-3.1.3-6] — derive one with
+`AuthResult.AssignClientID`, as `Example_authentication` shows.
+
+The broker re-runs the `Authorizer` over a resumed session's filters, with
+`AuthzRequest.Resume` set, so a permission narrowed between two connections
+takes effect on the second one rather than when the session expires. That bounds
+the damage; it does not remove the need to bind the identifier, and it has two
+costs worth knowing about. A slow `Authorizer` delays the CONNACK in proportion
+to the session's filter count. And a denial there is silent — there is no
+per-filter Reason Code in a CONNACK, so the filter is torn down and the client
+is still told `SessionPresent: true`.
 
 ## How MQTT maps onto NATS
 
@@ -246,6 +256,13 @@ What it costs and what it does not cover:
   or on another broker — does not, because the record carries the subscription
   set and not the in-flight set. Storing Packet Identifiers without the payloads
   to go with them would promise a resend the broker could not perform.
+- **A filter the `Authorizer` no longer permits is dropped without telling the
+  client.** Every filter of a resumed session goes back past the `Authorizer`
+  before the CONNACK, on both branches, so a permission narrowed while the
+  client was away takes effect immediately. A CONNACK has no per-filter Reason
+  Code to carry the refusal, so the dropped filters are logged and the client
+  still sees `SessionPresent: true`; it finds out by not receiving. The
+  unacknowledged messages a dropped filter earned go with it.
 - **The Will Message is not persisted.** A Will belongs to the network
   connection (MQTT-5.0 §3.1.2.5), and a broker reading a record cannot tell a
   connection that has ended from an owner that is merely busy, so publishing

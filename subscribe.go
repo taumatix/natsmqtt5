@@ -92,9 +92,10 @@ func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID
 	}
 
 	if a := c.broker.opts.Authorizer; a != nil {
+		identity, username := c.sess.principal()
 		req := &AuthzRequest{
-			Action: ActionSubscribe, ClientID: c.sess.clientID, Identity: c.sess.identity,
-			Username: c.sess.username, Topic: want.Filter, QoS: want.QoS,
+			Action: ActionSubscribe, ClientID: c.sess.clientID, Identity: identity,
+			Username: username, Topic: want.Filter, QoS: want.QoS,
 		}
 		if err := a.Authorize(ctx, req); err != nil {
 			c.logger.Debug("subscription denied", "filter", want.Filter, "error", err)

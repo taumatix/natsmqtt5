@@ -43,9 +43,10 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 	}
 
 	if a := c.broker.opts.Authorizer; a != nil {
+		identity, username := c.sess.principal()
 		req := &AuthzRequest{
-			Action: ActionPublish, ClientID: c.sess.clientID, Identity: c.sess.identity,
-			Username: c.sess.username, Topic: topicName, QoS: p.QoS, Retain: p.Retain,
+			Action: ActionPublish, ClientID: c.sess.clientID, Identity: identity,
+			Username: username, Topic: topicName, QoS: p.QoS, Retain: p.Retain,
 		}
 		if err := a.Authorize(ctx, req); err != nil {
 			c.logger.Debug("publish denied", "topic", topicName, "error", err)

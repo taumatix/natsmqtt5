@@ -81,9 +81,12 @@ func TestAwaitPubcomp(t *testing.T) {
 	assert.False(t, ok)
 }
 
-// withdrawInflight takes back the entries no surviving filter matches, and
-// leaves alone both the ones that still match and the ones the client already
-// owns.
+// withdrawInflight takes back what a denied filter earned, and only that.
+//
+// The entry on "orphan/a" is the case that makes "matches no surviving filter"
+// the wrong test: handleUnsubscribe leaves the in-flight set alone, so a
+// message earned by a filter the client has since unsubscribed from matches
+// nothing live and is still one the broker MUST resend [MQTT-4.4.0-1].
 func TestWithdrawInflight(t *testing.T) {
 	s := newSession("withdraw")
 	s.trackInflight(&outbound{packetID: 1, qos: packet.QoS1, publish: &packet.Publish{Topic: "secret/a"}})
@@ -92,19 +95,37 @@ func TestWithdrawInflight(t *testing.T) {
 		packetID: 3, qos: packet.QoS2, awaitingPubcomp: true,
 		publish: &packet.Publish{Topic: "secret/b"},
 	})
+	s.trackInflight(&outbound{packetID: 4, qos: packet.QoS1, publish: &packet.Publish{Topic: "orphan/a"}})
 
-	assert.Equal(t, []uint16{1}, s.withdrawInflight([]string{"public/#"}))
+	// ElementsMatch, not Equal: the slice is built by ranging a map, so the
+	// order is Go's and asserting it would be flaky the moment a second entry
+	// is withdrawn.
+	assert.ElementsMatch(t, []uint16{1}, s.withdrawInflight([]string{"secret/#"}, []string{"public/#"}))
 
 	_, ok := s.inflightEntry(1)
-	assert.False(t, ok, "the unmatched entry must be gone")
+	assert.False(t, ok, "the entry a denied filter earned must be gone")
 	_, ok = s.inflightEntry(2)
-	assert.True(t, ok, "a matched entry must be left alone")
+	assert.True(t, ok, "an entry a surviving filter matches must be left alone")
 	_, ok = s.inflightEntry(3)
 	assert.True(t, ok, "an entry past its PUBREC owes a PUBREL, which carries no payload")
+	_, ok = s.inflightEntry(4)
+	assert.True(t, ok, "an entry no denied filter earned is still owed [MQTT-4.4.0-1]")
 
 	assert.True(t, s.forgetWithdrawn(1), "a late acknowledgement for 1 must be recognised")
 	assert.False(t, s.forgetWithdrawn(1), "and recognised only once")
 	assert.False(t, s.forgetWithdrawn(2))
+}
+
+// A filter that survives shields the messages it matches even when a denied
+// filter matches them too — an overlapping pair is one the client is still
+// permitted to receive on.
+func TestWithdrawInflightKeepsWhatASurvivingFilterAlsoMatches(t *testing.T) {
+	s := newSession("overlap")
+	s.trackInflight(&outbound{packetID: 1, qos: packet.QoS1, publish: &packet.Publish{Topic: "a/b"}})
+
+	assert.Empty(t, s.withdrawInflight([]string{"a/#"}, []string{"a/b"}))
+	_, ok := s.inflightEntry(1)
+	assert.True(t, ok)
 }
 
 // A withdrawn Packet Identifier is still owed an acknowledgement, so it must
@@ -117,7 +138,7 @@ func TestWithdrawInflight(t *testing.T) {
 func TestNextIDSkipsAWithdrawnIdentifier(t *testing.T) {
 	s := newSession("reuse")
 	s.trackInflight(&outbound{packetID: 7, qos: packet.QoS1, publish: &packet.Publish{Topic: "secret/a"}})
-	require.Equal(t, []uint16{7}, s.withdrawInflight(nil))
+	require.ElementsMatch(t, []uint16{7}, s.withdrawInflight([]string{"secret/#"}, nil))
 
 	s.nextPacketID = 6
 	id, ok := s.nextID()

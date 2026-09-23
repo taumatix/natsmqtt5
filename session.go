@@ -239,7 +239,8 @@ func (s *session) nextID() (uint16, bool) {
 			s.nextPacketID = 1
 		}
 		_, busy := s.inflight[s.nextPacketID]
-		if _, owed := s.withdrawn[s.nextPacketID]; !busy && !owed {
+		_, owed := s.withdrawn[s.nextPacketID]
+		if !busy && !owed {
 			return s.nextPacketID, true
 		}
 	}
@@ -327,10 +328,16 @@ func (s *session) inflightEntry(id uint16) (outbound, bool) {
 	return *o, true
 }
 
-// withdrawInflight takes back the unacknowledged messages whose Topic Name
-// matches none of filters, and returns the Packet Identifiers it took. It is
-// how a subscription denied on resume stops the payloads it earned from being
-// put back on the wire by the retransmission that follows.
+// withdrawInflight takes back the unacknowledged messages a denied filter
+// earned, and returns the Packet Identifiers it took. It is how a subscription
+// denied on resume stops the payloads it earned from being put back on the wire
+// by the retransmission that follows.
+//
+// An entry has to match a denied filter and no surviving one. "Matches no
+// surviving filter" alone is not the same test and would take back messages the
+// broker MUST resend [MQTT-4.4.0-1]: handleUnsubscribe deliberately leaves the
+// in-flight set alone, so a message earned by a filter the client has since
+// unsubscribed from matches nothing live and is still owed.
 //
 // An entry past its PUBREC is left alone. The client took ownership of that
 // message when it sent the PUBREC [MQTT-4.3.3-8], so what is outstanding is a
@@ -341,13 +348,17 @@ func (s *session) inflightEntry(id uint16) (outbound, bool) {
 // It runs during the handshake, where attach has just cleared every entry's
 // claim on the send quota and the delivery goroutine has not started, so no
 // entry it removes is holding a slot that would have to be returned.
-func (s *session) withdrawInflight(filters []string) []uint16 {
+func (s *session) withdrawInflight(denied, surviving []string) []uint16 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	var taken []uint16
 	for id, o := range s.inflight {
-		if o.awaitingPubcomp || matchesAny(filters, o.publish.Topic) {
+		if o.awaitingPubcomp {
+			continue
+		}
+		name := o.publish.Topic
+		if !topic.MatchAny(denied, name) || topic.MatchAny(surviving, name) {
 			continue
 		}
 		delete(s.inflight, id)
@@ -365,15 +376,6 @@ func (s *session) forgetWithdrawn(id uint16) bool {
 	_, ok := s.withdrawn[id]
 	delete(s.withdrawn, id)
 	return ok
-}
-
-func matchesAny(filters []string, name string) bool {
-	for _, f := range filters {
-		if topic.Match(f, name) {
-			return true
-		}
-	}
-	return false
 }
 
 // markQoS2Received records a QoS 2 Packet Identifier and reports whether it
@@ -462,6 +464,26 @@ func (s *session) hasConn() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.conn != nil
+}
+
+// setPrincipal records who the connection now serving this session
+// authenticated as. It is guarded like every other mutable field, and for a
+// sharper reason than most: a connection displaced by this one goes on decoding
+// the packets its socket had already buffered, so it can be inside
+// subscribeOne reading these two while the CONNECT that displaced it writes
+// them. An unsynchronised string assignment can be observed half-written.
+func (s *session) setPrincipal(identity, username string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.identity, s.username = identity, username
+}
+
+// principal returns the identity and User Name every authorisation decision is
+// made against.
+func (s *session) principal() (identity, username string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.identity, s.username
 }
 
 func (s *session) setExpiry(seconds uint32) {

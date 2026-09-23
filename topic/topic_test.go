@@ -125,3 +125,13 @@ func TestSharedFilterSubjectDropsShareName(t *testing.T) {
 	assert.Equal(t, plain, subject,
 		"a shared subscription must map to the same subject as its unshared equivalent")
 }
+
+func TestMatchAny(t *testing.T) {
+	filters := []string{"public/#", "$share/g/shared/+"}
+
+	assert.True(t, MatchAny(filters, "public/a"))
+	assert.True(t, MatchAny(filters, "shared/a"),
+		"a shared filter matches on its {filter} part alone (MQTT-5.0 §4.8.2)")
+	assert.False(t, MatchAny(filters, "secret/a"))
+	assert.False(t, MatchAny(nil, "public/a"), "no subscriptions left means nothing matches")
+}
