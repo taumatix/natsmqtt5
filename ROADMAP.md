@@ -4,28 +4,26 @@ Ordered by how much they limit real deployments, not by how interesting they
 are to build. Each entry says what breaks today, so it can be judged on its
 own.
 
-## Re-authorising an in-memory session on resume
+## Revoking a permission from a client that is already connected
 
-**Today:** `handshake.mayResume` re-runs `Options.Authorizer` over every
-subscription it restores from the durable record, because a session is keyed by
-Client Identifier alone and whoever the Authenticator lets use that identifier
-inherits it. A session resumed from *this broker's memory* gets no such check:
-`resumeSubscriptions` takes its `len(stored) == 0` early return, and the NATS
-subscriptions that were never torn down go on delivering. So a permission
-revoked between two connections does not take effect until the session expires.
+**Today:** the Authorizer is consulted when a client subscribes, when it
+publishes, and — since `reauthoriseLive` — over every filter of a session being
+resumed, on both the in-memory and the stored branch. What it is never consulted
+about is a session that simply stays connected. A client that holds its
+connection open for a week keeps delivering on a filter its principal lost on
+day one, because nothing re-asks until the next CONNECT.
 
-**Why it is now worth more:** retransmission on resume means a resumed session
-hands over the previous connection's undelivered payloads at CONNACK time,
-before the client has sent anything. The subscription staying live was already
-the larger leak — it covers every *future* message, not just the buffered ones —
-but the two share one fix and one test.
+**Why it is not simply fixed:** the obvious answer is to re-check on delivery,
+and that puts a user-supplied call on the hot path of every message the broker
+forwards. The resume check exists precisely to avoid paying that.
 
-**Shape:** run `mayResume` over the session's live `subs` map on the in-memory
-branch too, unsubscribing the denied filters before `deliverLoop` starts, and
-drop any in-flight entry whose topic no longer matches a surviving filter.
-`Options.Authenticator` should also document that an implementation must bind
-the authenticated principal to `req.ClientID`, or assign one with
-`AssignClientID`, since the session key is the Client Identifier.
+**Shape:** an exported `Broker.Reauthorize(ctx, clientID)` running the same
+sweep `reauthoriseLive` does, against the live connection rather than a resuming
+one — so a deployment drives it from its own revocation event instead of the
+broker polling a policy store it knows nothing about. The sweep itself is
+already written; the work is making it safe against a connection that is
+delivering at the time, which the resume path gets for free by running before
+`deliverLoop` starts.
 
 ## Offline message queue: a durable consumer per session
 
@@ -78,6 +76,46 @@ decoding packets its socket had already buffered.
 an unmatched acknowledgement for one of them by ignoring it rather than by
 disconnecting. Making the read and the write atomic is the other option and the
 worse one: it means holding the session lock across a socket write.
+
+Half the mechanism now exists: `session.withdrawn` and `forgetWithdrawn` are
+exactly "an identifier the client may still acknowledge, whose acknowledgement
+is ignored", built for the filters denied on resume. What this entry needs is
+the same set populated from `conn.resend` rather than from the handshake.
+
+## The withdrawn-identifier set only empties when the client acknowledges
+
+**Today:** `session.withdrawn` holds the Packet Identifier of every in-flight
+message taken back on resume, so that a late PUBACK or PUBCOMP for one is
+ignored rather than answered with `0x82 Protocol Error`, and so that `nextID`
+does not hand the identifier to a new message. Nothing else removes an entry. A
+client that never flushes the acknowledgement it owed leaves the identifier
+spent for the life of the session — bounded by the 65535 that exist, but
+monotonic, so a long-lived session narrowed repeatedly slowly runs out.
+
+**Why it is not simply fixed:** a timer is the wrong instrument — the
+acknowledgement is owed by a client that may be offline, and MQTT puts no
+deadline on it. What is needed is evidence the client will never send it.
+
+**Shape:** forget a withdrawn identifier on the second resumption after its
+withdrawal. A client that has completed two CONNECTs without flushing the
+acknowledgement is not going to, and the count is already there in the session.
+
+## Telling a client which of its filters were dropped
+
+**Today:** a filter denied on resume is torn down silently. The CONNACK says
+`SessionPresent: true` and the client finds out by not receiving — there is no
+per-filter Reason Code in a CONNACK the way there is in a SUBACK, so the refusal
+has nowhere to go. A client written to trust Session Present has no way to know
+it must re-subscribe.
+
+**Trade-off:** CONNACK User Properties (MQTT-5.0 §3.2.2.3.10) are unconstrained
+and would carry it, but a property name this broker invents is not something a
+conforming client is required to read, so it informs a client written for this
+broker and nobody else. The alternative — refusing the whole connection — turns a
+narrowed permission into an outage and loses the filters that are still allowed.
+
+**Shape:** a User Property per dropped filter, and a line in the README saying
+it is this broker's own and not part of MQTT v5.
 
 ## Expiring a detached session that is never resumed
 
