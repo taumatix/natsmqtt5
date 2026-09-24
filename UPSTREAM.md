@@ -7,17 +7,18 @@ controls. This file says which versions it was built and checked against.
 - name: mqtt-specification
   kind: literal
   value: "MQTT Version 5.0, OASIS Standard, 2019-03-07"
-  checked: 2026-09-21
+  checked: 2026-09-24
   note: >-
     the normative reference; source clauses are cited inline as MQTT-5.0 §x.y.z.
-    Re-read at docs.oasis-open.org on 2026-09-21: still the current revision, no
-    later version and no errata published.
+    Re-read at docs.oasis-open.org on 2026-09-24: the document's own status line
+    still says "OASIS Standard, 07 March 2019", its "Latest version" link still
+    resolves to itself, and no errata document exists (3.1.1 has one; 5.0 does not).
 
 - name: nats-server
   kind: github-release
   repo: nats-io/nats-server
   tag: v2.14.5
-  checked: 2026-09-23
+  checked: 2026-09-24
   hold: "issue #11 — v2.15.0 needs Go 1.26, this module's floor is 1.25, dependency is test-only"
   note: held deliberately; the gap is still reported, it just does not raise the alarm
 
@@ -25,13 +26,15 @@ controls. This file says which versions it was built and checked against.
   kind: github-release
   repo: nats-io/nats.go
   tag: v1.53.1
-  checked: 2026-09-23
+  checked: 2026-09-24
   hold: >-
     issue #11 — v1.54.0 declares go 1.26.0, and taking it rewrites this module's
     directive from 1.25.0 to 1.26.0 (probed, not assumed). Unlike nats-server this
     one is a RUNTIME dependency, so the hold now costs users a real version — and
     since 2026-09-21 it also pins golang.org/x/crypto at v0.55.0, whose two
     x/crypto/ssh DoS advisories are fixed only in v0.56.0, which needs Go 1.26 too.
+    Re-probed 2026-09-24: taking nats.go@v1.54.0 now drags x/crypto to v0.57.0 by
+    itself, so the runtime bump and the security patch are one move, not two.
   note: >-
     the NATS client the broker is built on; in the shipped build, not just the tests.
     Added as a pin on 2026-09-21 when it hit the same Go 1.26 floor as nats-server.
@@ -40,7 +43,7 @@ controls. This file says which versions it was built and checked against.
   kind: github-release
   repo: eclipse-paho/paho.golang
   tag: v0.23.0
-  checked: 2026-09-23
+  checked: 2026-09-24
   note: the third-party MQTT client the end-to-end tests drive the broker with
 ```
 
@@ -92,6 +95,17 @@ argument, not a decision — it still belongs to issue #11.
 [g54]: https://pkg.go.dev/vuln/GO-2026-6354
 [g55]: https://pkg.go.dev/vuln/GO-2026-6355
 
+**2026-09-24: the two bumps turned out to be one bump.** Re-probed in a throwaway copy rather
+than re-read off the earlier note. `go get github.com/nats-io/nats.go@v1.54.0` now pulls
+`golang.org/x/crypto v0.55.0 => v0.57.0` along with it — so taking the runtime client forward and
+taking the `x/crypto` patch are the same action, not two separate reasons to raise the floor. The
+cost side is unchanged: every path prints `go: upgraded go 1.25.0 => 1.26.0`.
+
+Sixteen modules now have a newer version available and `go get` rewrites the directive to `1.26.0`
+for each of the ones tried. `x/crypto` itself has moved on again, to v0.57.0. Nothing here is a
+new decision — issue #11 still owns it — but the number to weigh has grown, and the toolchain this
+host builds with is Go 1.27.1, two majors past the floor.
+
 **`paho.golang` is the independent client** the end-to-end tests use. That independence is the
 point: a test that drives the broker with its own encoder proves self-consistency, not
 conformance. A third-party client that has never seen this code is the thing that can catch a
@@ -106,9 +120,9 @@ warning, not a build failure.
 
 `checked` is bumped on every maintenance pass whether or not anything moved — an unrefreshed
 date cannot be told apart from an unchecked one, and it moves only as far as that pass actually
-verified. The three `github-release` pins read 2026-09-23 because the drift checker queried them
-that day; `mqtt-specification` still reads 2026-09-21 because nobody has re-opened the OASIS
-document since, and a date copied across from its neighbours would be a claim rather than a check.
+verified. All four pins read 2026-09-24: the three `github-release` ones because the drift checker
+queried them that day, and `mqtt-specification` because the OASIS document was re-opened and its
+status line read, which is what had been missing when it lagged its neighbours by two days.
 Drift is reported by:
 
     /Users/taumatix/bootstrap/bin/check-upstream-drift.py <checkout>
