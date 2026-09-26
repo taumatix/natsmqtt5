@@ -5,13 +5,13 @@
 #	mosquitto_pub -V 5 -h localhost -p 1883 -t sensors/7/temp -m 21.5
 #
 # That pulls an image which is published but not yet public, so it fails with
-# `denied` (checked 2026-09-23). No API can change that for any caller —
+# `denied` (checked 2026-09-26). No API can change that for any caller —
 # package visibility is set in the GitHub web UI, by a human, and nowhere else.
 # Tracked in https://github.com/taumatix/natsmqtt5/issues/7. Until it is
 # resolved, build the image locally under the same tag and compose works
 # unchanged:
 #
-#	docker build -t ghcr.io/taumatix/natsmqtt5:v0.2.0 .
+#	docker build -t ghcr.io/taumatix/natsmqtt5:v0.3.0 .
 #
 # To put the broker in front of a NATS server you already run, delete the nats
 # service and set NATSMQTT5_NATS to its URL.
@@ -41,7 +41,13 @@ services:
       retries: 15
 
   natsmqtt5:
-    image: ghcr.io/taumatix/natsmqtt5:v0.2.0
+    # Pinned to a release rather than :latest, so the quickstart a reader
+    # downloads at a tag starts that tag's broker. The README hands this file out
+    # as raw.githubusercontent.com/.../<tag>/compose.yaml, so a stale pin here
+    # ships a quickstart for the previous version — and CI cannot catch it,
+    # because compose.ci.yaml overrides `image:` with the locally built
+    # natsmqtt5:ci. Bump all three occurrences when cutting a release.
+    image: ghcr.io/taumatix/natsmqtt5:v0.3.0
     environment:
       NATSMQTT5_NATS: nats://nats:4222
       NATSMQTT5_PERSISTENT_SESSIONS: ${NATSMQTT5_PERSISTENT_SESSIONS:-false}
@@ -58,7 +64,7 @@ services:
     # A second broker against the same NATS server. Started only by
     # `--profile cluster`, so the quickstart above stays one broker.
     profiles: ["cluster"]
-    image: ghcr.io/taumatix/natsmqtt5:v0.2.0
+    image: ghcr.io/taumatix/natsmqtt5:v0.3.0
     environment:
       NATSMQTT5_NATS: nats://nats:4222
       NATSMQTT5_PERSISTENT_SESSIONS: ${NATSMQTT5_PERSISTENT_SESSIONS:-false}
