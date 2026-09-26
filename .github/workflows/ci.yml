@@ -125,3 +125,61 @@ jobs:
       - name: Logs
         if: always()
         run: docker compose -f compose.yaml -f compose.ci.yaml --profile cluster logs
+
+  published-image:
+    # Drives the README's headline `docker run` against the image users actually
+    # get, pulled anonymously.
+    #
+    # The `docker` job above cannot do this and should not try: compose.ci.yaml
+    # overrides `image:` with a locally built natsmqtt5:ci so the smoke tests
+    # exercise the working tree, which is right — and means nothing ever checked
+    # that the published image is reachable. It was not, for fourteen days, with
+    # this workflow green the whole time (#7). Absence of a failing test is not
+    # presence of a passing one.
+    #
+    # Deliberately no `docker login`: authenticating would answer a different
+    # question than the one the README makes a promise about. `:latest` rather
+    # than the version compose.yaml pins, because that pin names the release
+    # being prepared and does not exist until the tag is pushed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Pull the published image with no credential
+        run: docker pull ghcr.io/taumatix/natsmqtt5:latest
+
+      - name: It is the image the README describes
+        run: |
+          set -eux
+          docker run --rm ghcr.io/taumatix/natsmqtt5:latest -version
+          # distroless/static has no shell, so this must fail. A passing `sh`
+          # would mean the base image quietly changed under the README's claim.
+          if docker run --rm --entrypoint sh ghcr.io/taumatix/natsmqtt5:latest -c 'echo reachable'; then
+            echo "a shell ran in the image; it is no longer distroless/static" >&2
+            exit 1
+          fi
+          test "$(docker inspect -f '{{.Config.User}}' ghcr.io/taumatix/natsmqtt5:latest)" = nonroot:nonroot
+
+      - name: Start NATS and the published broker
+        run: |
+          set -eux
+          docker network create natsmqtt5-published
+          docker run -d --name nats --network natsmqtt5-published nats:2-alpine -js
+          docker run -d --name broker --network natsmqtt5-published -p 1883:1883 \
+            -e NATSMQTT5_NATS=nats://nats:4222 \
+            ghcr.io/taumatix/natsmqtt5:latest
+          .github/scripts/wait-for-tcp.sh 127.0.0.1 1883 60
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+          check-latest: true
+
+      - name: Smoke test the published image
+        env:
+          NATSMQTT5_SMOKE_ADDR: 127.0.0.1:1883
+        run: .github/scripts/smoke.sh TestSmoke
+
+      - name: Logs
+        if: always()
+        run: docker logs broker; docker logs nats

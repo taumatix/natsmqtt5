@@ -11,6 +11,32 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-26
+
+Documentation only. No code changed, so upgrading from 0.3.0 changes nothing at
+runtime — this release exists because the instructions inside the `v0.3.0` tag say
+something that is no longer true, and a tag cannot be edited.
+
+### Fixed
+
+- **The container image is public**, so `docker run ghcr.io/taumatix/natsmqtt5` and
+  the `compose.yaml` quickstart work with no credential ([#7]). The README and
+  `compose.yaml` carried a warning that they would fail with `denied`; that warning
+  was correct until today and is now removed. Verified anonymously: every published
+  tag resolves for `linux/amd64` and `linux/arm64`, with a nonexistent tag returning
+  404 in the same run to prove the check discriminates.
+
+  `v0.1.0` has no image and never did — the release workflow was added after that
+  tag — so the oldest pullable version is `v0.1.1`.
+
+### Added
+
+- CI pulls the **published** image anonymously and drives the documented quickstart
+  against it. The existing compose smoke test overrides `image:` with a locally
+  built `natsmqtt5:ci`, which is right for testing the working tree and means it
+  never checked that the thing users are told to run is reachable. That gap is why
+  the image stayed unpullable for fourteen days with CI green throughout.
+
 ## [0.3.0] - 2026-09-26
 
 ### Added
@@ -93,13 +119,14 @@ honestly be reconstructed now.
   copied, and the Paho client the end-to-end tests drive it with — each with the
   date it was last checked ([#12]).
 
-### Known limitation
+### Known limitation — resolved in 0.3.1
 
-The published container image is still not public, so `docker run
-ghcr.io/taumatix/natsmqtt5:v0.3.0` fails with `denied`. The image exists and
-every release pushes it; the GitHub package's visibility is settable only by a
-human in the web UI and no API can change it. Tracked in [#7]. `go get`, `go
-install` and building from source are unaffected.
+The published container image was not public when 0.3.0 shipped, so `docker run
+ghcr.io/taumatix/natsmqtt5:v0.3.0` failed with `denied`. The image existed and every
+release pushed it; the package's visibility was settable only by a human in the web
+UI, which happened later the same day. Tracked in [#7]. `go get`, `go install` and
+building from source were never affected. **The tag still carries this warning in
+its own README, because a tag cannot be edited — that is what 0.3.1 is for.**
 
 ## [0.2.0] - 2026-09-13
 
@@ -138,7 +165,8 @@ mapping `nats-server` uses for its own MQTT support.
 [#12]: https://github.com/taumatix/natsmqtt5/pull/12
 [#13]: https://github.com/taumatix/natsmqtt5/pull/13
 [#19]: https://github.com/taumatix/natsmqtt5/pull/19
-[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/taumatix/natsmqtt5/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/taumatix/natsmqtt5/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/taumatix/natsmqtt5/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/taumatix/natsmqtt5/compare/v0.1.0...v0.1.1

@@ -57,24 +57,16 @@ MQTT v5 clients ──TCP/TLS──▶ natsmqtt5 ──▶ your existing NATS se
 
 ## Install
 
-> **The published image is not public yet, so the `docker run` below fails with
-> `denied` (checked 2026-09-26).** The image exists — every release pushes it —
-> but the GitHub package is still private, and there is no API that can change
-> that: package visibility is settable only by a human in the GitHub web UI.
-> Tracked in [#7](https://github.com/taumatix/natsmqtt5/issues/7). Until it is
-> resolved, use the `go install` instructions below, which work today. This
-> note goes away when the package does.
-
 As a container, against a NATS server you already run:
 
 ```sh
 docker run --rm -p 1883:1883 \
   -e NATSMQTT5_NATS=nats://your-nats-server:4222 \
-  ghcr.io/taumatix/natsmqtt5:v0.3.0
+  ghcr.io/taumatix/natsmqtt5:v0.3.1
 ```
 
 Images are published for `linux/amd64` and `linux/arm64` on every release, as
-`:v0.3.0`, `:0.3.0`, `:0.3` and `:latest`. They are built from
+`:v0.3.1`, `:0.3.1`, `:0.3` and `:latest`. They are built from
 [distroless/static][distroless], so there is no shell and no package manager in
 them, and the broker runs as a non-root user.
 
@@ -82,7 +74,7 @@ If you have no NATS server yet, [compose.yaml](compose.yaml) starts one with
 JetStream enabled and the broker in front of it:
 
 ```sh
-curl -O https://raw.githubusercontent.com/taumatix/natsmqtt5/v0.3.0/compose.yaml
+curl -O https://raw.githubusercontent.com/taumatix/natsmqtt5/v0.3.1/compose.yaml
 docker compose up -d
 mosquitto_pub -V 5 -h localhost -p 1883 -t sensors/7/temp -m 21.5
 ```
@@ -90,21 +82,21 @@ mosquitto_pub -V 5 -h localhost -p 1883 -t sensors/7/temp -m 21.5
 Every flag has an environment variable twin — upper-case, `-` becomes `_`,
 behind a `NATSMQTT5_` prefix — so `-subject-prefix` is
 `NATSMQTT5_SUBJECT_PREFIX`. An explicit flag beats the environment. Run
-`docker run --rm ghcr.io/taumatix/natsmqtt5:v0.3.0 -h` for the full list.
+`docker run --rm ghcr.io/taumatix/natsmqtt5:v0.3.1 -h` for the full list.
 
 [distroless]: https://github.com/GoogleContainerTools/distroless
 
 As a binary:
 
 ```sh
-go install github.com/taumatix/natsmqtt5/cmd/natsmqtt5@v0.3.0
+go install github.com/taumatix/natsmqtt5/cmd/natsmqtt5@v0.3.1
 natsmqtt5 -nats nats://localhost:4222 -listen :1883
 ```
 
 As a library:
 
 ```sh
-go get github.com/taumatix/natsmqtt5@v0.3.0
+go get github.com/taumatix/natsmqtt5@v0.3.1
 ```
 
 Requires Go 1.25 or newer, and a NATS server with JetStream enabled (or
