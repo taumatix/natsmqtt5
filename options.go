@@ -372,6 +372,16 @@ type AuthzRequest struct {
 	// — an implementation may answer a resume from a cache it would not trust
 	// for a fresh SUBSCRIBE.
 	Resume bool
+	// Will marks the Will Message of a CONNECT, asked about as an
+	// ActionPublish before the connection is accepted. It is only ever set with
+	// ActionPublish.
+	//
+	// The broker publishes a Will on the client's behalf after the client has
+	// gone, so this is the only chance to refuse it: a denial refuses the
+	// CONNECT with 0x87 (Not authorized), and the Will is not re-checked when it
+	// fires. An implementation that audit-logs publishes can use the flag to
+	// tell a Will — which may never be sent — from a PUBLISH the client made.
+	Will bool
 	// ClientID is the session's Client Identifier, after any assignment.
 	ClientID string
 	// Identity is the AuthResult.Identity from authentication, if any.
@@ -392,7 +402,9 @@ type AuthzRequest struct {
 //
 // A denied publish is answered with 0x87 (Not authorized) in the PUBACK or
 // PUBREC, or dropped silently at QoS 0, as MQTT-5.0 §3.3.4 requires. A denied
-// SUBSCRIBE is answered with 0x87 in the SUBACK for that filter.
+// SUBSCRIBE is answered with 0x87 in the SUBACK for that filter. A denied Will
+// Message, asked about with AuthzRequest.Will set, refuses the CONNECT with
+// 0x87 in the CONNACK.
 //
 // # It is also called while a session is being resumed
 //

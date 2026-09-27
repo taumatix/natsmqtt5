@@ -11,6 +11,30 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+### Security
+
+- **A Will Message now goes past the `Authorizer`.** Before this, the Will was
+  checked for QoS, RETAIN and topic syntax and then published with no
+  authorization at all, so a principal denied `ActionPublish` on a topic could
+  publish — and retain — to it by setting it as the Will and dropping its
+  connection, at a moment of its choosing via the Will Delay Interval. The Will
+  is now asked about at CONNECT as an `ActionPublish` under the connecting
+  principal, and a denial refuses the connection with `0x87 Not authorized`.
+  The check runs before the session is taken over, so a refused CONNECT does not
+  displace a live connection on the same Client Identifier.
+
+  **Check your `Authorizer` before upgrading** if your clients set Wills: one
+  that denies publishing to a Will's topic now refuses those clients' CONNECTs
+  where it used to let them in. A deployment without an `Authorizer` is
+  unaffected, and so is a CONNECT without a Will.
+
+### Added
+
+- **`AuthzRequest.Will`**, set only on that check and only with `ActionPublish`,
+  so an implementation that audit-logs publishes can tell a Will — which may
+  never be sent — from a PUBLISH the client made. The zero value is every other
+  call site, so an existing `Authorizer` compiles unchanged.
+
 ## [0.3.1] - 2026-09-26
 
 Documentation only. No code changed, so upgrading from 0.3.0 changes nothing at
