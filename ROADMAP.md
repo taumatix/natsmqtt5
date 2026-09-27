@@ -4,27 +4,6 @@ Ordered by how much they limit real deployments, not by how interesting they
 are to build. Each entry says what breaks today, so it can be judged on its
 own.
 
-## A Will Message is published without ever reaching the Authorizer
-
-**Today:** `checkWill` validates the Will's QoS, its retain flag and its topic
-syntax. `publishWill` then hands it to NATS and to the retained stream with no
-`Authorize(ActionPublish)` anywhere — the only `Authorizer` call sites are
-`handlePublish`, `subscribeOne` and `mayResume`. So a principal denied
-`ActionPublish` on `admin/#` sets `Will.Topic` to `admin/shutdown` with RETAIN,
-drops its connection, and the broker publishes and retains it on the
-principal's behalf. The Will Delay Interval lets it choose roughly when.
-
-**Why it is not simply fixed:** there are two defensible moments and they are
-not equivalent. Authorising at CONNECT means refusing the connection with 0x87,
-which is the honest answer but rejects a client whose Will may never fire.
-Authorising at publish time means dropping it silently, because there is no
-longer a connection to tell.
-
-**Shape:** at CONNECT, in `checkWill`, alongside the QoS and retain checks that
-are already there — a Will the broker would refuse to publish is a Will it
-should not accept [MQTT-3.2.2-13 is the same reasoning for RETAIN]. Re-check at
-publish time only if the roadmap ever grows per-message revocation.
-
 ## A displaced connection can reinstall a filter after it has been re-authorised
 
 **Today:** `takeOverSession` shuts the displaced connection's socket, but a
@@ -66,6 +45,14 @@ broker polling a policy store it knows nothing about. The sweep itself is
 already written; the work is making it safe against a connection that is
 delivering at the time, which the resume path gets for free by running before
 `deliverLoop` starts.
+
+The sweep has to cover the connection's Will as well. Since the Will check at
+CONNECT (`authoriseWill`), a Will is authorised once and never again: a client
+that connects with a Will on `alerts/x`, loses that permission, and then drops
+its connection still gets the Will published — up to its Will Delay Interval
+and Session Expiry later. `Reauthorize` should re-run the Will check and, on a
+denial, discard the Will rather than the connection: the connection itself is
+still allowed, and a DISCONNECT would publish the very Will being revoked.
 
 ## Offline message queue: a durable consumer per session
 
@@ -165,6 +152,12 @@ mechanism.
 error`, leaving the session and the record untouched, so the client retries
 rather than silently losing its subscriptions. Fail-closed and non-destructive,
 which neither of today's two outcomes is.
+
+There is now a third call site that conflates the two: `authoriseWill` answers
+any error with `0x87 Not authorized`, so a policy-service outage tells every
+client carrying a Will that it is not permitted. That outcome is already
+non-destructive — the check runs before the session is taken over — so only
+the Reason Code is wrong; the sentinel should map to `0x83` there too.
 
 ## `forgetWithdrawn` does not check which acknowledgement was owed
 

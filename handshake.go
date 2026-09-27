@@ -150,6 +150,11 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 	if err := c.checkClientID(clientID); err != nil {
 		return err
 	}
+	// Before the takeover, so a refused CONNECT cannot displace the live
+	// connection on the same Client Identifier.
+	if err := c.authoriseWill(ctx, cp.Will, clientID, identity, username); err != nil {
+		return err
+	}
 
 	// Displace any connection already using this Client Identifier
 	// [MQTT-3.1.4-3], and decide whether we may resume its session.
@@ -463,6 +468,36 @@ func (c *conn) checkWill(cp *packet.Connect) error {
 	if err := topic.ValidateName(cp.Will.Topic); err != nil {
 		c.refuse(packet.TopicNameInvalid, err.Error())
 		return fmt.Errorf("will topic %q: %w", cp.Will.Topic, err)
+	}
+	return nil
+}
+
+// authoriseWill puts the Will Message past the Authorizer as a publish by the
+// connecting principal, refusing the CONNECT with 0x87 if it is denied.
+//
+// The Will is published on the client's behalf after the client has gone, so
+// nothing on the publish path can ask again, and there is no connection left
+// to tell by then. A Will the broker would refuse to publish is a Will it
+// should not accept — the reasoning [MQTT-3.2.2-12] and [MQTT-3.2.2-13] apply
+// to a Will whose QoS or RETAIN it cannot honour.
+func (c *conn) authoriseWill(ctx context.Context, will *packet.Will, clientID, identity, username string) error {
+	a := c.broker.opts.Authorizer
+	if will == nil || a == nil {
+		return nil
+	}
+	err := a.Authorize(ctx, &AuthzRequest{
+		Action:   ActionPublish,
+		Will:     true,
+		ClientID: clientID,
+		Identity: identity,
+		Username: username,
+		Topic:    will.Topic,
+		QoS:      will.QoS,
+		Retain:   will.Retain,
+	})
+	if err != nil {
+		c.refuse(packet.NotAuthorized, "")
+		return fmt.Errorf("will message on %q denied for %q: %w", will.Topic, clientID, err)
 	}
 	return nil
 }

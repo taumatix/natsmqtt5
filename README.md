@@ -180,6 +180,12 @@ to the session's filter count. And a denial there is silent — there is no
 per-filter Reason Code in a CONNACK, so the filter is torn down and the client
 is still told `SessionPresent: true`.
 
+A Will Message goes past the `Authorizer` too, at CONNECT, as an
+`ActionPublish` with `AuthzRequest.Will` set. The broker publishes a Will on the
+client's behalf after the client has gone, so CONNECT is the only moment it can
+be refused: a denied Will refuses the connection with 0x87, and the Will is not
+checked again when it fires.
+
 ## How MQTT maps onto NATS
 
 | MQTT | NATS |
