@@ -7,18 +7,20 @@ controls. This file says which versions it was built and checked against.
 - name: mqtt-specification
   kind: literal
   value: "MQTT Version 5.0, OASIS Standard, 2019-03-07"
-  checked: 2026-09-24
+  checked: 2026-09-27
   note: >-
     the normative reference; source clauses are cited inline as MQTT-5.0 §x.y.z.
     Re-read at docs.oasis-open.org on 2026-09-24: the document's own status line
     still says "OASIS Standard, 07 March 2019", its "Latest version" link still
     resolves to itself, and no errata document exists (3.1.1 has one; 5.0 does not).
+    Re-checked 2026-09-27 at oasis-open.org/standard/mqtt-v5-0-os: still the
+    approved standard, with no successor listed.
 
 - name: nats-server
   kind: github-release
   repo: nats-io/nats-server
   tag: v2.14.5
-  checked: 2026-09-24
+  checked: 2026-09-27
   hold: "issue #11 — v2.15.0 needs Go 1.26, this module's floor is 1.25, dependency is test-only"
   note: held deliberately; the gap is still reported, it just does not raise the alarm
 
@@ -26,7 +28,7 @@ controls. This file says which versions it was built and checked against.
   kind: github-release
   repo: nats-io/nats.go
   tag: v1.53.1
-  checked: 2026-09-24
+  checked: 2026-09-27
   hold: >-
     issue #11 — v1.54.0 declares go 1.26.0, and taking it rewrites this module's
     directive from 1.25.0 to 1.26.0 (probed, not assumed). Unlike nats-server this
@@ -35,6 +37,11 @@ controls. This file says which versions it was built and checked against.
     x/crypto/ssh DoS advisories are fixed only in v0.56.0, which needs Go 1.26 too.
     Re-probed 2026-09-24: taking nats.go@v1.54.0 now drags x/crypto to v0.57.0 by
     itself, so the runtime bump and the security patch are one move, not two.
+    Re-checked 2026-09-27: v1.54.0 is still @latest and still declares go 1.26.0.
+    govulncheck reports no vulnerable symbol reached from this module's code, so
+    the advisories sit in the module graph but not on a call path. go.dev/dl
+    lists only 1.27.1 and 1.26.8 as supported, so the 1.25 floor this hold
+    protects is itself unsupported upstream; the decision stays on issue #11.
   note: >-
     the NATS client the broker is built on; in the shipped build, not just the tests.
     Added as a pin on 2026-09-21 when it hit the same Go 1.26 floor as nats-server.
@@ -43,7 +50,7 @@ controls. This file says which versions it was built and checked against.
   kind: github-release
   repo: eclipse-paho/paho.golang
   tag: v0.23.0
-  checked: 2026-09-24
+  checked: 2026-09-27
   note: the third-party MQTT client the end-to-end tests drive the broker with
 ```
 
