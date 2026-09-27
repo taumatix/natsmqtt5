@@ -11,6 +11,13 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-27
+
+A security fix with one behaviour change to check before upgrading: an
+`Authorizer` is now asked about every Will Message, and one that denies a Will's
+topic refuses that client's CONNECT. The Go API change is one new field, so
+existing code compiles unchanged.
+
 ### Security
 
 - **A Will Message now goes past the `Authorizer`** ([#24]). Before this, the Will was
@@ -190,7 +197,8 @@ mapping `nats-server` uses for its own MQTT support.
 [#13]: https://github.com/taumatix/natsmqtt5/pull/13
 [#19]: https://github.com/taumatix/natsmqtt5/pull/19
 [#24]: https://github.com/taumatix/natsmqtt5/pull/24
-[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/taumatix/natsmqtt5/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/taumatix/natsmqtt5/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/taumatix/natsmqtt5/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/taumatix/natsmqtt5/compare/v0.1.1...v0.2.0
