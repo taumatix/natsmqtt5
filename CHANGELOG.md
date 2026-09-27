@@ -13,7 +13,7 @@ honestly be reconstructed now.
 
 ### Security
 
-- **A Will Message now goes past the `Authorizer`.** Before this, the Will was
+- **A Will Message now goes past the `Authorizer`** ([#24]). Before this, the Will was
   checked for QoS, RETAIN and topic syntax and then published with no
   authorization at all, so a principal denied `ActionPublish` on a topic could
   publish — and retain — to it by setting it as the Will and dropping its
@@ -30,7 +30,7 @@ honestly be reconstructed now.
 
 ### Added
 
-- **`AuthzRequest.Will`**, set only on that check and only with `ActionPublish`,
+- **`AuthzRequest.Will`** ([#24]), set only on that check and only with `ActionPublish`,
   so an implementation that audit-logs publishes can tell a Will — which may
   never be sent — from a PUBLISH the client made. The zero value is every other
   call site, so an existing `Authorizer` compiles unchanged.
@@ -189,6 +189,7 @@ mapping `nats-server` uses for its own MQTT support.
 [#12]: https://github.com/taumatix/natsmqtt5/pull/12
 [#13]: https://github.com/taumatix/natsmqtt5/pull/13
 [#19]: https://github.com/taumatix/natsmqtt5/pull/19
+[#24]: https://github.com/taumatix/natsmqtt5/pull/24
 [Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.3.1...HEAD
 [0.3.1]: https://github.com/taumatix/natsmqtt5/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/taumatix/natsmqtt5/compare/v0.2.0...v0.3.0
