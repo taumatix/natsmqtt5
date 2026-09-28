@@ -122,16 +122,6 @@ func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID
 		granted = packet.QoS1
 	}
 
-	// "If a Server receives a SUBSCRIBE packet containing a Topic Filter that
-	// is identical to a Non-shared Subscription's Topic Filter for the current
-	// Session, then it MUST replace that existing Subscription"
-	// [MQTT-3.8.4-3]. Replacing means tearing the NATS subscriptions down and
-	// building them again, since the options may have changed.
-	old, existed := c.sess.removeSubscription(want.Filter)
-	if existed {
-		unsubscribeAll(old)
-	}
-
 	sub := &subscription{
 		filter:     want.Filter,
 		subject:    full,
@@ -143,10 +133,30 @@ func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID
 	if err := c.bindNATS(sub); err != nil {
 		c.logger.Warn("could not create the NATS subscription",
 			"filter", want.Filter, "subject", full, "error", err)
-		return nil, existed, packet.ImplementationSpecificError
+		return nil, false, packet.ImplementationSpecificError
 	}
-	c.sess.putSubscription(sub)
 
+	// The Authorizer call above can outlast this connection's hold on the
+	// session; installSubscription re-checks that under the session lock. A
+	// refusal is answered with 0x80, which nothing will read: the socket was
+	// closed by the takeover that displaced this connection.
+	old, installed := c.sess.installSubscription(c, sub)
+	if !installed {
+		unsubscribeAll(sub)
+		c.logger.Debug("not installing a subscription for a connection that lost its session",
+			"client_id", c.sess.clientID, "filter", want.Filter)
+		return nil, false, packet.UnspecifiedError
+	}
+
+	// "If a Server receives a SUBSCRIBE packet containing a Topic Filter that
+	// is identical to a Non-shared Subscription's Topic Filter for the current
+	// Session, then it MUST replace that existing Subscription"
+	// [MQTT-3.8.4-3]. Replacing means tearing the old NATS subscriptions down,
+	// since the options may have changed; the new ones are already bound.
+	existed := old != nil
+	if existed {
+		unsubscribeAll(old)
+	}
 	return sub, existed, packet.ReasonCode(granted)
 }
 
@@ -182,6 +192,11 @@ func (c *conn) bindNATS(sub *subscription) error {
 	// capturing would leave them delivering into the closed socket.
 	sess := c.sess
 	handler := func(msg *nats.Msg) {
+		if !sub.live.Load() {
+			// Bound but not installed, or already removed: no connection has
+			// been cleared to receive through it.
+			return
+		}
 		if cur := sess.currentConn(); cur != nil {
 			cur.onNATSMessage(sub, msg)
 		}

@@ -4,26 +4,31 @@ Ordered by how much they limit real deployments, not by how interesting they
 are to build. Each entry says what breaks today, so it can be judged on its
 own.
 
-## A displaced connection can reinstall a filter after it has been re-authorised
+## A displaced connection can still change the session it lost
 
-**Today:** `takeOverSession` shuts the displaced connection's socket, but a
-goroutine already inside `Authorize` in `subscribeOne` is not interrupted. When
-it returns it calls `bindNATS` and `putSubscription` against the shared session,
-checking neither `c.done` nor whether it is still the session's connection. So:
-connection A has a SUBSCRIBE for `secret/#` in flight under principal `victim`;
-B connects on the same Client Identifier under a narrower principal;
-`reauthoriseLive` runs and finds nothing to deny because the filter is not in
-the map yet; A's `Authorize` then returns *allow*, decided on `victim`'s
-identity, and installs it. The handler resolves to B.
+**Today:** v0.4.1 stopped a displaced connection *installing* a subscription
+into the session its successor now owns (`installSubscription` checks ownership
+under the session lock). It did not stop the rest of what that connection does
+while it drains the packets its socket had already buffered.
+`handleUnsubscribe` calls `removeSubscription` on the shared session with no
+ownership check, so an UNSUBSCRIBE A sent just before the takeover tears down
+the filter B resumed, and B is never told. Acknowledgements (PUBACK, PUBREC,
+PUBCOMP) from A act on the in-flight set B inherited in the same way.
 
-**Why it is not simply fixed:** the decision and the installation are separated
-by a user-supplied call of unbounded duration, so any check has to be made
-again after it returns rather than before it is made.
+**Why it is not simply fixed:** each of these is legitimate from the connection
+that owns the session and wrong from the one that lost it, and the handlers do
+not currently know which they are. The check is the same one, but it has to be
+made in every handler that writes session state, and the acknowledgement paths
+are entangled with the withdrawn-identifier handling below.
 
-**Shape:** the `claimGen` pattern the session record already uses. Have
-`subscribeOne` refuse to install when the connection is no longer
-`sess.currentConn()`, and answer the SUBACK it can no longer honour with
-0x80 — the socket is closed by then, so nothing reads it.
+**Shape:** route session mutations through methods that take the calling
+`*conn` and refuse when it is not `s.conn`, as `installSubscription` does. Test
+it the way `TestADisplacedConnectionCannotInstallAFilterIntoTheSessionItLost`
+does, with the Authorizer holding A open, plus an UNSUBSCRIBE queued on A.
+
+A related gap: the restore path in `resumeSubscriptions` has the same guard,
+but no test drives a takeover in the middle of a stored-record resume. It is
+covered by reasoning only.
 
 ## Revoking a permission from a client that is already connected
 

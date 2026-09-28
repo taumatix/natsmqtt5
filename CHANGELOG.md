@@ -11,6 +11,28 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-28
+
+A security fix. No API change and no configuration change.
+
+### Security
+
+- **A connection being taken over could install a subscription into the
+  session it had just lost.** An `Authorizer` call is not interrupted by a
+  takeover, so a SUBSCRIBE decided on the old connection's principal could
+  finish after a second CONNECT had claimed the Client Identifier — under a
+  principal that may not read that filter — and after that connection's resume
+  check had already run. The filter was installed anyway, and its messages were
+  delivered to the new principal. Reproduced end to end over a real NATS server
+  before the fix. A subscription is now installed only while the connection that
+  asked for it still owns the session, checked under the lock the takeover
+  takes; otherwise it is torn down and answered `0x80` on a socket nothing
+  reads. The same check guards filters restored from a stored session record.
+- Its NATS subscription no longer delivers until it is installed. The NATS side
+  is bound first, and the handler delivers to whichever connection holds the
+  session at the time, so a subscription refused at install could briefly carry
+  messages to the wrong connection.
+
 ## [0.4.0] - 2026-09-27
 
 A security fix with one behaviour change to check before upgrading: an
@@ -197,7 +219,8 @@ mapping `nats-server` uses for its own MQTT support.
 [#13]: https://github.com/taumatix/natsmqtt5/pull/13
 [#19]: https://github.com/taumatix/natsmqtt5/pull/19
 [#24]: https://github.com/taumatix/natsmqtt5/pull/24
-[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/taumatix/natsmqtt5/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/taumatix/natsmqtt5/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/taumatix/natsmqtt5/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/taumatix/natsmqtt5/compare/v0.2.0...v0.3.0
