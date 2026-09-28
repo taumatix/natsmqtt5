@@ -542,6 +542,16 @@ func TestSessionResumesSubscriptions(t *testing.T) {
 	// No new SUBSCRIBE: the resumed subscription must still deliver.
 	pub.publish(&paho.Publish{Topic: "durable/b", QoS: 1, Payload: []byte("after")})
 	got := second.expectMessage()
+	// Paho sends the PUBACK for "before" from its router goroutine after the
+	// handler has queued the message, so the Disconnect above can reach the wire
+	// first. The broker then holds "before" unacknowledged and must resend it on
+	// resume, as a duplicate [MQTT-4.4.0-1, MQTT-3.3.1-1]. This failed about 1
+	// run in 20 while the test assumed the PUBACK always won.
+	if got.Topic == "durable/a" {
+		assert.True(t, got.Dup, "a resent unacknowledged PUBLISH must carry DUP=1")
+		assert.Equal(t, "before", got.Payload)
+		got = second.expectMessage()
+	}
 	assert.Equal(t, "durable/b", got.Topic)
 	assert.Equal(t, "after", got.Payload)
 }
