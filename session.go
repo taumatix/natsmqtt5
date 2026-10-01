@@ -3,6 +3,7 @@ package natsmqtt5
 import (
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -32,6 +33,13 @@ type subscription struct {
 	// in '#' needs two: one on "x.>" and one on "x", because MQTT's '#' also
 	// matches the parent level while NATS's '>' does not (MQTT-5.0 §4.7.1.2).
 	natsSubs []*nats.Subscription
+
+	// live gates delivery. The NATS subscriptions are created before the
+	// subscription is installed, and their handler resolves the session's
+	// current connection — so until installSubscription has checked who that
+	// is, a message must not go anywhere. Cleared again when the subscription
+	// leaves the session.
+	live atomic.Bool
 }
 
 // outbound tracks a QoS 1 or QoS 2 message the broker has sent to the client
@@ -420,10 +428,30 @@ func (s *session) subscriptions() []*subscription {
 	return out
 }
 
-func (s *session) putSubscription(sub *subscription) {
+// installSubscription puts sub into the session on behalf of c, replacing and
+// returning any subscription already held on the same filter. It refuses, and
+// changes nothing, when c is no longer the session's connection.
+//
+// The check and the install are one critical section on purpose. The decision
+// to allow sub was made by the Authorizer on c's principal, and a takeover can
+// happen while that call is out: the new connection attaches, then sweeps the
+// session's subscriptions past the Authorizer again. Checked under the same
+// lock attach takes, an install either lands before the attach — and the sweep
+// sees it — or after, and is refused here. Checked any earlier, it could land
+// after the sweep had already run and be delivered to a principal nobody asked.
+func (s *session) installSubscription(c *conn, sub *subscription) (old *subscription, installed bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.conn != c {
+		return nil, false
+	}
+	old = s.subs[sub.filter]
+	if old != nil {
+		old.live.Store(false)
+	}
 	s.subs[sub.filter] = sub
+	sub.live.Store(true)
+	return old, true
 }
 
 func (s *session) removeSubscription(filter string) (*subscription, bool) {
@@ -432,6 +460,7 @@ func (s *session) removeSubscription(filter string) (*subscription, bool) {
 	sub, ok := s.subs[filter]
 	if ok {
 		delete(s.subs, filter)
+		sub.live.Store(false)
 	}
 	return sub, ok
 }
