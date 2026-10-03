@@ -4,26 +4,6 @@ Ordered by how much they limit real deployments, not by how interesting they
 are to build. Each entry says what breaks today, so it can be judged on its
 own.
 
-## Acknowledgements across a takeover: decide what is correct before changing anything
-
-**Today:** a displaced connection's buffered PUBACK, PUBREC or PUBCOMP is still applied to the
-session its successor now owns. v0.4.2 first tried dropping everything a closed connection had
-buffered, and `TestARefusedMessageIsNotResent` failed on CI and locally (2 of 15). A client that
-acks or refuses a message and immediately reconnects had its ack discarded, and the message was
-resent. So acks from the displaced connection are not simply wrong: they are the same client
-talking about messages it received.
-
-The case still worth thinking about is the cross-principal one, where A and B authenticate
-differently on the same Client Identifier. A's ack then completes an exchange B inherited. That is
-a correctness oddity (B's own ack for that identifier is then unknown), not a disclosure.
-
-**Shape:** first write down what the spec and real clients expect when an ack arrives on a
-connection that was taken over; MQTT-5.0 §4.4 is the place to start. Only then decide whether
-anything should change, and pin the answer with a test either way.
-
-A related gap: the restore path in `resumeSubscriptions` has the same guard as SUBSCRIBE, but no
-test drives a takeover in the middle of a stored-record resume. It is covered by reasoning only.
-
 ## Revoking a permission from a client that is already connected
 
 **Today:** the Authorizer is consulted when a client subscribes, when it
@@ -96,9 +76,12 @@ client is disconnected for the broker's mistake, and its next reconnect can hit
 the same window.
 
 **Reaching it** needs an acknowledgement for a message received on the previous
-connection to arrive during that window — either from a client that flushes
-owed acknowledgements on reconnect, or from a displaced connection still
-decoding packets its socket had already buffered.
+connection to arrive during that window, from a client that flushes owed
+acknowledgements on reconnect. The other route, a displaced connection still
+decoding packets its socket had buffered, is closed since v0.4.3: completing an
+exchange its successor resent leaves the identifier owed (`resentOn` in
+`completeInflight`). This entry is the same-connection case, which `resentOn`
+cannot tell from an ordinary acknowledgement.
 
 **Shape:** keep the set of Packet Identifiers this connection resent, and answer
 an unmatched acknowledgement for one of them by ignoring it rather than by
@@ -110,6 +93,13 @@ exactly "an identifier the client may still acknowledge, whose acknowledgement
 is ignored", built for the filters denied on resume. What this entry needs is
 the same set populated from `conn.resend` rather than from the handshake.
 
+## A takeover in the middle of a stored-record resume is untested
+
+The restore path in `resumeSubscriptions` has the same ownership guard as SUBSCRIBE, but no test
+drives a takeover while a session is being restored from its stored record. It is covered by
+reasoning only. The technique in `displaced_ack_test.go` (Keep Alive 0, a held QoS 0 PUBLISH) can
+reach it.
+
 ## The withdrawn-identifier set only empties when the client acknowledges
 
 **Today:** `session.withdrawn` holds the Packet Identifier of every in-flight
@@ -119,6 +109,12 @@ does not hand the identifier to a new message. Nothing else removes an entry. A
 client that never flushes the acknowledgement it owed leaves the identifier
 spent for the life of the session — bounded by the 65535 that exist, but
 monotonic, so a long-lived session narrowed repeatedly slowly runs out.
+
+Since v0.4.3 the set also takes an identifier when a displaced connection's
+acknowledgement completes an exchange its successor resent. If the successor
+drops before acknowledging its copy, that identifier is owed for good as well,
+and so is the send-quota slot it names (only until that connection ends,
+since quota is per connection).
 
 **Why it is not simply fixed:** a timer is the wrong instrument — the
 acknowledgement is owed by a client that may be offline, and MQTT puts no

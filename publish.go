@@ -148,9 +148,9 @@ func (c *conn) rejectPublish(p *packet.Publish, code packet.ReasonCode, reason s
 // handlePuback completes a QoS 1 delivery to the client and returns its slot
 // in the receive quota (MQTT-5.0 §4.9).
 func (c *conn) handlePuback(p *packet.Puback) error {
-	o, ok := c.sess.completeInflight(p.Ack.PacketID)
+	o, ok := c.sess.completeInflight(c, p.Ack.PacketID)
 	if !ok {
-		if c.sess.forgetWithdrawn(p.Ack.PacketID) {
+		if c.forgetWithdrawn(p.Ack.PacketID) {
 			return nil
 		}
 		c.sendDisconnect(packet.ProtocolError,
@@ -182,7 +182,7 @@ func (c *conn) handlePubrec(p *packet.Pubrec) error {
 		// exchange on to expecting a PUBCOMP that its client has no reason to
 		// send, and a resumed session would then resend a PUBREL for it on
 		// every resumption [MQTT-4.4.0-1].
-		c.sess.completeInflight(p.Ack.PacketID)
+		c.sess.completeInflight(c, p.Ack.PacketID)
 		c.sendDisconnect(packet.ProtocolError,
 			fmt.Sprintf("PUBREC for Packet Identifier %d, which is a QoS 1 exchange", p.Ack.PacketID))
 		return errors.New("PUBREC for a QoS 1 message")
@@ -191,7 +191,7 @@ func (c *conn) handlePubrec(p *packet.Pubrec) error {
 		// "If PUBACK or PUBREC is received containing a Reason Code of 0x80 or
 		// greater the corresponding PUBLISH packet is treated as acknowledged,
 		// and MUST NOT be retransmitted" [MQTT-4.4.0-2].
-		done, _ := c.sess.completeInflight(p.Ack.PacketID)
+		done, _ := c.sess.completeInflight(c, p.Ack.PacketID)
 		c.releaseQuotaFor(done)
 		return nil
 	}
@@ -213,12 +213,12 @@ func (c *conn) handlePubrel(p *packet.Pubrel) error {
 
 // handlePubcomp is stage 3 of a broker-to-client QoS 2 delivery.
 func (c *conn) handlePubcomp(p *packet.Pubcomp) error {
-	o, ok := c.sess.completeInflight(p.Ack.PacketID)
+	o, ok := c.sess.completeInflight(c, p.Ack.PacketID)
 	if !ok {
 		// A withdrawn QoS 2 exchange reaches here by way of handlePubrec, which
 		// answers an identifier it no longer holds with 0x92 and leaves the
 		// client owing the PUBCOMP that closes it (MQTT-5.0 §3.6.2.1).
-		if c.sess.forgetWithdrawn(p.Ack.PacketID) {
+		if c.forgetWithdrawn(p.Ack.PacketID) {
 			return nil
 		}
 		c.sendDisconnect(packet.ProtocolError,
@@ -227,6 +227,17 @@ func (c *conn) handlePubcomp(p *packet.Pubcomp) error {
 	}
 	c.releaseQuotaFor(o)
 	return nil
+}
+
+// forgetWithdrawn settles an acknowledgement for an identifier the session
+// only remembers as owed, returning the send-quota slot it was holding if that
+// slot is this connection's.
+func (c *conn) forgetWithdrawn(id uint16) bool {
+	w, ok := c.sess.forgetWithdrawn(id)
+	if ok && w.quotaHolder == c {
+		c.releaseQuota()
+	}
+	return ok
 }
 
 // releaseQuotaFor returns the send-quota slot a completed exchange was holding,

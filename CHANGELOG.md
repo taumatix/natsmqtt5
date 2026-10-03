@@ -11,6 +11,24 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-10-04
+
+A fix. No API change and no configuration change.
+
+### Fixed
+
+- **A takeover could get the new connection disconnected for acknowledging a message.** When a
+  connection is taken over, an acknowledgement it had already buffered is still applied: the
+  client did receive that message, and the session belongs to the Client Identifier
+  (MQTT-5.0 §4.1). But by then the new connection may have resent the same message, and its
+  client acknowledges that copy too. The broker answered that second acknowledgement with
+  `0x82 Protocol Error` and closed the connection. It now ignores it, and does not reuse the
+  Packet Identifier before it arrives.
+- **The same race cost the new connection a send-quota slot.** The slot its resend took was
+  returned to the old connection's quota instead, so the new connection could send one fewer
+  message at a time from then on. With a Receive Maximum of 1, delivery stopped. The slot now
+  comes back to the connection that spent it.
+
 ## [0.4.2] - 2026-10-04
 
 A security fix. No API change and no configuration change.
