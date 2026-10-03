@@ -11,6 +11,23 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-10-04
+
+A security fix. No API change and no configuration change.
+
+### Security
+
+- **A connection being taken over could remove its successor's subscriptions.** A connection
+  displaced by a second CONNECT on its Client Identifier goes on decoding what its socket had
+  already buffered. With a Keep Alive of 0, nothing stopped it: an UNSUBSCRIBE the client sent
+  before the takeover was processed against the session the new connection now owned. It tore
+  down the new connection's filter, and that client was never told. Reproduced end to end over a
+  real NATS server before the fix. With a non-zero Keep Alive the read loop already stopped,
+  because setting the read deadline fails on the closed socket; that was a side effect, not a
+  check. Now a closed connection handles nothing more from its buffer, whatever its Keep Alive,
+  and an UNSUBSCRIBE checks that its connection still owns the session in the same locked step
+  that removes the filter.
+
 ## [0.4.1] - 2026-09-28
 
 A security fix. No API change and no configuration change.
@@ -219,7 +236,8 @@ mapping `nats-server` uses for its own MQTT support.
 [#13]: https://github.com/taumatix/natsmqtt5/pull/13
 [#19]: https://github.com/taumatix/natsmqtt5/pull/19
 [#24]: https://github.com/taumatix/natsmqtt5/pull/24
-[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/taumatix/natsmqtt5/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/taumatix/natsmqtt5/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/taumatix/natsmqtt5/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/taumatix/natsmqtt5/compare/v0.3.0...v0.3.1

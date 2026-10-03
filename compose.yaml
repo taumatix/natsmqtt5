@@ -42,7 +42,7 @@ services:
     # because compose.ci.yaml overrides `image:` with the locally built
     # natsmqtt5:ci. Bump both occurrences when cutting a release — this one and
     # natsmqtt5-b's below.
-    image: ghcr.io/taumatix/natsmqtt5:v0.4.1
+    image: ghcr.io/taumatix/natsmqtt5:v0.4.2
     environment:
       NATSMQTT5_NATS: nats://nats:4222
       NATSMQTT5_PERSISTENT_SESSIONS: ${NATSMQTT5_PERSISTENT_SESSIONS:-false}
@@ -59,7 +59,7 @@ services:
     # A second broker against the same NATS server. Started only by
     # `--profile cluster`, so the quickstart above stays one broker.
     profiles: ["cluster"]
-    image: ghcr.io/taumatix/natsmqtt5:v0.4.1
+    image: ghcr.io/taumatix/natsmqtt5:v0.4.2
     environment:
       NATSMQTT5_NATS: nats://nats:4222
       NATSMQTT5_PERSISTENT_SESSIONS: ${NATSMQTT5_PERSISTENT_SESSIONS:-false}

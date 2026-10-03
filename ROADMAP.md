@@ -4,31 +4,28 @@ Ordered by how much they limit real deployments, not by how interesting they
 are to build. Each entry says what breaks today, so it can be judged on its
 own.
 
-## A displaced connection can still change the session it lost
+## An acknowledgement in flight during a takeover can complete the successor's exchange
 
-**Today:** v0.4.1 stopped a displaced connection *installing* a subscription
-into the session its successor now owns (`installSubscription` checks ownership
-under the session lock). It did not stop the rest of what that connection does
-while it drains the packets its socket had already buffered.
-`handleUnsubscribe` calls `removeSubscription` on the shared session with no
-ownership check, so an UNSUBSCRIBE A sent just before the takeover tears down
-the filter B resumed, and B is never told. Acknowledgements (PUBACK, PUBREC,
-PUBCOMP) from A act on the in-flight set B inherited in the same way.
+**Today:** since v0.4.2 a connection that has been closed (displaced by a takeover, for one)
+handles nothing more from its socket buffer, and UNSUBSCRIBE checks ownership atomically. What is
+left is narrower: a PUBACK, PUBREC or PUBCOMP that A's loop had *already started* handling when
+B took the session over. `completeInflight` and `forgetWithdrawn` act on the shared in-flight set
+with no ownership check. B resends the inherited in-flight messages under the same Packet
+Identifiers, so A's late PUBACK for N can complete B's exchange N, and B's own PUBACK for N then
+names an identifier the session no longer holds, which this broker answers by disconnecting B.
 
-**Why it is not simply fixed:** each of these is legitimate from the connection
-that owns the session and wrong from the one that lost it, and the handlers do
-not currently know which they are. The check is the same one, but it has to be
-made in every handler that writes session state, and the acknowledgement paths
-are entangled with the withdrawn-identifier handling below.
+**Why it is not simply fixed:** each ack is legitimate from the owner and wrong from anyone else,
+as UNSUBSCRIBE was. But the ack paths are entangled with the withdrawn-identifier handling (an
+ack for a withdrawn id is swallowed, not refused), so the ownership check has to sit inside
+`completeInflight`, `awaitPubcomp` and `forgetWithdrawn` without changing what the owner sees.
 
-**Shape:** route session mutations through methods that take the calling
-`*conn` and refuse when it is not `s.conn`, as `installSubscription` does. Test
-it the way `TestADisplacedConnectionCannotInstallAFilterIntoTheSessionItLost`
-does, with the Authorizer holding A open, plus an UNSUBSCRIBE queued on A.
+**Shape:** `completeInflightFor(c, id)` and friends, mirroring `removeSubscriptionFor`. The
+window is one handler wide and cannot be held open from outside: no Authorizer call sits in an
+ack path. So the test is an internal one that drives two `conn`s on one session directly, the
+way `TestABoundButUninstalledSubscriptionDeliversNothing` does.
 
-A related gap: the restore path in `resumeSubscriptions` has the same guard,
-but no test drives a takeover in the middle of a stored-record resume. It is
-covered by reasoning only.
+A related gap: the restore path in `resumeSubscriptions` has the same guard as SUBSCRIBE, but no
+test drives a takeover in the middle of a stored-record resume. It is covered by reasoning only.
 
 ## Revoking a permission from a client that is already connected
 
