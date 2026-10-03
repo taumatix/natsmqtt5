@@ -454,6 +454,24 @@ func (s *session) installSubscription(c *conn, sub *subscription) (old *subscrip
 	return old, true
 }
 
+// removeSubscriptionFor removes filter on behalf of c, which must still be the
+// session's connection; owner is false, and nothing is changed, when it is not.
+// The check and the removal share the lock attach takes, as they do in
+// installSubscription.
+func (s *session) removeSubscriptionFor(c *conn, filter string) (sub *subscription, ok, owner bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.conn != c {
+		return nil, false, false
+	}
+	sub, ok = s.subs[filter]
+	if ok {
+		delete(s.subs, filter)
+		sub.live.Store(false)
+	}
+	return sub, ok, true
+}
+
 func (s *session) removeSubscription(filter string) (*subscription, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

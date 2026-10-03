@@ -145,6 +145,16 @@ func (c *conn) readLoop(ctx context.Context, keepAlive time.Duration) error {
 		if err != nil {
 			return c.readError(err)
 		}
+		// A closed connection's buffer can still hold packets the client sent
+		// before it was closed — on a takeover, before another connection was
+		// given its session. With a Keep Alive the deadline call above already
+		// fails on the closed socket; with Keep Alive 0 nothing did, and those
+		// packets went on acting on the successor's session.
+		select {
+		case <-c.done:
+			return errConnClosed
+		default:
+		}
 		if err := c.handle(ctx, pkt); err != nil {
 			return err
 		}
@@ -185,6 +195,10 @@ var errClientGone = errors.New("client closed the connection")
 // errNormalDisconnect marks a clean DISCONNECT with reason 0x00, which deletes
 // the Will Message [MQTT-3.1.2-8].
 var errNormalDisconnect = errors.New("client disconnected normally")
+
+// errConnClosed ends the read loop of a connection the broker has already
+// closed, a displaced one for instance, before it handles anything it buffered.
+var errConnClosed = errors.New("connection already closed")
 
 func (c *conn) handle(ctx context.Context, pkt packet.Packet) error {
 	switch p := pkt.(type) {

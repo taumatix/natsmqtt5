@@ -242,7 +242,12 @@ func (c *conn) handleUnsubscribe(p *packet.Unsubscribe) error {
 	codes := make([]packet.ReasonCode, len(p.Filters))
 	removed := false
 	for i, filter := range p.Filters {
-		sub, ok := c.sess.removeSubscription(filter)
+		sub, ok, owner := c.sess.removeSubscriptionFor(c, filter)
+		if !owner {
+			// Displaced while this packet was being handled: the session, and
+			// every filter in it, now belongs to the connection that took it.
+			return errConnClosed
+		}
 		if !ok {
 			// [MQTT-3.11.3-1] with 0x11.
 			codes[i] = packet.NoSubscriptionExisted
