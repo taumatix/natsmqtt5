@@ -19,14 +19,16 @@ A security fix. No API change and no configuration change.
 
 - **A connection being taken over could remove its successor's subscriptions.** A connection
   displaced by a second CONNECT on its Client Identifier goes on decoding what its socket had
-  already buffered. With a Keep Alive of 0, nothing stopped it: an UNSUBSCRIBE the client sent
-  before the takeover was processed against the session the new connection now owned. It tore
-  down the new connection's filter, and that client was never told. Reproduced end to end over a
-  real NATS server before the fix. With a non-zero Keep Alive the read loop already stopped,
-  because setting the read deadline fails on the closed socket; that was a side effect, not a
-  check. Now a closed connection handles nothing more from its buffer, whatever its Keep Alive,
-  and an UNSUBSCRIBE checks that its connection still owns the session in the same locked step
-  that removes the filter.
+  already buffered. An UNSUBSCRIBE the client sent before the takeover was handled against the
+  session the new connection now owned: it tore down the new connection's filter, and that client
+  was never told. Reproduced end to end over a real NATS server before the fix, with a Keep Alive
+  of 0. With a non-zero Keep Alive the race is narrower but not closed. UNSUBSCRIBE now checks
+  that its connection still owns the session in the same locked step that removes the filter, and
+  a displaced connection's UNSUBSCRIBE is refused. Its client never received an UNSUBACK, so it
+  cannot have assumed the unsubscribe happened.
+- Acknowledgements from a displaced connection are still applied, deliberately. They come from the
+  same client, about messages it received, and dropping them makes the successor resend a message
+  the client already acknowledged or refused.
 
 ## [0.4.1] - 2026-09-28
 

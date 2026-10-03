@@ -145,16 +145,14 @@ func (c *conn) readLoop(ctx context.Context, keepAlive time.Duration) error {
 		if err != nil {
 			return c.readError(err)
 		}
-		// A closed connection's buffer can still hold packets the client sent
-		// before it was closed — on a takeover, before another connection was
-		// given its session. With a Keep Alive the deadline call above already
-		// fails on the closed socket; with Keep Alive 0 nothing did, and those
-		// packets went on acting on the successor's session.
-		select {
-		case <-c.done:
-			return errConnClosed
-		default:
-		}
+		// A displaced connection's buffer can still hold packets its client
+		// sent before the takeover, and they are handled. That is deliberate
+		// for acknowledgements: they come from the same client about messages
+		// it received, and dropping one makes the successor resend a message
+		// the client already acknowledged or refused (v0.4.2 tried, and
+		// TestARefusedMessageIsNotResent caught it). Handlers that must not act
+		// for a displaced connection check ownership themselves, as
+		// handleUnsubscribe and subscribeOne do.
 		if err := c.handle(ctx, pkt); err != nil {
 			return err
 		}
