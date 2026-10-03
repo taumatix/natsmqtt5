@@ -66,6 +66,20 @@ type outbound struct {
 	// back for each — and the broker exceeds the Receive Maximum that same
 	// client just advertised.
 	quotaHeld bool
+	// resentOn is the connection that last put this entry back on the wire
+	// after a resumption. An acknowledgement that completes the entry on any
+	// other connection (one displaced by a takeover, still draining its
+	// socket) leaves resentOn's client owing an acknowledgement for the copy
+	// it was sent; see completeInflight.
+	resentOn *conn
+}
+
+// withdrawal is an identifier the session no longer holds a message for, but
+// whose acknowledgement the client may still send.
+type withdrawal struct {
+	// quotaHolder is the connection whose send-quota slot the owed
+	// acknowledgement returns, or nil when it returns none.
+	quotaHolder *conn
 }
 
 // session is the MQTT Session State the broker holds for a Client Identifier
@@ -114,7 +128,7 @@ type session struct {
 	// denied on resume. The client was sent those messages and may still owe an
 	// acknowledgement for them, so one has to be ignored rather than answered
 	// with a protocol error.
-	withdrawn map[uint16]struct{}
+	withdrawn map[uint16]withdrawal
 
 	will          *packet.Will
 	willDelay     time.Duration
@@ -145,7 +159,7 @@ func newSession(clientID string) *session {
 		subs:         make(map[string]*subscription),
 		inflight:     make(map[uint16]*outbound),
 		receivedQoS2: make(map[uint16]struct{}),
-		withdrawn:    make(map[uint16]struct{}),
+		withdrawn:    make(map[uint16]withdrawal),
 	}
 }
 
@@ -287,12 +301,25 @@ func (s *session) unacknowledged() []outbound {
 // takeQuotaSlot records that the entry for id now holds a slot in the current
 // connection's send quota, and reports whether the entry was still there to
 // record it against.
-func (s *session) takeQuotaSlot(id uint16) bool {
+func (s *session) takeQuotaSlot(c *conn, id uint16) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	o, ok := s.inflight[id]
 	if ok {
 		o.quotaHeld = true
+		o.resentOn = c
+	}
+	return ok
+}
+
+// markResent records that c is about to resend the PUBREL for id, and reports
+// whether the exchange is still in flight.
+func (s *session) markResent(c *conn, id uint16) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	o, ok := s.inflight[id]
+	if ok {
+		o.resentOn = c
 	}
 	return ok
 }
@@ -311,7 +338,7 @@ func (s *session) awaitPubcomp(id uint16) {
 }
 
 // completeInflight removes the entry for id and reports whether one existed.
-func (s *session) completeInflight(id uint16) (outbound, bool) {
+func (s *session) completeInflight(c *conn, id uint16) (outbound, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	o, ok := s.inflight[id]
@@ -319,7 +346,25 @@ func (s *session) completeInflight(id uint16) (outbound, bool) {
 		return outbound{}, false
 	}
 	delete(s.inflight, id)
-	return *o, true
+	done := *o
+	if o.resentOn != nil && o.resentOn != c {
+		// The acknowledgement came from a connection displaced by a takeover,
+		// for a message its successor has since resent. It stands: the client
+		// did receive the message, and the session is the Client Identifier's,
+		// not the connection's (MQTT-5.0 §4.1). But the successor's client will
+		// acknowledge the copy it was sent too. Keep the identifier as owed,
+		// so that acknowledgement is ignored rather than answered with 0x82 and
+		// the identifier is not handed to a new message first; and leave the
+		// send-quota slot for that acknowledgement to return, on the connection
+		// that spent it.
+		w := withdrawal{}
+		if o.quotaHeld {
+			w.quotaHolder = o.resentOn
+		}
+		s.withdrawn[id] = w
+		done.quotaHeld = false
+	}
+	return done, true
 }
 
 // inflightEntry returns a copy of the entry for id. It is a copy for the same
@@ -370,7 +415,7 @@ func (s *session) withdrawInflight(denied, surviving []string) []uint16 {
 			continue
 		}
 		delete(s.inflight, id)
-		s.withdrawn[id] = struct{}{}
+		s.withdrawn[id] = withdrawal{}
 		taken = append(taken, id)
 	}
 	return taken
@@ -378,12 +423,12 @@ func (s *session) withdrawInflight(denied, surviving []string) []uint16 {
 
 // forgetWithdrawn reports whether id names a message the broker took back, and
 // forgets it if so. The acknowledgement that asks is the last one owed for it.
-func (s *session) forgetWithdrawn(id uint16) bool {
+func (s *session) forgetWithdrawn(id uint16) (withdrawal, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, ok := s.withdrawn[id]
+	w, ok := s.withdrawn[id]
 	delete(s.withdrawn, id)
-	return ok
+	return w, ok
 }
 
 // markQoS2Received records a QoS 2 Packet Identifier and reports whether it

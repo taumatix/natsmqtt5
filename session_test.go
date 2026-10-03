@@ -111,9 +111,12 @@ func TestWithdrawInflight(t *testing.T) {
 	_, ok = s.inflightEntry(4)
 	assert.True(t, ok, "an entry no denied filter earned is still owed [MQTT-4.4.0-1]")
 
-	assert.True(t, s.forgetWithdrawn(1), "a late acknowledgement for 1 must be recognised")
-	assert.False(t, s.forgetWithdrawn(1), "and recognised only once")
-	assert.False(t, s.forgetWithdrawn(2))
+	_, ok = s.forgetWithdrawn(1)
+	assert.True(t, ok, "a late acknowledgement for 1 must be recognised")
+	_, ok = s.forgetWithdrawn(1)
+	assert.False(t, ok, "and recognised only once")
+	_, ok = s.forgetWithdrawn(2)
+	assert.False(t, ok)
 }
 
 // A filter that survives shields the messages it matches even when a denied

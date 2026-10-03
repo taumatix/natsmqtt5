@@ -93,6 +93,9 @@ func (c *conn) writeResend(o outbound, live bool) (spentQuota bool, err error) {
 		// releaseQuota's non-blocking receive gives when the quota is
 		// otherwise idle; when it is not, this broker over-replenishes exactly
 		// as §4.9's own counter would.
+		if !c.sess.markResent(c, o.packetID) {
+			return false, nil
+		}
 		return false, c.write(&packet.Pubrel{Ack: packet.Ack{PacketID: o.packetID}})
 	}
 
@@ -100,7 +103,7 @@ func (c *conn) writeResend(o outbound, live bool) (spentQuota bool, err error) {
 	// acknowledgement returns this slot and not one belonging to something
 	// else. A false return means the exchange completed in the moment between
 	// the read above and here.
-	if !c.sess.takeQuotaSlot(o.packetID) {
+	if !c.sess.takeQuotaSlot(c, o.packetID) {
 		return false, nil
 	}
 
@@ -119,7 +122,7 @@ func (c *conn) writeResend(o outbound, live bool) (spentQuota bool, err error) {
 		// that Application Message" [MQTT-3.1.2-25]; keeping it in flight
 		// instead would resend an undeliverable packet on every future
 		// resumption and hold its quota slot for the life of the session.
-		c.sess.completeInflight(o.packetID)
+		c.sess.completeInflight(c, o.packetID)
 		return false, nil
 	}
 	return true, nil

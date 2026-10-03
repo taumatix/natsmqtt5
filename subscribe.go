@@ -392,7 +392,7 @@ func (c *conn) deliver(d *delivery) error {
 		// completed sending that Application Message" [MQTT-3.1.2-25]: the
 		// exchange ends here, rather than holding a Packet Identifier and a
 		// send-quota slot until the session does.
-		c.sess.completeInflight(id)
+		c.sess.completeInflight(c, id)
 		c.releaseQuota()
 	}
 	return nil
