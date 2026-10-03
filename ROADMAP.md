@@ -4,28 +4,33 @@ Ordered by how much they limit real deployments, not by how interesting they
 are to build. Each entry says what breaks today, so it can be judged on its
 own.
 
-## An acknowledgement in flight during a takeover can complete the successor's exchange
+## Acknowledgements across a takeover: decide what is correct before changing anything
 
-**Today:** since v0.4.2 a connection that has been closed (displaced by a takeover, for one)
-handles nothing more from its socket buffer, and UNSUBSCRIBE checks ownership atomically. What is
-left is narrower: a PUBACK, PUBREC or PUBCOMP that A's loop had *already started* handling when
-B took the session over. `completeInflight` and `forgetWithdrawn` act on the shared in-flight set
-with no ownership check. B resends the inherited in-flight messages under the same Packet
-Identifiers, so A's late PUBACK for N can complete B's exchange N, and B's own PUBACK for N then
-names an identifier the session no longer holds, which this broker answers by disconnecting B.
+**Today:** a displaced connection's buffered PUBACK, PUBREC or PUBCOMP is still applied to the
+session its successor now owns. v0.4.2 first tried dropping everything a closed connection had
+buffered, and `TestARefusedMessageIsNotResent` failed on CI and locally (2 of 15). A client that
+acks or refuses a message and immediately reconnects had its ack discarded, and the message was
+resent. So acks from the displaced connection are not simply wrong: they are the same client
+talking about messages it received.
 
-**Why it is not simply fixed:** each ack is legitimate from the owner and wrong from anyone else,
-as UNSUBSCRIBE was. But the ack paths are entangled with the withdrawn-identifier handling (an
-ack for a withdrawn id is swallowed, not refused), so the ownership check has to sit inside
-`completeInflight`, `awaitPubcomp` and `forgetWithdrawn` without changing what the owner sees.
+The case still worth thinking about is the cross-principal one, where A and B authenticate
+differently on the same Client Identifier. A's ack then completes an exchange B inherited. That is
+a correctness oddity (B's own ack for that identifier is then unknown), not a disclosure.
 
-**Shape:** `completeInflightFor(c, id)` and friends, mirroring `removeSubscriptionFor`. The
-window is one handler wide and cannot be held open from outside: no Authorizer call sits in an
-ack path. So the test is an internal one that drives two `conn`s on one session directly, the
-way `TestABoundButUninstalledSubscriptionDeliversNothing` does.
+**Shape:** first write down what the spec and real clients expect when an ack arrives on a
+connection that was taken over; MQTT-5.0 §4.4 is the place to start. Only then decide whether
+anything should change, and pin the answer with a test either way.
 
 A related gap: the restore path in `resumeSubscriptions` has the same guard as SUBSCRIBE, but no
 test drives a takeover in the middle of a stored-record resume. It is covered by reasoning only.
+
+## `TestWithdrawnFilterTakesItsUnacknowledgedMessagesWithIt` is order-flaky
+
+It failed once on CI (2026-10-04, macOS) and once in 55 local runs. At line 147 `public/a`
+arrived before `secret/a`, on the **first** connection, before anything the test is about. The
+two messages travel through two separate NATS subscriptions, and nats.go does not order deliveries
+across subscriptions. The test assumes it does. Publish the second message only after the first
+has been received, or compare as a set.
 
 ## Revoking a permission from a client that is already connected
 
