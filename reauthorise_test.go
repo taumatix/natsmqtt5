@@ -137,14 +137,19 @@ func TestWithdrawnFilterTakesItsUnacknowledgedMessagesWithIt(t *testing.T) {
 	raw.subscribe("public/#", packet.QoS1)
 
 	pub, _ := connectClient(t, addr, connectOpts("pub"))
-	pub.publish(&paho.Publish{Topic: "secret/a", QoS: 1, Payload: []byte("classified")})
-	pub.publish(&paho.Publish{Topic: "public/a", QoS: 1, Payload: []byte("fine")})
 
 	// Received and deliberately left unacknowledged, in the order they were
 	// sent — which is the order a resend has to use [MQTT-4.6.0-5], so a broker
 	// that resent the withdrawn one would be caught by the first read below.
+	//
+	// The second is published only once the first has arrived. They reach the
+	// broker through two different NATS subscriptions, and nats.go does not
+	// order deliveries across subscriptions: published back to back, public/a
+	// sometimes arrived first (CI, macOS, twice on 2026-10-04).
+	pub.publish(&paho.Publish{Topic: "secret/a", QoS: 1, Payload: []byte("classified")})
 	classified := raw.expectPublish()
 	require.Equal(t, "secret/a", classified.Topic)
+	pub.publish(&paho.Publish{Topic: "public/a", QoS: 1, Payload: []byte("fine")})
 	require.Equal(t, "public/a", raw.expectPublish().Topic)
 	raw.drop()
 

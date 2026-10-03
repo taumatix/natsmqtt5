@@ -24,14 +24,6 @@ anything should change, and pin the answer with a test either way.
 A related gap: the restore path in `resumeSubscriptions` has the same guard as SUBSCRIBE, but no
 test drives a takeover in the middle of a stored-record resume. It is covered by reasoning only.
 
-## `TestWithdrawnFilterTakesItsUnacknowledgedMessagesWithIt` is order-flaky
-
-It failed once on CI (2026-10-04, macOS) and once in 55 local runs. At line 147 `public/a`
-arrived before `secret/a`, on the **first** connection, before anything the test is about. The
-two messages travel through two separate NATS subscriptions, and nats.go does not order deliveries
-across subscriptions. The test assumes it does. Publish the second message only after the first
-has been received, or compare as a set.
-
 ## Revoking a permission from a client that is already connected
 
 **Today:** the Authorizer is consulted when a client subscribes, when it
