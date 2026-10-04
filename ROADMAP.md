@@ -4,17 +4,6 @@ Ordered by how much they limit real deployments, not by how interesting they
 are to build. Each entry says what breaks today, so it can be judged on its
 own.
 
-## `Reauthorize` reaches only the broker it is called on
-
-**Today:** `Broker.Reauthorize` (v0.5.0) acts on sessions in this broker's memory. With several
-brokers sharing a NATS cluster and a session store, a deployment has to call it on every broker,
-or on the one serving the client, which it has no easy way to know. A session held only in the
-store is re-checked when it is next resumed, so that case is safe, just late.
-
-**Shape:** a NATS subject the brokers listen on (under `SubjectPrefix`), so that one
-`Reauthorize` on any broker reaches the one holding the session. The request-reply answer says
-whether some broker held it. Needs the cluster tests the session store already has.
-
 ## Offline message queue: a durable consumer per session
 
 **Today:** messages published while a session is disconnected are dropped for
@@ -131,7 +120,8 @@ rather than silently losing its subscriptions. Fail-closed and non-destructive,
 which neither of today's two outcomes is.
 
 `Broker.Reauthorize` (v0.5.0) is a fourth: called during an outage, it removes every
-subscription it re-checks from a live connection.
+subscription it re-checks from a live connection. Since v0.6.0 it can also be triggered over NATS, on
+`_NATSMQTT5.reauthorize.<prefix>`, by anything allowed to publish there.
 
 There is now a third call site that conflates the two: `authoriseWill` answers
 any error with `0x87 Not authorized`, so a policy-service outage tells every

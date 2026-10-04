@@ -62,11 +62,11 @@ As a container, against a NATS server you already run:
 ```sh
 docker run --rm -p 1883:1883 \
   -e NATSMQTT5_NATS=nats://your-nats-server:4222 \
-  ghcr.io/taumatix/natsmqtt5:v0.5.0
+  ghcr.io/taumatix/natsmqtt5:v0.6.0
 ```
 
 Images are published for `linux/amd64` and `linux/arm64` on every release, as
-`:v0.5.0`, `:0.5.0`, `:0.5` and `:latest`. They are built from
+`:v0.6.0`, `:0.6.0`, `:0.6` and `:latest`. They are built from
 [distroless/static][distroless], so there is no shell and no package manager in
 them, and the broker runs as a non-root user.
 
@@ -74,7 +74,7 @@ If you have no NATS server yet, [compose.yaml](compose.yaml) starts one with
 JetStream enabled and the broker in front of it:
 
 ```sh
-curl -O https://raw.githubusercontent.com/taumatix/natsmqtt5/v0.5.0/compose.yaml
+curl -O https://raw.githubusercontent.com/taumatix/natsmqtt5/v0.6.0/compose.yaml
 docker compose up -d
 mosquitto_pub -V 5 -h localhost -p 1883 -t sensors/7/temp -m 21.5
 ```
@@ -82,21 +82,21 @@ mosquitto_pub -V 5 -h localhost -p 1883 -t sensors/7/temp -m 21.5
 Every flag has an environment variable twin — upper-case, `-` becomes `_`,
 behind a `NATSMQTT5_` prefix — so `-subject-prefix` is
 `NATSMQTT5_SUBJECT_PREFIX`. An explicit flag beats the environment. Run
-`docker run --rm ghcr.io/taumatix/natsmqtt5:v0.5.0 -h` for the full list.
+`docker run --rm ghcr.io/taumatix/natsmqtt5:v0.6.0 -h` for the full list.
 
 [distroless]: https://github.com/GoogleContainerTools/distroless
 
 As a binary:
 
 ```sh
-go install github.com/taumatix/natsmqtt5/cmd/natsmqtt5@v0.5.0
+go install github.com/taumatix/natsmqtt5/cmd/natsmqtt5@v0.6.0
 natsmqtt5 -nats nats://localhost:4222 -listen :1883
 ```
 
 As a library:
 
 ```sh
-go get github.com/taumatix/natsmqtt5@v0.5.0
+go get github.com/taumatix/natsmqtt5@v0.6.0
 ```
 
 Requires Go 1.25 or newer, and a NATS server with JetStream enabled (or
@@ -201,6 +201,15 @@ whatever tells you about revocations:
 The connection stays up, because a DISCONNECT would publish the Will being
 revoked. As at a resume, the client is not told which filters it lost, and any
 error from the `Authorizer` counts as a denial.
+
+Any broker will do. Brokers sharing a NATS cluster and a `SubjectPrefix` answer
+one another on `_NATSMQTT5.reauthorize.<prefix>`, and the one holding the
+session runs the sweep. When none holds it, `Reauthorize` returns nil after
+`ReauthorizeForwardWait` (one second), since an offline session is re-checked
+when it next connects. Anything that can publish on that subject can make a
+broker re-ask your `Authorizer`, which can only narrow a session; restrict
+`_NATSMQTT5.>` to the brokers' NATS user if your other NATS clients are not
+trusted.
 
 ## How MQTT maps onto NATS
 
