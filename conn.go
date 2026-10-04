@@ -28,7 +28,10 @@ type delivery struct {
 	// sub is the subscription that earned the message. A delivery queued
 	// before its subscription was removed is dropped rather than sent; see
 	// deliverLoop.
-	sub     *subscription
+	sub *subscription
+	// id is the message's Mqtt5-Msg-Id, which ties its live delivery to its
+	// offline-queue copy. Empty for a message published straight onto NATS.
+	id      string
 	topic   string
 	payload []byte
 	qos     packet.QoS
@@ -71,7 +74,10 @@ type conn struct {
 	aliases map[uint16]string
 
 	deliveries chan *delivery
-	quota      chan struct{}
+	// replayed holds the ids replayOffline delivered from the offline queue,
+	// so the live copy of one is skipped. Only the delivery goroutine uses it.
+	replayed map[string]bool
+	quota    chan struct{}
 
 	closeOnce sync.Once
 	done      chan struct{}
@@ -88,6 +94,7 @@ func newConn(b *Broker, nc net.Conn) *conn {
 		logger:     b.logger.With("remote", nc.RemoteAddr().String()),
 		aliases:    make(map[uint16]string),
 		deliveries: make(chan *delivery, deliveryQueueDepth),
+		replayed:   make(map[string]bool),
 		done:       make(chan struct{}),
 	}
 }
@@ -275,6 +282,9 @@ func (c *conn) finish(cause error) {
 	}
 
 	c.sess.detach(c)
+	if c.broker.queue != nil && c.sess.expiry() > 0 {
+		c.sess.markAway(time.Now())
+	}
 	// Hand the durable record back before tearing the session down, so the
 	// snapshot it writes still describes the session that existed.
 	c.broker.releaseStoredSession(c)

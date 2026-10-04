@@ -11,6 +11,25 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-05
+
+### Added
+
+- **An offline queue (`Options.OfflineQueue`, `-offline-queue`).** QoS 1 and 2 messages
+  published while a session is disconnected used to be dropped for it. With the queue on, they
+  are kept in a JetStream stream (`MQTT5_queue`, for `OfflineQueueMaxAge`, 24 hours by default)
+  and delivered when the session resumes. Delivery is in publish order, before live traffic, and
+  exactly once across the drop and the resume. This covers sessions held in the memory of the
+  broker the client returns to. Sessions restored from `PersistentSessions` come next (see
+  ROADMAP.md).
+- `Options.OfflineQueueMaxAge`, `OfflineQueueStorage` and `OfflineQueueReplicas`.
+
+### Changed
+
+- **Every message the broker publishes carries a `Mqtt5-Msg-Id` header**, so its live delivery
+  and its queued copy are known to be the same message. NATS-native subscribers see one more
+  header.
+
 ## [0.6.0] - 2026-10-05
 
 ### Added

@@ -34,6 +34,9 @@ type Broker struct {
 
 	mu       sync.Mutex
 	sessions map[string]*session
+	// queue holds QoS 1 and 2 messages for disconnected sessions, when
+	// Options.OfflineQueue is set; see offline.go.
+	queue *offlineQueue
 	// reauthSub answers other brokers' Reauthorize; see reauthorize.go.
 	reauthSub *nats.Subscription
 	conns     map[*conn]struct{}
@@ -84,7 +87,7 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 		b.ownsNC = true
 	}
 
-	if !r.DisableRetained || r.PersistentSessions {
+	if !r.DisableRetained || r.PersistentSessions || r.OfflineQueue {
 		js, err := jetstream.New(b.nc)
 		if err != nil {
 			b.closeNATS()
@@ -108,6 +111,15 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 		}
 	}
 
+	if r.OfflineQueue {
+		var err error
+		if b.queue, err = newOfflineQueue(ctx, b.js, r); err != nil {
+			b.closeSessionStore()
+			b.closeRetain()
+			b.closeNATS()
+			return nil, fmt.Errorf("natsmqtt5: setting up the offline queue: %w", err)
+		}
+	}
 	if err := b.listenForReauthorize(); err != nil {
 		b.closeSessionStore()
 		b.closeRetain()

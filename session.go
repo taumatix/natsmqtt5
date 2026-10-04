@@ -132,6 +132,13 @@ type session struct {
 
 	will      *packet.Will
 	willDelay time.Duration
+	// awayAt is when the session's last connection ended, for the offline
+	// queue's replay; zero when there is nothing to replay.
+	awayAt time.Time
+	// delivered is the offline-queue ids recently delivered to the client,
+	// with when, so a replay that rewinds past them does not repeat them.
+	delivered map[string]time.Time
+
 	// pendingWill is a Will whose connection has gone and which is waiting
 	// out its Will Delay Interval. It is published only if it is still here
 	// when the delay ends.
@@ -555,6 +562,50 @@ func (s *session) takeWill() (*packet.Will, time.Duration) {
 	w, d := s.will, s.willDelay
 	s.will, s.willDelay = nil, 0
 	return w, d
+}
+
+func (s *session) markAway(at time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.awayAt = at
+}
+
+// takeAway returns when the last connection ended, once.
+func (s *session) takeAway() (time.Time, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	at := s.awayAt
+	s.awayAt = time.Time{}
+	return at, !at.IsZero()
+}
+
+// noteDelivered records a delivered message id, forgetting those older than a
+// replay could rewind to.
+func (s *session) noteDelivered(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	if s.delivered == nil {
+		s.delivered = make(map[string]time.Time)
+	}
+	s.delivered[id] = now
+	if len(s.delivered) > 64 && len(s.delivered)%64 == 0 {
+		for k, at := range s.delivered {
+			if now.Sub(at) > 2*offlineRewind {
+				delete(s.delivered, k)
+			}
+		}
+	}
+}
+
+func (s *session) deliveredIDs() map[string]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]bool, len(s.delivered))
+	for k := range s.delivered {
+		out[k] = true
+	}
+	return out
 }
 
 func (s *session) setPendingWill(w *packet.Will) {

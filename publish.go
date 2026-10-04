@@ -75,6 +75,12 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 		c.logger.Warn("publishing to NATS failed", "subject", full, "error", err)
 		return c.rejectPublish(p, packet.ImplementationSpecificError, "the NATS server rejected the message")
 	}
+	if q := c.broker.queue; q != nil && p.QoS > packet.QoS0 {
+		if err := q.keep(c.broker.nc, subject, msg); err != nil {
+			// The live publish went out; only sessions that are away miss it.
+			c.logger.Warn("queueing a message for disconnected sessions failed", "subject", full, "error", err)
+		}
+	}
 
 	switch p.QoS {
 	case packet.QoS0:
@@ -286,9 +292,15 @@ func (b *Broker) publishWill(s *session, will *packet.Will) {
 	}
 
 	full := topic.Prefix(b.opts.SubjectPrefix, subject)
-	if err := b.nc.PublishMsg(toNATS(full, s.clientID, p)); err != nil {
+	msg := toNATS(full, s.clientID, p)
+	if err := b.nc.PublishMsg(msg); err != nil {
 		b.logger.Warn("publishing a will message failed", "topic", name, "error", err)
 		return
+	}
+	if b.queue != nil && p.QoS > packet.QoS0 {
+		if err := b.queue.keep(b.nc, subject, msg); err != nil {
+			b.logger.Warn("queueing a will message failed", "topic", name, "error", err)
+		}
 	}
 	b.logger.Info("published will message", "client_id", s.clientID, "topic", name)
 }

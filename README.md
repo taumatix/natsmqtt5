@@ -50,6 +50,10 @@ MQTT v5 clients ──TCP/TLS──▶ natsmqtt5 ──▶ your existing NATS se
   `PersistentSessions`, a client that reconnects with Clean Start 0 resumes its
   subscriptions on a broker that has never served it, and after a restart. Off
   by default; see [Persistent sessions](#persistent-sessions).
+- **Queues messages for a client that is away, if you ask it to.** With
+  `OfflineQueue`, QoS 1 and 2 messages published while a session is
+  disconnected are delivered when it resumes. Off by default; see
+  [Offline queue](#offline-queue).
 - **Embeds as a library.** `natsmqtt5.New` returns a `*Broker` you run inside
   your own process, sharing your `*nats.Conn` if you want.
 
@@ -62,11 +66,11 @@ As a container, against a NATS server you already run:
 ```sh
 docker run --rm -p 1883:1883 \
   -e NATSMQTT5_NATS=nats://your-nats-server:4222 \
-  ghcr.io/taumatix/natsmqtt5:v0.6.0
+  ghcr.io/taumatix/natsmqtt5:v0.7.0
 ```
 
 Images are published for `linux/amd64` and `linux/arm64` on every release, as
-`:v0.6.0`, `:0.6.0`, `:0.6` and `:latest`. They are built from
+`:v0.7.0`, `:0.7.0`, `:0.7` and `:latest`. They are built from
 [distroless/static][distroless], so there is no shell and no package manager in
 them, and the broker runs as a non-root user.
 
@@ -74,7 +78,7 @@ If you have no NATS server yet, [compose.yaml](compose.yaml) starts one with
 JetStream enabled and the broker in front of it:
 
 ```sh
-curl -O https://raw.githubusercontent.com/taumatix/natsmqtt5/v0.6.0/compose.yaml
+curl -O https://raw.githubusercontent.com/taumatix/natsmqtt5/v0.7.0/compose.yaml
 docker compose up -d
 mosquitto_pub -V 5 -h localhost -p 1883 -t sensors/7/temp -m 21.5
 ```
@@ -82,21 +86,21 @@ mosquitto_pub -V 5 -h localhost -p 1883 -t sensors/7/temp -m 21.5
 Every flag has an environment variable twin — upper-case, `-` becomes `_`,
 behind a `NATSMQTT5_` prefix — so `-subject-prefix` is
 `NATSMQTT5_SUBJECT_PREFIX`. An explicit flag beats the environment. Run
-`docker run --rm ghcr.io/taumatix/natsmqtt5:v0.6.0 -h` for the full list.
+`docker run --rm ghcr.io/taumatix/natsmqtt5:v0.7.0 -h` for the full list.
 
 [distroless]: https://github.com/GoogleContainerTools/distroless
 
 As a binary:
 
 ```sh
-go install github.com/taumatix/natsmqtt5/cmd/natsmqtt5@v0.6.0
+go install github.com/taumatix/natsmqtt5/cmd/natsmqtt5@v0.7.0
 natsmqtt5 -nats nats://localhost:4222 -listen :1883
 ```
 
 As a library:
 
 ```sh
-go get github.com/taumatix/natsmqtt5@v0.6.0
+go get github.com/taumatix/natsmqtt5@v0.7.0
 ```
 
 Requires Go 1.25 or newer, and a NATS server with JetStream enabled (or
@@ -210,6 +214,36 @@ when it next connects. Anything that can publish on that subject can make a
 broker re-ask your `Authorizer`, which can only narrow a session; restrict
 `_NATSMQTT5.>` to the brokers' NATS user if your other NATS clients are not
 trusted.
+
+## Offline queue
+
+Core NATS delivers a message to whoever is subscribed when it is published and
+keeps nothing, so by default a session whose client is disconnected misses what
+is published meanwhile. Turn on the queue:
+
+```go
+natsmqtt5.Options{OfflineQueue: true, OfflineQueueMaxAge: 24 * time.Hour}
+```
+
+or `-offline-queue` / `NATSMQTT5_OFFLINE_QUEUE=true` (and
+`-offline-queue-max-age`) for the binary and the image.
+
+When the session resumes, the client gets what its filters matched while it was
+away, in publish order, before anything published after it reconnected. A
+message is delivered once: what the client received before it dropped and what
+arrives live during the resume are not repeated.
+
+What it costs and what it does not cover yet:
+
+- Each QoS 1 and 2 message is published twice: live, and under
+  `<prefix>.$queue.<subject>` into the `MQTT5_queue` stream, which keeps it for
+  `OfflineQueueMaxAge` (24 hours by default). QoS 0 is not queued.
+- It covers sessions held in the memory of the broker the client reconnects to.
+  A session restored from `PersistentSessions` after a restart or on another
+  broker is not replayed yet, nor is a message published straight onto NATS
+  rather than through a broker ([ROADMAP.md](ROADMAP.md)).
+- A resume reads everything queued since the client left and matches it in the
+  broker, so a long absence on a busy broker takes longer to catch up.
 
 ## How MQTT maps onto NATS
 

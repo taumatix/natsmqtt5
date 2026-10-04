@@ -131,6 +131,28 @@ type Options struct {
 	// Defaults to 1.
 	SessionReplicas int
 
+	// OfflineQueue keeps QoS 1 and QoS 2 messages for a session while its
+	// client is disconnected, and delivers them when the session resumes, in
+	// publish order and before anything published after the resume. Without
+	// it they are dropped for that session, as core NATS keeps nothing.
+	//
+	// Each such message is published a second time, under
+	// <SubjectPrefix>.$queue.<subject>, into a JetStream stream that keeps it
+	// for OfflineQueueMaxAge. It covers sessions held in this broker's memory;
+	// a session restored from the session store after a restart, and messages
+	// published straight onto NATS rather than through a broker, are not
+	// queued yet (ROADMAP.md).
+	OfflineQueue bool
+	// OfflineQueueMaxAge is how long a queued message is kept. Defaults to 24
+	// hours. A session away for longer loses what is older.
+	OfflineQueueMaxAge time.Duration
+	// OfflineQueueStorage selects file or memory storage for the queue
+	// stream. Defaults to file storage.
+	OfflineQueueStorage jetstream.StorageType
+	// OfflineQueueReplicas is the JetStream replica count for the queue
+	// stream. Defaults to 1.
+	OfflineQueueReplicas int
+
 	// Authenticator, when non-nil, decides whether a CONNECT is accepted. When
 	// nil every connection is accepted, which is only appropriate on a trusted
 	// network.
@@ -205,6 +227,12 @@ func (o Options) resolve() (*resolved, error) {
 	}
 	if r.NATSURL == "" {
 		r.NATSURL = nats.DefaultURL
+	}
+	if r.OfflineQueueMaxAge <= 0 {
+		r.OfflineQueueMaxAge = 24 * time.Hour
+	}
+	if r.OfflineQueueReplicas == 0 {
+		r.OfflineQueueReplicas = 1
 	}
 	if r.RetainedReplicas == 0 {
 		r.RetainedReplicas = 1

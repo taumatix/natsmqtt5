@@ -4,17 +4,34 @@ Ordered by how much they limit real deployments, not by how interesting they
 are to build. Each entry says what breaks today, so it can be judged on its
 own.
 
-## Offline message queue: a durable consumer per session
+## Offline message queue
 
-**Today:** messages published while a session is disconnected are dropped for
-it, whether or not the session is persisted. The broker now resends what it was
-already holding when a connection died (MQTT-5.0 §4.4), but a message published
-into the gap was never held by anything — core NATS fans out to whoever is
-subscribed at the time and keeps nothing.
+**Today:** messages published while a session is disconnected are dropped for it, whether or not
+the session is persisted. Core NATS fans out to whoever is subscribed at the time and keeps
+nothing. It is the largest entry here, so it ships in pieces:
 
-**Shape:** a durable JetStream consumer per session, filtered to the session's
-subject set, delivering on resume from where the session left off. This is the
-entry the other two below depend on, and the largest of the three.
+### 1a. Queue for a session held in this broker's memory (opt-in)
+
+`Options.OfflineQueue`: the broker publishes a copy of each QoS 1/2 message under
+`<prefix>.$queue.<subject>`, kept by a JetStream stream with a maximum age. A stream on
+`<prefix>.>` itself would overlap the retained stream on `<prefix>.$retained.>`, which JetStream
+refuses. When a session with an expiry disconnects, the stream's position is recorded. On resume,
+before going live, the delivery loop replays what the session's filters match since then. A
+message-id header lets the live path skip what was replayed, because QoS 2 must not arrive twice.
+
+### 1b. Queue for a session restored from the session store
+
+After a restart, or on another broker, the recorded position has to come from the stored record.
+
+### 1c. Replay without scanning everything published
+
+1a reads every queued message since the disconnect and matches each in Go. `FilterSubjects`
+would let JetStream do it, but it refuses overlapping filters (`a.>` with `a.b`), so the
+session's filters have to be reduced to a non-overlapping set first.
+
+### 1d. Messages published by plain NATS clients
+
+Only messages that pass through a broker are copied to the queue.
 
 ## Retransmission that survives a broker restart
 

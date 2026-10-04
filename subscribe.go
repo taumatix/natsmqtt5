@@ -278,14 +278,22 @@ func (c *conn) onNATSMessage(sub *subscription, msg *nats.Msg) {
 	if !topic.Match(sub.filter, name) {
 		return
 	}
+	if d := c.deliveryFor(sub, name, msg); d != nil {
+		c.enqueue(d)
+	}
+}
 
+// deliveryFor turns a message on name into what sub delivers, or nil when the
+// subscription's options say it delivers nothing. The caller has matched name
+// against sub's filter.
+func (c *conn) deliveryFor(sub *subscription, name string, msg *nats.Msg) *delivery {
 	qos, retain, origin, props := fromNATS(msg)
 
 	// "If the value is 1, Application Messages MUST NOT be forwarded to a
 	// connection with a ClientID equal to the ClientID of the publishing
 	// connection" [MQTT-3.8.3-3].
 	if sub.opts.NoLocal && origin == c.sess.clientID {
-		return
+		return nil
 	}
 	// Retain As Published: keep the flag only if the subscription asked for it
 	// [MQTT-3.3.1-12, MQTT-3.3.1-13].
@@ -296,8 +304,9 @@ func (c *conn) onNATSMessage(sub *subscription, msg *nats.Msg) {
 		props.SubscriptionIdentifiers = []int{sub.id}
 	}
 
-	c.enqueue(&delivery{
+	return &delivery{
 		sub:   sub,
+		id:    messageID(msg),
 		topic: name,
 		// "The QoS of Application Messages sent in response to a Subscription
 		// MUST be the minimum of the QoS of the originally published message
@@ -306,7 +315,7 @@ func (c *conn) onNATSMessage(sub *subscription, msg *nats.Msg) {
 		retain:  retain,
 		payload: msg.Data,
 		props:   props,
-	})
+	}
 }
 
 func minQoS(a, b packet.QoS) packet.QoS {
@@ -341,12 +350,22 @@ func (c *conn) deliverLoop() {
 		c.close()
 		return
 	}
+	if err := c.replayOffline(); err != nil {
+		c.logger.Debug("could not deliver the offline queue", "error", err)
+		c.close()
+		return
+	}
 
 	for {
 		select {
 		case <-c.done:
 			return
 		case d := <-c.deliveries:
+			if d.id != "" && c.replayed[d.id] {
+				// Its queued copy was replayed; this is the live copy arriving
+				// late, and QoS 2 must not deliver twice.
+				continue
+			}
 			if d.sub != nil && !d.sub.live.Load() {
 				// Queued before its subscription was removed, by an UNSUBSCRIBE
 				// or by Broker.Reauthorize. A server "MAY continue to deliver any
@@ -400,6 +419,11 @@ func (c *conn) deliver(d *delivery) error {
 	sent, err := c.writePublish(pub)
 	if err != nil {
 		return err
+	}
+	if d.id != "" && c.broker.queue != nil {
+		// Delivered, or discarded as too large, which counts as delivered
+		// [MQTT-3.1.2-25]: either way a replay must not send it again.
+		c.sess.noteDelivered(d.id)
 	}
 	if !sent {
 		// Discarded for exceeding the client's Maximum Packet Size, so no
