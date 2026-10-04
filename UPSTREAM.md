@@ -7,7 +7,7 @@ controls. This file says which versions it was built and checked against.
 - name: mqtt-specification
   kind: literal
   value: "MQTT Version 5.0, OASIS Standard, 2019-03-07"
-  checked: 2026-09-27
+  checked: 2026-10-05
   note: >-
     the normative reference; source clauses are cited inline as MQTT-5.0 §x.y.z.
     Re-read at docs.oasis-open.org on 2026-09-24: the document's own status line
@@ -20,7 +20,7 @@ controls. This file says which versions it was built and checked against.
   kind: github-release
   repo: nats-io/nats-server
   tag: v2.14.5
-  checked: 2026-09-27
+  checked: 2026-10-05
   hold: "issue #11 — v2.15.0 needs Go 1.26, this module's floor is 1.25, dependency is test-only"
   note: held deliberately; the gap is still reported, it just does not raise the alarm
 
@@ -28,7 +28,7 @@ controls. This file says which versions it was built and checked against.
   kind: github-release
   repo: nats-io/nats.go
   tag: v1.53.1
-  checked: 2026-09-27
+  checked: 2026-10-05
   hold: >-
     issue #11 — v1.54.0 declares go 1.26.0, and taking it rewrites this module's
     directive from 1.25.0 to 1.26.0 (probed, not assumed). Unlike nats-server this
@@ -50,7 +50,7 @@ controls. This file says which versions it was built and checked against.
   kind: github-release
   repo: eclipse-paho/paho.golang
   tag: v0.23.0
-  checked: 2026-09-27
+  checked: 2026-10-05
   note: the third-party MQTT client the end-to-end tests drive the broker with
 ```
 
