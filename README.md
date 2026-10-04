@@ -235,9 +235,13 @@ arrives live during the resume are not repeated.
 
 What it costs and what it does not cover yet:
 
-- Each QoS 1 and 2 message is published twice: live, and under
+- Each QoS 1 and 2 message is published twice: first under
   `<prefix>.$queue.<subject>` into the `MQTT5_queue` stream, which keeps it for
-  `OfflineQueueMaxAge` (24 hours by default). QoS 0 is not queued.
+  `OfflineQueueMaxAge` (24 hours by default), and then live. The broker waits
+  for JetStream to confirm the first before publishing live and acknowledging
+  the client, which adds a JetStream round trip to every QoS 1 and 2 publish.
+  If JetStream cannot store it, the publish is refused, so the client tries
+  again. QoS 0 is not queued.
 - It covers sessions held in the memory of the broker the client reconnects to.
   A session restored from `PersistentSessions` after a restart or on another
   broker is not replayed yet, nor is a message published straight onto NATS

@@ -22,6 +22,11 @@ honestly be reconstructed now.
   exactly once across the drop and the resume. This covers sessions held in the memory of the
   broker the client returns to. Sessions restored from `PersistentSessions` come next (see
   ROADMAP.md).
+  The queued copy is stored, and confirmed by JetStream, before the message is published live
+  and acknowledged. That adds a JetStream round trip to each QoS 1 and 2 publish, and refuses
+  the publish if JetStream cannot store it. Storing it afterwards could lose a message published
+  just before a client resumed. CI caught that on the first version, and it is reproduced in
+  the tests by delaying the store.
 - `Options.OfflineQueueMaxAge`, `OfflineQueueStorage` and `OfflineQueueReplicas`.
 
 ### Changed

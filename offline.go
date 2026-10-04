@@ -67,12 +67,25 @@ func queuedSubject(prefix, subject string) string {
 	return topic.Prefix(prefix, "$queue."+subject)
 }
 
-// keep publishes the queue's copy of msg, a message the broker has just
-// published on subject (without the prefix).
-func (q *offlineQueue) keep(nc *nats.Conn, subject string, msg *nats.Msg) error {
+// keep stores the queue's copy of msg, a message about to be published on
+// subject (without the prefix), and returns once JetStream has it.
+//
+// It runs before the live publish, and waits, and that order is what makes a
+// resume lose nothing. A replay reads up to the stream's end as it is when the
+// replay starts, which is after the session has its connection again. A copy
+// stored after that point belongs to a live publish made after it too, which
+// the reattached session receives live. Stored the other way round, a message
+// published just before a resume had its live copy dropped while the session
+// was away and its queued copy stored too late for the replay, and was lost
+// (found on CI, on #36's merge commit).
+func (q *offlineQueue) keep(ctx context.Context, js jetstream.JetStream, subject string, msg *nats.Msg) error {
 	copied := &nats.Msg{Subject: queuedSubject(q.prefix, subject), Header: msg.Header, Data: msg.Data}
-	return nc.PublishMsg(copied)
+	_, err := js.PublishMsg(ctx, copied)
+	return err
 }
+
+// offlineKeepTimeout bounds waiting for JetStream to store a queue copy.
+const offlineKeepTimeout = 5 * time.Second
 
 // replay calls fn with every queued message stored since `since`, in order,
 // up to the end of the stream as it is when replay starts. The subject handed

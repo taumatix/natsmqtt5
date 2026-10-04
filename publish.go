@@ -71,15 +71,21 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 	}
 
 	msg := toNATS(full, c.sess.clientID, p)
+	if q := c.broker.queue; q != nil && p.QoS > packet.QoS0 {
+		// Queued first, and confirmed; see offlineQueue.keep for why the
+		// order matters. Refusing on failure lets the client try again rather
+		// than have the message reach only the sessions that are connected.
+		kctx, cancel := context.WithTimeout(ctx, offlineKeepTimeout)
+		err := q.keep(kctx, c.broker.js, subject, msg)
+		cancel()
+		if err != nil {
+			c.logger.Warn("queueing a message for disconnected sessions failed", "subject", full, "error", err)
+			return c.rejectPublish(p, packet.ImplementationSpecificError, "the message could not be queued")
+		}
+	}
 	if err := c.broker.nc.PublishMsg(msg); err != nil {
 		c.logger.Warn("publishing to NATS failed", "subject", full, "error", err)
 		return c.rejectPublish(p, packet.ImplementationSpecificError, "the NATS server rejected the message")
-	}
-	if q := c.broker.queue; q != nil && p.QoS > packet.QoS0 {
-		if err := q.keep(c.broker.nc, subject, msg); err != nil {
-			// The live publish went out; only sessions that are away miss it.
-			c.logger.Warn("queueing a message for disconnected sessions failed", "subject", full, "error", err)
-		}
 	}
 
 	switch p.QoS {
@@ -293,14 +299,17 @@ func (b *Broker) publishWill(s *session, will *packet.Will) {
 
 	full := topic.Prefix(b.opts.SubjectPrefix, subject)
 	msg := toNATS(full, s.clientID, p)
+	if b.queue != nil && p.QoS > packet.QoS0 {
+		kctx, cancel := context.WithTimeout(context.Background(), offlineKeepTimeout)
+		if err := b.queue.keep(kctx, b.js, subject, msg); err != nil {
+			// A Will has no one to refuse to; it still goes out live.
+			b.logger.Warn("queueing a will message failed", "topic", name, "error", err)
+		}
+		cancel()
+	}
 	if err := b.nc.PublishMsg(msg); err != nil {
 		b.logger.Warn("publishing a will message failed", "topic", name, "error", err)
 		return
-	}
-	if b.queue != nil && p.QoS > packet.QoS0 {
-		if err := b.queue.keep(b.nc, subject, msg); err != nil {
-			b.logger.Warn("queueing a will message failed", "topic", name, "error", err)
-		}
 	}
 	b.logger.Info("published will message", "client_id", s.clientID, "topic", name)
 }
