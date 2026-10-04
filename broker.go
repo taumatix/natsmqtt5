@@ -262,9 +262,11 @@ func (b *Broker) closeRetain() {
 }
 
 func (b *Broker) closeNATS() {
+	// b.nc is not cleared: Serve's start-up and a delayed Will firing on
+	// shutdown read it without a lock, and a drained connection answers them
+	// with an error where a nil one would race or panic.
 	if b.ownsNC && b.nc != nil {
 		b.nc.Drain()
-		b.nc = nil
 	}
 }
 

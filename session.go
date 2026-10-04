@@ -130,8 +130,12 @@ type session struct {
 	// with a protocol error.
 	withdrawn map[uint16]withdrawal
 
-	will          *packet.Will
-	willDelay     time.Duration
+	will      *packet.Will
+	willDelay time.Duration
+	// pendingWill is a Will whose connection has gone and which is waiting
+	// out its Will Delay Interval. It is published only if it is still here
+	// when the delay ends.
+	pendingWill   *packet.Will
 	expirySeconds uint32
 	// disconnectedAt is when the connection went away, used with
 	// expirySeconds to decide whether the session may still be resumed.
@@ -171,6 +175,9 @@ func (s *session) attach(c *conn) *conn {
 	prev := s.conn
 	s.conn = c
 	s.disconnectedAt = time.Time{}
+	// A resumption cancels a delayed Will [MQTT-3.1.3-9]; clearing it here
+	// keeps it cancelled even if this connection ends before the delay does.
+	s.pendingWill = nil
 
 	// "The send quota and Receive Maximum value are not preserved across
 	// Network Connections, and are re-initialized with each new Network
@@ -398,9 +405,9 @@ func (s *session) inflightEntry(id uint16) (outbound, bool) {
 // a PUBCOMP forever, and its Packet Identifier unusable, to prevent a
 // disclosure that has already happened.
 //
-// It runs during the handshake, where attach has just cleared every entry's
-// claim on the send quota and the delivery goroutine has not started, so no
-// entry it removes is holding a slot that would have to be returned.
+// At the handshake attach has just cleared every entry's claim on the send
+// quota. From Broker.Reauthorize, on a live connection, an entry may hold one,
+// and the withdrawal records it so the acknowledgement still returns it.
 func (s *session) withdrawInflight(denied, surviving []string) []uint16 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -415,7 +422,13 @@ func (s *session) withdrawInflight(denied, surviving []string) []uint16 {
 			continue
 		}
 		delete(s.inflight, id)
-		s.withdrawn[id] = withdrawal{}
+		w := withdrawal{}
+		if o.quotaHeld {
+			// Only on a live connection: attach clears every claim at the
+			// handshake. The client's acknowledgement returns this slot.
+			w.quotaHolder = s.conn
+		}
+		s.withdrawn[id] = w
 		taken = append(taken, id)
 	}
 	return taken
@@ -542,6 +555,47 @@ func (s *session) takeWill() (*packet.Will, time.Duration) {
 	w, d := s.will, s.willDelay
 	s.will, s.willDelay = nil, 0
 	return w, d
+}
+
+func (s *session) setPendingWill(w *packet.Will) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pendingWill = w
+}
+
+// takePendingWill reports whether w is still the pending Will, and clears it
+// if so, so that it is published at most once.
+func (s *session) takePendingWill(w *packet.Will) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pendingWill != w {
+		return false
+	}
+	s.pendingWill = nil
+	return true
+}
+
+// currentWill returns the Will that would be published for this session: the
+// connection's, or one already waiting out its delay.
+func (s *session) currentWill() *packet.Will {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.will != nil {
+		return s.will
+	}
+	return s.pendingWill
+}
+
+// discardWill drops w, wherever it is held, so it is never published.
+func (s *session) discardWill(w *packet.Will) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.will == w {
+		s.will, s.willDelay = nil, 0
+	}
+	if s.pendingWill == w {
+		s.pendingWill = nil
+	}
 }
 
 // currentConn returns the connection serving the session, or nil while it is

@@ -11,6 +11,34 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-04
+
+### Added
+
+- **`Broker.Reauthorize(ctx, clientID)`: revoke a permission from a client that is still
+  connected.** The `Authorizer` was asked at SUBSCRIBE, at publish, at CONNECT for the Will, and
+  at resume, never while a client simply stayed connected. A client that kept its connection for
+  a week kept receiving on a filter its principal lost on day one. `Reauthorize` re-runs the
+  `Authorizer` over the session's subscriptions and Will:
+  - a denied subscription stops delivering at once, including messages already queued for the
+    connection;
+  - its unacknowledged messages are withdrawn, so a resume does not resend them, and their
+    acknowledgements still return the send-quota slot;
+  - a denied Will is discarded, even one waiting out its Will Delay Interval.
+
+  The connection stays up. Call it from whatever tells you about revocations.
+
+### Fixed
+
+- A message queued for a subscription that was then removed (by an UNSUBSCRIBE, or by
+  `Reauthorize`) is no longer delivered after the removal, including one waiting for room in the
+  client's Receive Maximum. MQTT-5.0 §3.10.4 allows either behaviour after an UNSUBSCRIBE.
+- A delayed Will cancelled by a resumption stays cancelled even if the resumed connection ends
+  before the delay does. Before, the original timer published it when it woke.
+- `Broker.Close` no longer clears the NATS connection it drains, which raced with `Serve`'s
+  start-up and with delayed Wills firing on shutdown. `Broker.NATS()` after `Close` now returns
+  the drained connection rather than `nil`.
+
 ## [0.4.3] - 2026-10-04
 
 A fix. No API change and no configuration change.

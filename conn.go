@@ -25,6 +25,10 @@ const deliveryQueueDepth = 2048
 // delivery is a message on its way to a client, after the subscription that
 // matched it has been resolved.
 type delivery struct {
+	// sub is the subscription that earned the message. A delivery queued
+	// before its subscription was removed is dropped rather than sent; see
+	// deliverLoop.
+	sub     *subscription
 	topic   string
 	payload []byte
 	qos     packet.QoS
@@ -317,6 +321,9 @@ func (c *conn) scheduleWill() {
 		return
 	}
 
+	// Held where Broker.Reauthorize can find it, so a Will whose permission
+	// is revoked during the delay can be discarded before it fires.
+	sess.setPendingWill(will)
 	go func() {
 		timer := time.NewTimer(delay)
 		defer timer.Stop()
@@ -327,6 +334,11 @@ func (c *conn) scheduleWill() {
 		if sess.hasConn() {
 			// The session was resumed before the delay elapsed
 			// [MQTT-3.1.3-9].
+			return
+		}
+		if !sess.takePendingWill(will) {
+			// Discarded by Broker.Reauthorize, or cancelled by a resumption
+			// that has since ended in a disconnect of its own.
 			return
 		}
 		c.broker.publishWill(sess, will)

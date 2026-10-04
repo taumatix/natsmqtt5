@@ -57,6 +57,14 @@ func startBroker(t *testing.T, natsURL string, customise ...func(*natsmqtt5.Opti
 // optional: the cleanup runs it if the test did not.
 func startStoppableBroker(t *testing.T, natsURL string, customise ...func(*natsmqtt5.Options)) (addr string, stop func()) {
 	t.Helper()
+	_, addr, stop = startBrokerHandle(t, natsURL, customise...)
+	return addr, stop
+}
+
+// startBrokerHandle is startStoppableBroker with the *Broker itself, for a test
+// that calls its methods.
+func startBrokerHandle(t *testing.T, natsURL string, customise ...func(*natsmqtt5.Options)) (*natsmqtt5.Broker, string, func()) {
+	t.Helper()
 
 	opts := natsmqtt5.Options{
 		NATSURL: natsURL,
@@ -75,7 +83,7 @@ func startStoppableBroker(t *testing.T, natsURL string, customise ...func(*natsm
 	go func() { served <- b.Serve(ctx) }()
 
 	var once sync.Once
-	stop = func() {
+	stop := func() {
 		once.Do(func() {
 			cancel()
 			require.NoError(t, b.Close())
@@ -89,7 +97,7 @@ func startStoppableBroker(t *testing.T, natsURL string, customise ...func(*natsm
 	}
 	t.Cleanup(stop)
 
-	return b.ListenAddr().String(), stop
+	return b, b.ListenAddr().String(), stop
 }
 
 // received is one message a test client got, flattened into the fields the
