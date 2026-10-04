@@ -28,6 +28,9 @@ const (
 	// hdrOrigin carries the publishing Client Identifier, which the No Local
 	// subscription option needs [MQTT-3.8.3-3].
 	hdrOrigin = "Mqtt5-Origin"
+	// hdrMsgID identifies one published message across its live delivery and
+	// its offline-queue copy, so a session resuming does not get it twice.
+	hdrMsgID = "Mqtt5-Msg-Id"
 )
 
 // Header values must survive the NATS protocol's line-oriented framing, and
@@ -113,6 +116,7 @@ func toNATS(subject, originClientID string, p *packet.Publish) *nats.Msg {
 	msg.Data = p.Payload
 
 	msg.Header.Set(hdrQoS, strconv.Itoa(int(p.QoS)))
+	msg.Header.Set(hdrMsgID, newMessageID())
 	if p.Retain {
 		msg.Header.Set(hdrRetain, "1")
 	}
