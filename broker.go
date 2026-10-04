@@ -34,8 +34,10 @@ type Broker struct {
 
 	mu       sync.Mutex
 	sessions map[string]*session
-	conns    map[*conn]struct{}
-	closed   bool
+	// reauthSub answers other brokers' Reauthorize; see reauthorize.go.
+	reauthSub *nats.Subscription
+	conns     map[*conn]struct{}
+	closed    bool
 	// shutdown closes when Close is called, so background work such as a
 	// delayed Will publication stops rather than firing into a dead broker.
 	shutdown chan struct{}
@@ -106,7 +108,14 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 		}
 	}
 
+	if err := b.listenForReauthorize(); err != nil {
+		b.closeSessionStore()
+		b.closeRetain()
+		b.closeNATS()
+		return nil, err
+	}
 	if err := b.listen(); err != nil {
+		b.stopReauthorize()
 		b.closeSessionStore()
 		b.closeRetain()
 		b.closeNATS()
@@ -209,6 +218,8 @@ func (b *Broker) Close() error {
 	// and has released its stored record, so a broker that shuts down cleanly
 	// leaves no record claiming it is still being served.
 	b.wg.Wait()
+	// Explicitly, since a NATS connection the caller passed in is not drained.
+	b.stopReauthorize()
 	b.closeSessionStore()
 	b.closeRetain()
 	b.closeNATS()
@@ -244,6 +255,12 @@ func (b *Broker) drainConns() {
 
 	for _, c := range conns {
 		c.shutdown(packet.ServerShuttingDown, "broker shutting down")
+	}
+}
+
+func (b *Broker) stopReauthorize() {
+	if b.reauthSub != nil {
+		_ = b.reauthSub.Unsubscribe()
 	}
 }
 

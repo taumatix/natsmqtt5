@@ -11,6 +11,25 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-05
+
+### Added
+
+- **`Broker.Reauthorize` reaches the broker holding the session, from any broker.** With several
+  brokers on one NATS cluster, a deployment had to call it on the one serving the client, which it
+  had no easy way to know. Brokers sharing a `SubjectPrefix` now listen on
+  `_NATSMQTT5.reauthorize.<prefix>`. A broker that does not hold the session asks there, and the
+  one that does runs the sweep and answers. When none does, `Reauthorize` returns nil after
+  `ReauthorizeForwardWait` (one second) or when its context ends.
+- `ReauthorizeForwardWait`.
+
+### Security
+
+- Anything able to publish on `_NATSMQTT5.reauthorize.<prefix>` can make a broker re-run its
+  `Authorizer` over a session. That can only narrow the session, but an `Authorizer` outage turns
+  it into removed subscriptions. If untrusted clients share your NATS, restrict `_NATSMQTT5.>` to
+  the brokers' NATS user.
+
 ## [0.5.0] - 2026-10-04
 
 ### Added

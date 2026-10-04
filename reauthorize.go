@@ -2,7 +2,12 @@ package natsmqtt5
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"time"
+
+	"github.com/nats-io/nats.go"
 )
 
 // Reauthorize re-runs the Authorizer over everything the session for clientID
@@ -25,20 +30,35 @@ import (
 // returns is a denial, so an Authorizer that cannot reach its policy should not
 // be asked to re-check a fleet during an outage.
 //
-// It returns nil when no session for clientID is held in this broker's memory:
-// a session elsewhere, or only in the session store, is re-checked when it is
-// next resumed. It returns ctx's error, having changed nothing further, if ctx
-// ends during the sweep.
+// Any broker will do. One that does not hold the session asks the others
+// sharing its NATS connection and SubjectPrefix, and the one holding it runs
+// the sweep and answers. When none holds it after [ReauthorizeForwardWait] (or
+// when ctx ends first), it returns nil: a session held nowhere, only in the
+// session store, is re-checked when it is next resumed. It returns ctx's error,
+// having changed nothing further, if ctx ends during this broker's own sweep,
+// and the holder's error if its sweep failed.
 func (b *Broker) Reauthorize(ctx context.Context, clientID string) error {
+	if b.opts.Authorizer == nil {
+		return nil
+	}
+	held, err := b.reauthorizeLocal(ctx, clientID)
+	if err != nil || held {
+		return err
+	}
+	return b.forwardReauthorize(ctx, clientID)
+}
+
+// reauthorizeLocal sweeps the session for clientID if this broker holds it.
+func (b *Broker) reauthorizeLocal(ctx context.Context, clientID string) (held bool, err error) {
 	a := b.opts.Authorizer
 	if a == nil {
-		return nil
+		return false, nil
 	}
 	b.mu.Lock()
 	s, ok := b.sessions[clientID]
 	b.mu.Unlock()
 	if !ok {
-		return nil
+		return false, nil
 	}
 	identity, username := s.principal()
 
@@ -55,7 +75,7 @@ func (b *Broker) Reauthorize(ctx context.Context, clientID string) error {
 		})
 		if ctx.Err() != nil {
 			// The Authorizer's answer may only reflect the cancelled context.
-			return fmt.Errorf("reauthorizing %q: %w", clientID, ctx.Err())
+			return true, fmt.Errorf("reauthorizing %q: %w", clientID, ctx.Err())
 		}
 		if err == nil {
 			surviving = append(surviving, sub.filter)
@@ -90,7 +110,7 @@ func (b *Broker) Reauthorize(ctx context.Context, clientID string) error {
 			Retain:   will.Retain,
 		})
 		if ctx.Err() != nil {
-			return fmt.Errorf("reauthorizing %q: %w", clientID, ctx.Err())
+			return true, fmt.Errorf("reauthorizing %q: %w", clientID, ctx.Err())
 		}
 		if err != nil {
 			b.logger.Warn("discarding a Will Message whose permission was revoked",
@@ -98,5 +118,99 @@ func (b *Broker) Reauthorize(ctx context.Context, clientID string) error {
 			s.discardWill(will)
 		}
 	}
+	return true, nil
+}
+
+// ReauthorizeForwardWait is how long [Broker.Reauthorize] waits for another
+// broker to say it holds a session this one does not. Every broker answers at
+// once, so the wait is spent only when no broker holds it.
+const ReauthorizeForwardWait = time.Second
+
+// reauthorizeRemoteTimeout bounds a sweep run for another broker's caller,
+// whose own context does not reach here.
+const reauthorizeRemoteTimeout = 30 * time.Second
+
+type reauthorizeRequest struct {
+	ClientID string `json:"client_id"`
+}
+
+type reauthorizeReply struct {
+	Held  bool   `json:"held"`
+	Error string `json:"error,omitempty"`
+}
+
+// reauthorizeSubject is where the brokers sharing a SubjectPrefix listen for
+// one another's Reauthorize. It lies outside the prefix, so no MQTT topic maps
+// onto it, and carries the prefix, so brokers serving different namespaces on
+// one NATS cluster do not sweep each other's Client Identifiers.
+func (b *Broker) reauthorizeSubject() string {
+	return "_NATSMQTT5.reauthorize." + b.opts.SubjectPrefix
+}
+
+// listenForReauthorize answers other brokers' Reauthorize. Every broker
+// answers, held or not, so that a caller is not left waiting for the holder
+// longer than it takes the holder to sweep.
+func (b *Broker) listenForReauthorize() error {
+	sub, err := b.nc.Subscribe(b.reauthorizeSubject(), func(m *nats.Msg) {
+		var req reauthorizeRequest
+		if err := json.Unmarshal(m.Data, &req); err != nil || req.ClientID == "" {
+			return
+		}
+		// Off the NATS dispatcher: a slow Authorizer must not hold up the
+		// next request.
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), reauthorizeRemoteTimeout)
+			defer cancel()
+			held, err := b.reauthorizeLocal(ctx, req.ClientID)
+			reply := reauthorizeReply{Held: held}
+			if err != nil {
+				reply.Error = err.Error()
+			}
+			data, _ := json.Marshal(reply)
+			_ = m.Respond(data)
+		}()
+	})
+	if err != nil {
+		return fmt.Errorf("natsmqtt5: listening for reauthorization requests: %w", err)
+	}
+	b.reauthSub = sub
 	return nil
+}
+
+// forwardReauthorize asks the other brokers to sweep clientID and waits for
+// the one holding it.
+func (b *Broker) forwardReauthorize(ctx context.Context, clientID string) error {
+	inbox := b.nc.NewRespInbox()
+	sub, err := b.nc.SubscribeSync(inbox)
+	if err != nil {
+		return fmt.Errorf("reauthorizing %q: %w", clientID, err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	data, _ := json.Marshal(reauthorizeRequest{ClientID: clientID})
+	if err := b.nc.PublishMsg(&nats.Msg{Subject: b.reauthorizeSubject(), Reply: inbox, Data: data}); err != nil {
+		return fmt.Errorf("reauthorizing %q: asking the other brokers: %w", clientID, err)
+	}
+
+	wait := ReauthorizeForwardWait
+	waitCtx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	for {
+		m, err := sub.NextMsgWithContext(waitCtx)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				// No broker holds it, or the caller stopped waiting.
+				return nil
+			}
+			return fmt.Errorf("reauthorizing %q: %w", clientID, err)
+		}
+		var reply reauthorizeReply
+		if json.Unmarshal(m.Data, &reply) != nil || !reply.Held {
+			continue
+		}
+		if reply.Error != "" {
+			return fmt.Errorf("reauthorizing %q on the broker holding it: %s", clientID, reply.Error)
+		}
+		return nil
+	}
 }
