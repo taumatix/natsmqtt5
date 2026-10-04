@@ -4,34 +4,16 @@ Ordered by how much they limit real deployments, not by how interesting they
 are to build. Each entry says what breaks today, so it can be judged on its
 own.
 
-## Revoking a permission from a client that is already connected
+## `Reauthorize` reaches only the broker it is called on
 
-**Today:** the Authorizer is consulted when a client subscribes, when it
-publishes, and — since `reauthoriseLive` — over every filter of a session being
-resumed, on both the in-memory and the stored branch. What it is never consulted
-about is a session that simply stays connected. A client that holds its
-connection open for a week keeps delivering on a filter its principal lost on
-day one, because nothing re-asks until the next CONNECT.
+**Today:** `Broker.Reauthorize` (v0.5.0) acts on sessions in this broker's memory. With several
+brokers sharing a NATS cluster and a session store, a deployment has to call it on every broker,
+or on the one serving the client, which it has no easy way to know. A session held only in the
+store is re-checked when it is next resumed, so that case is safe, just late.
 
-**Why it is not simply fixed:** the obvious answer is to re-check on delivery,
-and that puts a user-supplied call on the hot path of every message the broker
-forwards. The resume check exists precisely to avoid paying that.
-
-**Shape:** an exported `Broker.Reauthorize(ctx, clientID)` running the same
-sweep `reauthoriseLive` does, against the live connection rather than a resuming
-one — so a deployment drives it from its own revocation event instead of the
-broker polling a policy store it knows nothing about. The sweep itself is
-already written; the work is making it safe against a connection that is
-delivering at the time, which the resume path gets for free by running before
-`deliverLoop` starts.
-
-The sweep has to cover the connection's Will as well. Since the Will check at
-CONNECT (`authoriseWill`), a Will is authorised once and never again: a client
-that connects with a Will on `alerts/x`, loses that permission, and then drops
-its connection still gets the Will published — up to its Will Delay Interval
-and Session Expiry later. `Reauthorize` should re-run the Will check and, on a
-denial, discard the Will rather than the connection: the connection itself is
-still allowed, and a DISCONNECT would publish the very Will being revoked.
+**Shape:** a NATS subject the brokers listen on (under `SubjectPrefix`), so that one
+`Reauthorize` on any broker reaches the one holding the session. The request-reply answer says
+whether some broker held it. Needs the cluster tests the session store already has.
 
 ## Offline message queue: a durable consumer per session
 
@@ -147,6 +129,9 @@ mechanism.
 error`, leaving the session and the record untouched, so the client retries
 rather than silently losing its subscriptions. Fail-closed and non-destructive,
 which neither of today's two outcomes is.
+
+`Broker.Reauthorize` (v0.5.0) is a fourth: called during an outage, it removes every
+subscription it re-checks from a live connection.
 
 There is now a third call site that conflates the two: `authoriseWill` answers
 any error with `0x87 Not authorized`, so a policy-service outage tells every

@@ -297,6 +297,7 @@ func (c *conn) onNATSMessage(sub *subscription, msg *nats.Msg) {
 	}
 
 	c.enqueue(&delivery{
+		sub:   sub,
 		topic: name,
 		// "The QoS of Application Messages sent in response to a Subscription
 		// MUST be the minimum of the QoS of the originally published message
@@ -346,6 +347,13 @@ func (c *conn) deliverLoop() {
 		case <-c.done:
 			return
 		case d := <-c.deliveries:
+			if d.sub != nil && !d.sub.live.Load() {
+				// Queued before its subscription was removed, by an UNSUBSCRIBE
+				// or by Broker.Reauthorize. A server "MAY continue to deliver any
+				// existing messages buffered" after an UNSUBSCRIBE (MQTT-5.0
+				// §3.10.4); after a revoked permission it must not.
+				continue
+			}
 			if err := c.deliver(d); err != nil {
 				c.logger.Debug("delivery failed", "topic", d.topic, "error", err)
 				c.close()
@@ -372,6 +380,13 @@ func (c *conn) deliver(d *delivery) error {
 	select {
 	case c.quota <- struct{}{}:
 	case <-c.done:
+		return nil
+	}
+	if d.sub != nil && !d.sub.live.Load() {
+		// Revoked or unsubscribed while this waited for room, which is
+		// unbounded. A revocation landing between here and the write below
+		// still lets this one message out: it was earned before the change.
+		c.releaseQuota()
 		return nil
 	}
 
@@ -423,6 +438,7 @@ func (c *conn) sendRetained(sub *subscription, handling packet.RetainHandling, r
 			props.SubscriptionIdentifiers = []int{sub.id}
 		}
 		c.enqueue(&delivery{
+			sub:     sub,
 			topic:   r.topicName,
 			qos:     minQoS(r.qos, sub.grantedQoS),
 			payload: r.payload,
