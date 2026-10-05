@@ -66,11 +66,11 @@ As a container, against a NATS server you already run:
 ```sh
 docker run --rm -p 1883:1883 \
   -e NATSMQTT5_NATS=nats://your-nats-server:4222 \
-  ghcr.io/taumatix/natsmqtt5:v0.7.0
+  ghcr.io/taumatix/natsmqtt5:v0.8.0
 ```
 
 Images are published for `linux/amd64` and `linux/arm64` on every release, as
-`:v0.7.0`, `:0.7.0`, `:0.7` and `:latest`. They are built from
+`:v0.8.0`, `:0.8.0`, `:0.8` and `:latest`. They are built from
 [distroless/static][distroless], so there is no shell and no package manager in
 them, and the broker runs as a non-root user.
 
@@ -78,7 +78,7 @@ If you have no NATS server yet, [compose.yaml](compose.yaml) starts one with
 JetStream enabled and the broker in front of it:
 
 ```sh
-curl -O https://raw.githubusercontent.com/taumatix/natsmqtt5/v0.7.0/compose.yaml
+curl -O https://raw.githubusercontent.com/taumatix/natsmqtt5/v0.8.0/compose.yaml
 docker compose up -d
 mosquitto_pub -V 5 -h localhost -p 1883 -t sensors/7/temp -m 21.5
 ```
@@ -86,21 +86,21 @@ mosquitto_pub -V 5 -h localhost -p 1883 -t sensors/7/temp -m 21.5
 Every flag has an environment variable twin — upper-case, `-` becomes `_`,
 behind a `NATSMQTT5_` prefix — so `-subject-prefix` is
 `NATSMQTT5_SUBJECT_PREFIX`. An explicit flag beats the environment. Run
-`docker run --rm ghcr.io/taumatix/natsmqtt5:v0.7.0 -h` for the full list.
+`docker run --rm ghcr.io/taumatix/natsmqtt5:v0.8.0 -h` for the full list.
 
 [distroless]: https://github.com/GoogleContainerTools/distroless
 
 As a binary:
 
 ```sh
-go install github.com/taumatix/natsmqtt5/cmd/natsmqtt5@v0.7.0
+go install github.com/taumatix/natsmqtt5/cmd/natsmqtt5@v0.8.0
 natsmqtt5 -nats nats://localhost:4222 -listen :1883
 ```
 
 As a library:
 
 ```sh
-go get github.com/taumatix/natsmqtt5@v0.7.0
+go get github.com/taumatix/natsmqtt5@v0.8.0
 ```
 
 Requires Go 1.25 or newer, and a NATS server with JetStream enabled (or
@@ -242,10 +242,16 @@ What it costs and what it does not cover yet:
   the client, which adds a JetStream round trip to every QoS 1 and 2 publish.
   If JetStream cannot store it, the publish is refused, so the client tries
   again. QoS 0 is not queued.
-- It covers sessions held in the memory of the broker the client reconnects to.
-  A session restored from `PersistentSessions` after a restart or on another
-  broker is not replayed yet, nor is a message published straight onto NATS
-  rather than through a broker ([ROADMAP.md](ROADMAP.md)).
+- With `PersistentSessions` it also covers a session restored after a restart
+  or on another broker: the stored record says when the session was released.
+  Two limits there. A broker killed outright never releases its sessions, so
+  nothing is replayed for them. And a restored replay starts at the release
+  rather than a moment before it, because what the old connection had already
+  delivered is not stored, and going back further could deliver a QoS 2 message
+  twice. A message caught in the moments the connection went down can be lost
+  that way, like the in-flight messages a restored session does not carry.
+- A message published straight onto NATS rather than through a broker is not
+  queued ([ROADMAP.md](ROADMAP.md)).
 - A resume reads everything queued since the client left and matches it in the
   broker, so a long absence on a busy broker takes longer to catch up.
 

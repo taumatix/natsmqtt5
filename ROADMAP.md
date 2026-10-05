@@ -19,9 +19,15 @@ refuses. When a session with an expiry disconnects, the stream's position is rec
 before going live, the delivery loop replays what the session's filters match since then. A
 message-id header lets the live path skip what was replayed, because QoS 2 must not arrive twice.
 
-### 1b. Queue for a session restored from the session store
+### 1b. A restored replay that can rewind
 
-After a restart, or on another broker, the recorded position has to come from the stored record.
+v0.8.0 replays restored sessions from `AwayAt` exactly, because the ids the previous connection
+delivered are not stored, and rewinding without them could deliver a QoS 2 message twice. Storing
+the last few delivered ids in the record (bounded, as `noteDelivered` already is) would let a
+restored replay rewind like an in-memory one. That pairs with "Retransmission that survives a
+broker restart" below, which needs in-flight state in the record too. Also: a broker killed
+outright records no `AwayAt`. The record's `Attached` with no release could fall back to the
+claim time minus the queue's age, at the cost of duplicates.
 
 ### 1c. Replay without scanning everything published
 

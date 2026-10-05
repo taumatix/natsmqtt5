@@ -1,7 +1,12 @@
 package natsmqtt5_test
 
 import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"testing"
 	"time"
 
@@ -223,4 +228,94 @@ func TestMessagesWaitingOnADyingConnectionAreNotLost(t *testing.T) {
 	}
 	assert.Equal(t, []string{"w/1", "w/2", "w/3"}, got)
 	back.expectNothing()
+}
+
+func persistentWithQueue(o *natsmqtt5.Options) {
+	o.PersistentSessions = true
+	o.OfflineQueue = true
+}
+
+// A session restored from the session store after a broker restart gets what
+// was published while it was away, as one held in memory does.
+func TestARestoredSessionGetsWhatWasPublishedWhileItWasAway(t *testing.T) {
+	natsURL := startNATS(t)
+	addrA, stopA := startStoppableBroker(t, natsURL, persistentWithQueue)
+	first, _ := connectClient(t, addrA, durableConnect("offline-restored", 300))
+	first.subscribe(paho.SubscribeOptions{Topic: "r/#", QoS: 1})
+	require.NoError(t, first.Client.Disconnect(&paho.Disconnect{ReasonCode: 0}))
+	stopA()
+
+	addrB := startBroker(t, natsURL, persistentWithQueue)
+	pub, _ := connectClient(t, addrB, connectOpts("pub-offline-restored"))
+	pub.publish(&paho.Publish{Topic: "r/1", QoS: 1, Payload: []byte("1")})
+	pub.publish(&paho.Publish{Topic: "r/2", QoS: 1, Payload: []byte("2")})
+
+	back := dialRaw(t, addrB)
+	require.True(t, back.connect(rawConnect("offline-restored", 300)).SessionPresent)
+	for _, want := range []string{"r/1", "r/2"} {
+		got := back.expectPublish()
+		assert.Equal(t, want, got.Topic)
+		back.send(&packet.Puback{Ack: packet.Ack{PacketID: got.PacketID}})
+	}
+	back.expectNothing()
+}
+
+// The same for a client that moves to another live broker.
+func TestASessionMovingToAnotherBrokerGetsWhatWasPublishedWhileItWasAway(t *testing.T) {
+	natsURL := startNATS(t)
+	addrA := startBroker(t, natsURL, persistentWithQueue)
+	addrB := startBroker(t, natsURL, persistentWithQueue)
+
+	onA := dialRaw(t, addrA)
+	onA.connect(rawConnect("offline-moving", 300))
+	onA.subscribe("m/#", packet.QoS1)
+	onA.send(&packet.Disconnect{})
+	time.Sleep(100 * time.Millisecond)
+
+	pub, _ := connectClient(t, addrA, connectOpts("pub-offline-moving"))
+	pub.publish(&paho.Publish{Topic: "m/1", QoS: 1, Payload: []byte("1")})
+
+	onB := dialRaw(t, addrB)
+	require.True(t, onB.connect(rawConnect("offline-moving", 300)).SessionPresent)
+	got := onB.expectPublish()
+	assert.Equal(t, "m/1", got.Topic)
+	onB.send(&packet.Puback{Ack: packet.Ack{PacketID: got.PacketID}})
+	onB.expectNothing()
+}
+
+// The disconnect time is cleared when a broker claims the session. Left in the
+// record while that broker serves it, a later claim (after a broker killed
+// without releasing the session, say) would replay from the old disconnect and
+// deliver again what was delivered since. Observed in the stored record itself,
+// since killing a broker without its cleanup is not something the harness does.
+func TestAClaimedSessionsRecordForgetsTheOldAbsence(t *testing.T) {
+	natsURL := startNATS(t)
+	addrA, stopA := startStoppableBroker(t, natsURL, persistentWithQueue)
+	c := dialRaw(t, addrA)
+	c.connect(rawConnect("offline-once", 300))
+	c.subscribe("o/#", packet.QoS1)
+	c.send(&packet.Disconnect{})
+	time.Sleep(100 * time.Millisecond)
+	stopA()
+
+	stored := func() map[string]any {
+		nc, err := nats.Connect(natsURL)
+		require.NoError(t, err)
+		defer nc.Close()
+		js, err := jetstream.New(nc)
+		require.NoError(t, err)
+		kv, err := js.KeyValue(context.Background(), natsmqtt5.DefaultStreamPrefix+"_sessions")
+		require.NoError(t, err)
+		entry, err := kv.Get(context.Background(), base64.RawURLEncoding.EncodeToString([]byte("offline-once")))
+		require.NoError(t, err)
+		var rec map[string]any
+		require.NoError(t, json.Unmarshal(entry.Value(), &rec))
+		return rec
+	}
+	require.NotEmpty(t, stored()["AwayAt"], "a released session must record when it was released")
+
+	addrB := startBroker(t, natsURL, persistentWithQueue)
+	back := dialRaw(t, addrB)
+	require.True(t, back.connect(rawConnect("offline-once", 300)).SessionPresent)
+	assert.Empty(t, stored()["AwayAt"], "the claim left the old disconnect time in the record")
 }

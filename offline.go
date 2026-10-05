@@ -163,16 +163,25 @@ func (c *conn) replayOffline() error {
 	if q == nil {
 		return nil
 	}
-	awayAt, ok := c.sess.takeAway()
+	awayAt, restored, ok := c.sess.takeAway()
 	if !ok {
 		return nil
+	}
+	since := awayAt.Add(-offlineRewind)
+	if restored {
+		// Restored from the session store: the ids delivered before the
+		// release are not stored, so a rewind could deliver a message twice,
+		// which QoS 2 forbids. A message lost in the moments the connection
+		// was going down is the cost, as for the in-flight messages a restored
+		// session does not carry either.
+		since = awayAt
 	}
 	delivered := c.sess.deliveredIDs()
 
 	ctx, cancel := context.WithTimeout(context.Background(), offlineReplayTimeout)
 	defer cancel()
 	var deliverErr error
-	err := q.replay(ctx, awayAt.Add(-offlineRewind), func(msg *nats.Msg) {
+	err := q.replay(ctx, since, func(msg *nats.Msg) {
 		if deliverErr != nil {
 			return
 		}
