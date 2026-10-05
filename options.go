@@ -138,10 +138,10 @@ type Options struct {
 	//
 	// Each such message is published a second time, under
 	// <SubjectPrefix>.$queue.<subject>, into a JetStream stream that keeps it
-	// for OfflineQueueMaxAge. It covers sessions held in this broker's memory;
-	// a session restored from the session store after a restart, and messages
-	// published straight onto NATS rather than through a broker, are not
-	// queued yet (ROADMAP.md).
+	// for OfflineQueueMaxAge. It covers sessions held in this broker's memory
+	// and, with PersistentSessions, sessions restored from the session store
+	// after a restart or on another broker. Messages published straight onto
+	// NATS rather than through a broker are not queued (ROADMAP.md).
 	OfflineQueue bool
 	// OfflineQueueMaxAge is how long a queued message is kept. Defaults to 24
 	// hours. A session away for longer loses what is older.

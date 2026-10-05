@@ -11,6 +11,18 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-05
+
+### Added
+
+- **The offline queue covers sessions restored from the session store.** With
+  `PersistentSessions` and `OfflineQueue`, a client that comes back after a broker restart, or to
+  another broker, now gets what was published while it was away, as one returning to the broker
+  that held it in memory already did. The stored record carries when the session was released
+  (`AwayAt`), and the claim that restores it clears that again, so a later claim cannot replay an
+  old absence. A restored replay starts at the release, not just before it. A broker killed
+  without releasing its sessions records no release, and nothing is replayed for them.
+
 ## [0.7.0] - 2026-10-05
 
 ### Added

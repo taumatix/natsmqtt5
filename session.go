@@ -135,6 +135,10 @@ type session struct {
 	// awayAt is when the session's last connection ended, for the offline
 	// queue's replay; zero when there is nothing to replay.
 	awayAt time.Time
+	// awayRestored marks an awayAt read from the session store. The ids the
+	// previous connection delivered are not stored with it, so its replay
+	// cannot rewind past them; see replayOffline.
+	awayRestored bool
 	// delivered is the offline-queue ids recently delivered to the client,
 	// with when, so a replay that rewinds past them does not repeat them.
 	delivered map[string]time.Time
@@ -570,13 +574,20 @@ func (s *session) markAway(at time.Time) {
 	s.awayAt = at
 }
 
-// takeAway returns when the last connection ended, once.
-func (s *session) takeAway() (time.Time, bool) {
+func (s *session) markAwayRestored(at time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	at := s.awayAt
-	s.awayAt = time.Time{}
-	return at, !at.IsZero()
+	s.awayAt, s.awayRestored = at, true
+}
+
+// takeAway returns when the last connection ended, once, and whether that
+// came from the session store.
+func (s *session) takeAway() (at time.Time, restored, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	at, restored = s.awayAt, s.awayRestored
+	s.awayAt, s.awayRestored = time.Time{}, false
+	return at, restored, !at.IsZero()
 }
 
 // noteDelivered records a delivered message id, forgetting those older than a

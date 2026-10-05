@@ -166,6 +166,9 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 		stored []storedSubscription
 		rec    *sessionRecord
 		rev    uint64
+		// restoredAway is when a session restored from the store was last
+		// released, for the offline queue's replay.
+		restoredAway time.Time
 	)
 	if c.broker.persistsSessions() {
 		var (
@@ -184,10 +187,16 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 			stored = rec.Subscriptions
 			resumed = true
 		}
+		if sess == nil && present && c.broker.queue != nil && !rec.awayWas.IsZero() {
+			restoredAway = rec.awayWas
+		}
 	}
 
 	if sess == nil {
 		sess = newSession(clientID)
+		if !restoredAway.IsZero() {
+			sess.markAwayRestored(restoredAway)
+		}
 	}
 	if rec != nil {
 		c.claimGen = sess.bindRecord(rec, rev)

@@ -104,6 +104,17 @@ type sessionRecord struct {
 	// connection does not expire, and also for a released session whose Session
 	// Expiry Interval says it never expires.
 	ExpiresAt time.Time
+
+	// AwayAt is when the session was released, so the broker that next claims
+	// it can replay the offline queue from then (Options.OfflineQueue). It is
+	// cleared by that claim: left in a record while a broker serves the
+	// session, it would send a later claim back to an old disconnect, and the
+	// client would get again what it had already received.
+	AwayAt time.Time `json:",omitzero"`
+
+	// awayWas is the AwayAt this broker's claim found and cleared, for the
+	// handshake to replay from. It is never written.
+	awayWas time.Time
 }
 
 // resumable reports whether a CONNECT with Clean Start 0 may take this record
@@ -286,6 +297,7 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 		rec.Attached = true
 		rec.Identity, rec.Username = identity, username
 		rec.ExpiresAt = time.Time{}
+		rec.awayWas, rec.AwayAt = rec.AwayAt, time.Time{}
 		rev, err := s.kv.Update(ctx, key, encodeRecord(rec), entry.Revision())
 		if err != nil {
 			// Another broker claimed the same Client Identifier between the
@@ -350,6 +362,7 @@ func (s *sessionStore) release(ctx context.Context, rec *sessionRecord, rev uint
 
 	rec.Attached = false
 	rec.ExpiresAt = expiryDeadline(time.Now(), rec.ExpirySeconds)
+	rec.AwayAt = time.Now()
 	newRev, err := s.kv.Update(ctx, key, encodeRecord(rec), rev)
 	if err != nil {
 		return rev, fmt.Errorf("%w: %v", errLostSession, err)
