@@ -256,11 +256,13 @@ func (c *conn) replayOffline() error {
 	c.resume = &a
 	since := a.at.Add(-offlineRewind)
 	if a.restored {
-		// Restored from the session store: the ids delivered before the
-		// release are not stored, so a rewind could deliver a message twice,
-		// which QoS 2 forbids. A message lost in the moments the connection
-		// was going down is the cost, as for the in-flight messages a restored
-		// session does not carry either.
+		// Restored from the session store with no replay sequence in the
+		// record (one written before it held them, or a connection that
+		// delivered everything): the ids delivered before the release are not
+		// known, so a rewind could deliver a message twice, which QoS 2
+		// forbids. A message lost in the moments the connection was going
+		// down is the cost, as for the in-flight messages a restored session
+		// does not carry either.
 		since = a.at
 	}
 	delivered := c.sess.deliveredIDs()
@@ -283,7 +285,7 @@ func (c *conn) replayOffline() error {
 		}
 	}
 	var err error
-	if a.fromSeq != 0 && !a.restored {
+	if a.fromSeq != 0 {
 		c.streamNext = a.fromSeq
 		_, err = q.replaySeq(ctx, a.fromSeq, handle)
 	} else {

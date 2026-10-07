@@ -262,13 +262,19 @@ What it costs and what it does not cover yet:
   If JetStream cannot store it, the publish is refused, so the client tries
   again. QoS 0 is not queued.
 - With `PersistentSessions` it also covers a session restored after a restart
-  or on another broker: the stored record says when the session was released.
-  Two limits there. A broker killed outright never releases its sessions, so
-  nothing is replayed for them. And a restored replay starts at the release
-  rather than a moment before it, because what the old connection had already
-  delivered is not stored, and going back further could deliver a QoS 2 message
-  twice. A message caught in the moments the connection went down can be lost
-  that way, like the in-flight messages a restored session does not carry.
+  or on another broker: the stored record says when the session was released,
+  and, for a client that was behind, the lowest queue sequence it had not been
+  sent and the ids it had been sent above that (up to 4096), so the replay starts
+  where the client stopped, as for a session held in memory. Limits there. A
+  record without that position (one from a connection that had delivered
+  everything) replays from the release itself rather than a moment before it,
+  because going back further could deliver a QoS 2 message twice; a message
+  caught in the moments the connection went down can be lost that way, like the
+  in-flight messages a restored session does not carry. And a broker killed
+  outright never releases its sessions: the next broker to resume one sees it
+  attached to an owner that no longer answers and replays everything the queue
+  still holds for it, up to `OfflineQueueMaxAge`, which loses nothing and can
+  repeat what the dead connection had already delivered, QoS 2 included.
 - A message published straight onto NATS rather than through a broker is not
   queued ([ROADMAP.md](ROADMAP.md)).
 - A resume reads everything queued since the client left and matches it in the

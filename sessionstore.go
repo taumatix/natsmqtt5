@@ -112,9 +112,32 @@ type sessionRecord struct {
 	// client would get again what it had already received.
 	AwayAt time.Time `json:",omitzero"`
 
-	// awayWas is the AwayAt this broker's claim found and cleared, for the
-	// handshake to replay from. It is never written.
-	awayWas time.Time
+	// AwayFromSeq is the lowest offline-queue sequence the released connection
+	// had not delivered (conn.awayFloor), and Delivered the ids of messages at or
+	// above it that it had. A claim replays from the sequence instead of from
+	// AwayAt, which is later than what a client that was behind is owed, and
+	// Delivered is what keeps that rewind from sending a QoS 2 message twice
+	// [MQTT-4.3.3-2]. Both are cleared by the claim, as AwayAt is.
+	//
+	// Records written before these fields existed decode with them empty, and
+	// the replay falls back to AwayAt exactly as it did. The record version
+	// stays 1 for that reason: a broker that predates the fields ignores them.
+	AwayFromSeq uint64            `json:",omitempty"`
+	Delivered   []storedDelivered `json:",omitempty"`
+
+	// awayWas, awayFromSeqWas and deliveredWas are what this broker's claim
+	// found and cleared, for the handshake to replay from. They are never
+	// written.
+	awayWas        time.Time
+	awayFromSeqWas uint64
+	deliveredWas   []storedDelivered
+}
+
+// storedDelivered is a delivered message's id and the queue sequence of its
+// copy, as kept in the record by session.awayState.
+type storedDelivered struct {
+	ID  string
+	Seq uint64
 }
 
 // resumable reports whether a CONNECT with Clean Start 0 may take this record
@@ -150,6 +173,9 @@ type sessionStore struct {
 	// kept before the sweep may reclaim it.
 	maxSessionExpiry time.Duration
 	subjectPrefix    string
+	// queueMaxAge is how far back the offline queue reaches, which is how far a
+	// session left attached by a dead broker has to be replayed from.
+	queueMaxAge time.Duration
 
 	// owner identifies this broker instance for the lifetime of the process.
 	owner string
@@ -188,6 +214,7 @@ func newSessionStore(ctx context.Context, js jetstream.JetStream, nc *nats.Conn,
 		logger:           logger.With("session_bucket", bucket, "broker_instance", owner),
 		maxSessionExpiry: opts.maxSessionExpiry,
 		subjectPrefix:    opts.SubjectPrefix,
+		queueMaxAge:      opts.OfflineQueueMaxAge,
 		owner:            owner,
 		onLost:           onLost,
 	}
@@ -293,11 +320,16 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 			return rec, rev, false, err
 		}
 
+		previousOwner := rec.Owner
+		// Attached with no release time: the owner never released it.
+		unreleased := rec.Attached && rec.AwayAt.IsZero() && previousOwner != s.owner && s.queueMaxAge > 0
 		rec.Owner = s.owner
 		rec.Attached = true
 		rec.Identity, rec.Username = identity, username
 		rec.ExpiresAt = time.Time{}
 		rec.awayWas, rec.AwayAt = rec.AwayAt, time.Time{}
+		rec.awayFromSeqWas, rec.AwayFromSeq = rec.AwayFromSeq, 0
+		rec.deliveredWas, rec.Delivered = rec.Delivered, nil
 		rev, err := s.kv.Update(ctx, key, encodeRecord(rec), entry.Revision())
 		if err != nil {
 			// Another broker claimed the same Client Identifier between the
@@ -305,6 +337,13 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 			// and find out whether we are still in the running.
 			lastErr = err
 			continue
+		}
+		if unreleased && !s.ownerAlive(ctx, previousOwner) {
+			// The broker that held the session is gone and recorded nothing
+			// about where its client stood. Anything in the queue may be owed,
+			// so the replay starts at the oldest message the queue still holds,
+			// and may repeat what the dead connection delivered.
+			rec.awayWas = time.Now().Add(-s.queueMaxAge)
 		}
 		return rec, rev, true, nil
 	}

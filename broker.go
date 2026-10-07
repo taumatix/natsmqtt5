@@ -412,6 +412,15 @@ func (b *Broker) releaseStoredSession(c *conn) {
 	ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
 	defer cancel()
 
+	// Where the next broker's replay starts, so that it does not begin at the
+	// release time and lose what the client was still owed.
+	var dropped int
+	rec.AwayFromSeq, rec.Delivered, dropped = s.awayState()
+	if dropped > 0 {
+		b.logger.Warn("the session record keeps only some of the delivered message ids; "+
+			"a restored replay may repeat the rest", "client_id", s.clientID, "dropped", dropped)
+	}
+
 	newRev, err := b.store.release(ctx, rec, rev)
 	if err != nil {
 		// Losing the compare-and-swap here is the ordinary outcome of a client
