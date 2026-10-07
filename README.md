@@ -18,7 +18,9 @@ unrelated message bus.
 > floor had kept `golang.org/x/crypto` below the fix for two `x/crypto/ssh` DoS advisories
 > ([GO-2026-6354][g54], [GO-2026-6355][g55]). See [UPSTREAM.md](UPSTREAM.md),
 > [CHANGELOG.md](CHANGELOG.md) for what each release changed under you, and
-> [ROADMAP.md](ROADMAP.md) for where the broker knowingly does not yet conform.
+> [CONFORMANCE.md](CONFORMANCE.md) for a statement-by-statement review against the MQTT 5
+> specification, and [ROADMAP.md](ROADMAP.md) for where the broker knowingly does not yet conform,
+> in the order it will be fixed.
 
 [g54]: https://pkg.go.dev/vuln/GO-2026-6354
 [g55]: https://pkg.go.dev/vuln/GO-2026-6355

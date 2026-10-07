@@ -1,0 +1,64 @@
+# MQTT 5 conformance
+
+natsmqtt5 aims to be a conforming MQTT 5.0 Server. This file records where it stands against the
+specification's numbered conformance statements, and is what [ROADMAP.md](ROADMAP.md) is ordered
+from.
+
+- Specification: [MQTT Version 5.0, OASIS Standard, 7 March 2019](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)
+- Reviewed: 2026-10-07, against v0.9.0. The one finding fixed since, in v0.9.1, is marked below.
+- Data: [`conformance/mqtt5-statements.tsv`](conformance/mqtt5-statements.tsv), one row per
+  `[MQTT-x.y.z-n]` statement. The statement texts are in the specification; the file carries the
+  ids, sections and findings.
+
+## How it was done
+
+Every statement id in the specification was extracted (252 distinct). The 45 that bind only a
+Client were set aside. Each of the other 207 was looked up in the repository and classed:
+
+| Class | Meaning | Count |
+|---|---|---|
+| CITED-TESTED | cited in a test | 40 |
+| CITED-CODE | cited in the implementation only | 34 |
+| ROADMAP | not cited, but the gap is on the roadmap | 19 |
+| UNCITED | none of the above | 114 |
+
+Each uncited or roadmap statement then got a verdict, from reading the code and, for the doubtful
+ones, a probe test against an embedded NATS server:
+
+| Verdict (column `verdict`) | Meaning | Uncited | Roadmap |
+|---|---|---|---|
+| a | met, though not cited | 96 | 2 |
+| b | violated | 14 | 5 |
+| c | not applicable (behind a feature the broker refuses or does not advertise) | 3 | 12 |
+| u | unsure | 1 | 0 |
+
+"Met, though not cited" is a reading of the code, not a test. Turning those into cited tests is
+how this table's first column grows.
+
+## What it found
+
+The violated statements, grouped and ordered, are the first two tiers of the roadmap. The ones a
+conforming client hits in ordinary use:
+
+- **Fixed in v0.9.1.** A client could publish to `$retained/<topic>` and replace the retained
+  message for `<topic>`, bypassing the Authorizer, and read the offline queue through `$queue/#`.
+  [MQTT-3.3.1-8].
+- QoS 1 and 2 messages published while a session is disconnected are dropped unless
+  `OfflineQueue` is on, while the CONNACK says Session Present=1. [MQTT-3.1.2-23],
+  [MQTT-4.5.0-1].
+- A disconnected shared-subscription member keeps receiving, and dropping, its share.
+  [MQTT-4.5.0-1], [MQTT-4.1.0-2].
+- A client that falls behind loses QoS 1 and 2 messages. [MQTT-4.1.0-1].
+- Message Expiry is not enforced. [MQTT-3.3.2-5], [MQTT-3.3.2-6].
+- With `PersistentSessions`, a restored session resends nothing it had in flight.
+  [MQTT-4.4.0-1], [MQTT-4.3.3-10].
+- A retained message can carry its publisher's Topic Alias to another client. [MQTT-3.3.2-11].
+
+Features the specification defines and the broker does not offer (enhanced AUTH, server-to-client
+topic aliases, WebSocket, QoS 2 on shared subscriptions) are refused or left unadvertised the way
+the specification allows, and are the fourth tier.
+
+## Keeping it current
+
+Re-run the review when the code or the specification has moved a lot. When a fix lands, cite the
+statement it addresses in the test that proves it, and update its row here.
