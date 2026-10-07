@@ -32,6 +32,25 @@ const MaxLength = 65535
 // SharedPrefix marks a Shared Subscription Topic Filter (MQTT-5.0 §4.8.2).
 const SharedPrefix = "$share/"
 
+// reservedLevels lists the first topic levels the broker keeps its own messages
+// under: the retained store and the offline queue live at <prefix>.$retained.>
+// and <prefix>.$queue.>, inside the subject space every topic maps onto. A
+// client that could publish there could replace any retained message, with
+// the Authorizer asked only about the "$retained/…" name; one that could
+// subscribe there could read the queue of every session. So a Topic Name or
+// Topic Filter starting with one of these is refused.
+var reservedLevels = []string{"$retained", "$queue"}
+
+func reserved(s string) bool {
+	first, _, _ := strings.Cut(s, "/")
+	for _, r := range reservedLevels {
+		if first == r {
+			return true
+		}
+	}
+	return false
+}
+
 // ValidateName checks a Topic Name, as carried in a PUBLISH
 // (MQTT-5.0 §4.7.3). Wildcards are forbidden [MQTT-4.7.0-1].
 func ValidateName(name string) error {
@@ -40,6 +59,9 @@ func ValidateName(name string) error {
 	}
 	if strings.ContainsAny(name, "+#") {
 		return invalid("Topic Name %q contains a wildcard [MQTT-3.3.2-2]", name)
+	}
+	if reserved(name) {
+		return invalid("Topic Name %q is under a level the broker reserves for its own use", name)
 	}
 	return nil
 }
@@ -57,7 +79,13 @@ func ValidateFilter(filter string) error {
 			return err
 		}
 		_ = share
+		if reserved(rest) {
+			return invalid("Topic Filter %q is under a level the broker reserves for its own use", filter)
+		}
 		return validateFilterLevels(rest)
+	}
+	if reserved(filter) {
+		return invalid("Topic Filter %q is under a level the broker reserves for its own use", filter)
 	}
 	return validateFilterLevels(filter)
 }

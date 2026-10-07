@@ -11,6 +11,30 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-07
+
+A security fix. No API change and no configuration change.
+
+### Security
+
+- **A client could replace any retained message, and read the offline queue, through the
+  broker's internal subjects.** The retained store and the offline queue keep their messages
+  under `<prefix>.$retained.>` and `<prefix>.$queue.>`, which is inside the subject space MQTT
+  topics map onto. A PUBLISH to `$retained/news` replaced the retained message for `news`, with
+  the `Authorizer` asked only about `$retained/news`, so a permission on `news` itself did not
+  apply. A SUBSCRIBE to `$queue/#` (with `OfflineQueue` on) received a copy of every QoS 1 and
+  QoS 2 message on the broker, and to `$retained/#` every retained-message write. Topic Names and
+  Filters whose first level is `$retained` or `$queue` are now refused: PUBLISH with `0x90`, SUBSCRIBE
+  with `0x8F`, a Will with a `0x90` CONNACK. Other `$` topics are unaffected. Found by a
+  conformance review against the MQTT 5 specification. The retained-message forgery affects
+  every release with retained messages; reading the queue affects v0.7.0 to v0.9.0 with
+  `OfflineQueue` on (reproduced on v0.9.0: a `$queue/#` subscriber received another client's
+  `private/payroll` message).
+
+  **Check your retained messages** if untrusted clients could publish: any retained message may
+  have been replaced. A session that had subscribed to one of these filters before the upgrade
+  fails to restore from the session store; reconnecting with Clean Start clears it.
+
 ## [0.9.0] - 2026-10-07
 
 ### Changed
