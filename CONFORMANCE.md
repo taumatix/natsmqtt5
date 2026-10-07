@@ -5,7 +5,8 @@ specification's numbered conformance statements, and is what [ROADMAP.md](ROADMA
 from.
 
 - Specification: [MQTT Version 5.0, OASIS Standard, 7 March 2019](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)
-- Reviewed: 2026-10-07, against v0.9.0. The one finding fixed since, in v0.9.1, is marked below.
+- Reviewed: 2026-10-07, against v0.9.0. The counts are the review's; findings fixed since are
+  marked below and in the data file.
 - Data: [`conformance/mqtt5-statements.tsv`](conformance/mqtt5-statements.tsv), one row per
   `[MQTT-x.y.z-n]` statement. The statement texts are in the specification; the file carries the
   ids, sections and findings.
@@ -43,9 +44,9 @@ conforming client hits in ordinary use:
 - **Fixed in v0.9.1.** A client could publish to `$retained/<topic>` and replace the retained
   message for `<topic>`, bypassing the Authorizer, and read the offline queue through `$queue/#`.
   [MQTT-3.3.1-8].
-- QoS 1 and 2 messages published while a session is disconnected are dropped unless
-  `OfflineQueue` is on, while the CONNACK says Session Present=1. [MQTT-3.1.2-23],
-  [MQTT-4.5.0-1].
+- **Fixed, unreleased.** QoS 1 and 2 messages published while a session was disconnected were
+  dropped unless `OfflineQueue` was on, while the CONNACK said Session Present=1. The queue is now
+  on by default whenever the broker uses JetStream. [MQTT-3.1.2-23], [MQTT-4.5.0-1].
 - A disconnected shared-subscription member keeps receiving, and dropping, its share.
   [MQTT-4.5.0-1], [MQTT-4.1.0-2].
 - A client that falls behind loses QoS 1 and 2 messages. [MQTT-4.1.0-1].

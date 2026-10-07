@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -89,18 +90,67 @@ func TestTheOfflineQueueHoldsNoQoS0AndNothingForACleanStart(t *testing.T) {
 	clean.expectNothing()
 }
 
-// Without the option nothing changes: a resumed session gets only what was
-// already in flight.
-func TestWithoutTheOfflineQueueNothingPublishedWhileAwayArrives(t *testing.T) {
+// The queue is on by default whenever the broker uses JetStream, because
+// MQTT-5.0 makes it part of the session state: a session with an expiry keeps
+// its pending QoS 1 and 2 messages across a disconnect [MQTT-3.1.2-23], and a
+// message is added to the session of every matching subscriber, connected or
+// not [MQTT-4.5.0-1]. A broker with no options set must not answer Session
+// Present 1 and then deliver nothing.
+func TestTheOfflineQueueIsOnByDefault(t *testing.T) {
 	addr := startBroker(t, startNATS(t))
+
+	away := dialRaw(t, addr)
+	away.connect(rawConnect("offline-default", 300))
+	away.subscribe("q/#", packet.QoS1)
+	away.drop()
+
+	pub, _ := connectClient(t, addr, connectOpts("pub-offline-default"))
+	pub.publish(&paho.Publish{Topic: "q/1", QoS: 1, Payload: []byte("1")})
+
+	back := dialRaw(t, addr)
+	require.True(t, back.connect(rawConnect("offline-default", 300)).SessionPresent)
+	got := back.expectPublish()
+	assert.Equal(t, "q/1", got.Topic, "the message published while away [MQTT-3.1.2-23]")
+	back.send(&packet.Puback{Ack: packet.Ack{PacketID: got.PacketID}})
+	back.expectNothing()
+}
+
+// DisableOfflineQueue is the opt-out, for a deployment that would rather not
+// store every QoS 1 and 2 message and accepts the deviation: nothing is kept,
+// so a resumed session gets only what was already in flight.
+func TestWithoutTheOfflineQueueNothingPublishedWhileAwayArrives(t *testing.T) {
+	natsURL := startNATS(t)
+	var logs syncBuffer
+	addr := startBroker(t, natsURL, func(o *natsmqtt5.Options) {
+		o.DisableOfflineQueue = true
+		o.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	})
+
+	nc, err := nats.Connect(natsURL)
+	require.NoError(t, err)
+	defer nc.Close()
+	js, err := jetstream.New(nc)
+	require.NoError(t, err)
+	_, err = js.Stream(context.Background(), natsmqtt5.DefaultStreamPrefix+"_queue")
+	require.ErrorIs(t, err, jetstream.ErrStreamNotFound, "the opt-out must not create the queue's stream")
 
 	away := dialRaw(t, addr)
 	away.connect(rawConnect("offline-off", 300))
 	away.subscribe("q/#", packet.QoS1)
 	away.drop()
+	// Until the broker notices the drop, a message still goes to the old
+	// connection, is in flight, and is rightly resent on resume
+	// [MQTT-4.4.0-1]. Only once the session is detached is it truly away.
+	waitDetached(t, &logs, "offline-off")
 
 	pub, _ := connectClient(t, addr, connectOpts("pub-offline-3"))
 	pub.publish(&paho.Publish{Topic: "q/1", QoS: 1, Payload: []byte("1")})
+	// The PUBACK means NATS has the message, not that it has reached the
+	// session's subscription, which drops it silently. Resumed too soon, the
+	// session is attached again when it arrives and takes it live, which is
+	// not a fault: the opt-out keeps nothing, it does not promise a loss. There
+	// is no event to wait on, so give in-process NATS ample time.
+	time.Sleep(200 * time.Millisecond)
 
 	back := dialRaw(t, addr)
 	require.True(t, back.connect(rawConnect("offline-off", 300)).SessionPresent)

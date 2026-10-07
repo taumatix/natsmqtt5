@@ -35,7 +35,7 @@ MQTT-3.1.2-19	3.1.2.9 Password Flag	C	CLIENT-ONLY (UNCITED)
 MQTT-3.1.2-20	3.1.2.10 Keep Alive	C	CLIENT-ONLY (UNCITED)			
 MQTT-3.1.2-21	3.1.2.10 Keep Alive	C	CLIENT-ONLY (CITED-TESTED)			broker_test.go:487 options.go:180
 MQTT-3.1.2-22	3.1.2.10 Keep Alive	S	CITED-TESTED			broker_test.go:466 conn.go:137 handshake.go:17
-MQTT-3.1.2-23	3.1.2.11.2 Session Expiry Interval	CS	ROADMAP	b	Offline message queue	Subscriptions survive, but QoS 1/2 messages published while detached are dropped (subscribe.go:200-202) unless Options.OfflineQueue is on.
+MQTT-3.1.2-23	3.1.2.11.2 Session Expiry Interval	CS	CITED-TESTED	b	A disconnected shared-subscription member loses its share; Offline message queue: what it still loses	Pending QoS 1/2 messages are kept by the offline queue, on by default with JetStream since Unreleased (TestTheOfflineQueueIsOnByDefault). Still violated for a shared-subscription member, and at the boundary of a restored replay; deliberately so with DisableOfflineQueue or without JetStream.
 MQTT-3.1.2-24	3.1.2.11.4 Maximum Packet Size	S	CITED-CODE			conn.go:387
 MQTT-3.1.2-25	3.1.2.11.4 Maximum Packet Size	S	CITED-TESTED			retransmit_test.go:368 conn.go:360 conn.go:372
 MQTT-3.1.2-26	3.1.2.11.5 Topic Alias Maximum	S	UNCITED	b		The local retained map stores the publisher's Properties, TopicAlias included (retain.go:240-245), and serves them until the stream consumer overwrites the entry (retain.go:177-201). A subscriber on the same broker in that window receives the publisher's Topic Alias (probe: reproduced 1 run in 3).
@@ -211,7 +211,7 @@ MQTT-4.3.3-12	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		releaseQoS2 remov
 MQTT-4.3.3-13	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	c		Message expiry is not applied.
 MQTT-4.4.0-1	4.4 Message delivery retry	CS	CITED-TESTED			broker_test.go:548 displaced_ack_test.go:27 handshake.go:381 publish.go:196 README.md:351 ROADMAP.md:59
 MQTT-4.4.0-2	4.4 Message delivery retry	CS	CITED-TESTED			retransmit_test.go:320 publish.go:205
-MQTT-4.5.0-1	4.5 Message receipt	S	ROADMAP	b	Offline message queue (detached sessions only)	Messages for a session are dropped when it is detached (subscribe.go:200-202, unless OfflineQueue), when its delivery queue overflows (subscribe.go:331-338), and when NATS routes a shared-subscription message to a detached member (probe: 27 of 40 QoS 1 messages lost).
+MQTT-4.5.0-1	4.5 Message receipt	S	ROADMAP	b	A disconnected shared-subscription member loses its share; A client that falls behind loses QoS 1 and 2 messages	A detached session gets its messages from the offline queue, on by default with JetStream since Unreleased. Still dropped when the delivery queue overflows (subscribe.go:331-338) and when NATS routes a shared-subscription message to a detached member (probe: 27 of 40 QoS 1 messages lost).
 MQTT-4.5.0-2	4.5 Message receipt	C	CLIENT-ONLY (UNCITED)			
 MQTT-4.6.0-1	4.6 Message ordering	C	CLIENT-ONLY (UNCITED)			
 MQTT-4.6.0-2	4.6 Message ordering	C	CLIENT-ONLY (UNCITED)			

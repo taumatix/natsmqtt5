@@ -9,38 +9,16 @@ today and cites the statements it violates.
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
-## Offline message queue
+## Offline message queue: what it still loses
 
-**Today:** messages published while a session is disconnected are dropped for it, whether or not
-the session is persisted. Core NATS fans out to whoever is subscribed at the time and keeps
-nothing. It is the largest entry here, so it ships in pieces:
+**Today:** the queue (`offline.go`) is on by default whenever the broker uses JetStream (merged
+after v0.9.1, ships on the next release train), so a session with an expiry gets what was
+published while it was away [MQTT-3.1.2-23], [MQTT-4.5.0-1]. `DisableOfflineQueue` turns it
+off, which is a deviation, and a broker without JetStream cannot have it. One gap remains inside
+it, on the restored-session path (`PersistentSessions`). Two earlier attempts were stopped by
+a safety classifier (2026-10-05), so attempt this with my human present.
 
-
-**Decision (2026-10-07, from the conformance discovery in `CONFORMANCE.md`):** this is not an
-optional feature. MQTT-5.0 §4.1 counts QoS 1 and 2 messages pending transmission as part of the
-Server's session state, [MQTT-3.1.2-23] says that state MUST be kept after a disconnect while the
-Session Expiry Interval is above zero, and [MQTT-4.5.0-1] says each message MUST be added to the
-session state of every matching subscriber. With the queue off, the broker breaks both for every
-session with an expiry while answering Session Present=1. So:
-
-- The queue becomes the default whenever JetStream is available, with `OfflineQueue` kept as an
-  explicit opt-out for deployments that accept the deviation. That is a behaviour change, so it
-  goes in a minor release with a note, and it comes first in this tier.
-- 1b is the remaining conformance gap inside the queue: a restored session's replay that cannot
-  rewind can lose what a dying connection held. Two attempts were stopped by a safety classifier
-  (2026-10-05), so attempt it with my human present.
-- 1c and 1d are performance and reach, not conformance, and move to the operations section.
-
-### 1a. Queue for a session held in this broker's memory (opt-in)
-
-`Options.OfflineQueue`: the broker publishes a copy of each QoS 1/2 message under
-`<prefix>.$queue.<subject>`, kept by a JetStream stream with a maximum age. A stream on
-`<prefix>.>` itself would overlap the retained stream on `<prefix>.$retained.>`, which JetStream
-refuses. When a session with an expiry disconnects, the stream's position is recorded. On resume,
-before going live, the delivery loop replays what the session's filters match since then. A
-message-id header lets the live path skip what was replayed, because QoS 2 must not arrive twice.
-
-### 1b. A restored replay that can rewind
+### A restored replay that can rewind
 
 v0.8.0 replays restored sessions from `AwayAt` exactly, because the ids the previous connection
 delivered are not stored, and rewinding without them could deliver a QoS 2 message twice. Storing
@@ -49,16 +27,6 @@ restored replay rewind like an in-memory one. That pairs with "Retransmission th
 broker restart" below, which needs in-flight state in the record too. Also: a broker killed
 outright records no `AwayAt`. The record's `Attached` with no release could fall back to the
 claim time minus the queue's age, at the cost of duplicates.
-
-### 1c. Replay without scanning everything published
-
-1a reads every queued message since the disconnect and matches each in Go. `FilterSubjects`
-would let JetStream do it, but it refuses overlapping filters (`a.>` with `a.b`), so the
-session's filters have to be reduced to a non-overlapping set first.
-
-### 1d. Messages published by plain NATS clients
-
-Only messages that pass through a broker are copied to the queue.
 
 ## A disconnected shared-subscription member loses its share
 
@@ -450,3 +418,28 @@ import goes unnoticed, and it does not run `golangci-lint`.
 nine thousand existing lines will produce a batch of findings that has to be
 worked through rather than merged. `govulncheck` is the half worth doing first
 and on its own.
+
+## Offline-queue replay without scanning everything published
+
+The replay reads every queued message since the disconnect and matches each in Go. `FilterSubjects`
+would let JetStream do it, but it refuses overlapping filters (`a.>` with `a.b`), so the
+session's filters have to be reduced to a non-overlapping set first.
+
+## Offline queue for messages published by plain NATS clients
+
+Only messages that pass through a broker are copied to the queue.
+
+## A default queue that failed at startup stays off
+
+When the queue is on only by default and its stream cannot be created, the broker logs a warning
+and runs without it until it is restarted, while still answering Session Present 1. Nothing
+retries, and nothing but the log says it happened. Retrying in the background, and exposing
+whether the queue is active (a method on `Broker`, a line in the startup log at info level), would
+make the deviation visible and temporary.
+
+## The queue's cost per publish is unmeasured
+
+Every QoS 1 and 2 publish now waits for a JetStream store before its PUBACK, and the queue holds a
+day of that traffic by default. There is no benchmark of the throughput this costs, so the README
+can only say "one round trip". A benchmark against a file-backed embedded server, and a line in
+the README with the number, would let a deployment size it before upgrading.

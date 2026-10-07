@@ -556,7 +556,7 @@ func (c *rawClient) expectNothing() {
 	require.NoError(c.t, c.nc.SetReadDeadline(time.Now().Add(300*time.Millisecond)))
 	p, err := packet.Read(c.r, 0)
 	if err == nil {
-		c.t.Fatalf("expected no further packet, got %s", p.Type())
+		c.t.Fatalf("expected no further packet, got %s: %+v", p.Type(), p)
 	}
 	var ne net.Error
 	require.ErrorAs(c.t, err, &ne)
