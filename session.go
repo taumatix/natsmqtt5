@@ -143,9 +143,18 @@ type session struct {
 	// previous connection delivered are not stored with it, so its replay
 	// cannot rewind past them; see replayOffline.
 	awayRestored bool
+	// awayFromSeq is the lowest offline-queue sequence the last connection had
+	// not delivered when it ended, or 0 when it did not note one. A replay
+	// starts there rather than at a time; see conn.awayFloor.
+	awayFromSeq uint64
+	// predecessor is the connection the latest one displaced.
+	predecessor *conn
 	// delivered is the offline-queue ids recently delivered to the client,
-	// with when, so a replay that rewinds past them does not repeat them.
-	delivered map[string]time.Time
+	// so a replay that rewinds past them does not repeat them. See
+	// noteDelivered for how long one is kept.
+	delivered map[string]deliveredMark
+	// maxDeliveredSeq is the highest queue sequence noteDelivered has seen.
+	maxDeliveredSeq uint64
 
 	// pendingWill is a Will whose connection has gone and which is waiting
 	// out its Will Delay Interval. It is published only if it is still here
@@ -188,6 +197,9 @@ func (s *session) attach(c *conn) *conn {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	prev := s.conn
+	if prev != nil {
+		s.predecessor = prev
+	}
 	s.conn = c
 	s.disconnectedAt = time.Time{}
 	// A resumption cancels a delayed Will [MQTT-3.1.3-9]; clearing it here
@@ -206,15 +218,42 @@ func (s *session) attach(c *conn) *conn {
 	return prev
 }
 
-// detach unbinds the connection and starts the expiry clock.
-func (s *session) detach(c *conn) {
+// detach unbinds the connection and starts the expiry clock. A non-nil a is
+// recorded as what the connection left undelivered, in the same step, so that
+// no one sees the session unbound and without it.
+func (s *session) detach(c *conn, a *away) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.conn == c {
 		s.conn = nil
 		s.disconnectedAt = time.Now()
 	}
+	if a != nil {
+		s.markAwayLocked(*a)
+	}
 }
+
+// awaitPredecessor returns once the connection this one displaced, if it did,
+// has recorded what it left undelivered, or when c ends. A client that
+// reconnects at once is attached before the old connection has finished; its
+// replay must not run before that connection says where it stood.
+func (s *session) awaitPredecessor(c *conn) {
+	s.mu.Lock()
+	prev := s.predecessor
+	s.mu.Unlock()
+	if prev == nil || prev == c {
+		return
+	}
+	select {
+	case <-prev.ended:
+	case <-c.done:
+	case <-time.After(predecessorWait):
+	}
+}
+
+// predecessorWait bounds awaitPredecessor, which is only waiting for the
+// displaced connection to stop its delivery goroutine.
+const predecessorWait = 10 * time.Second
 
 // takeOver tells the session's current connection that another CONNECT has
 // claimed the Client Identifier [MQTT-3.1.4-3].
@@ -572,41 +611,75 @@ func (s *session) takeWill() (*packet.Will, time.Duration) {
 	return w, d
 }
 
-func (s *session) markAway(at time.Time) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.awayAt = at
+// markAwayLocked records that the last connection ended. A replay no connection has
+// taken yet is still owed, and is kept: the earlier start wins, and the lower
+// of two sequences.
+func (s *session) markAwayLocked(a away) {
+	if !s.awayAt.IsZero() {
+		a.at, a.restored = s.awayAt, s.awayRestored
+		switch {
+		case s.awayFromSeq == 0:
+			a.fromSeq = 0
+		case a.fromSeq == 0 || s.awayFromSeq < a.fromSeq:
+			a.fromSeq = s.awayFromSeq
+		}
+	}
+	s.awayAt, s.awayRestored, s.awayFromSeq = a.at, a.restored, a.fromSeq
 }
 
 func (s *session) markAwayRestored(at time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.awayAt, s.awayRestored = at, true
+	s.awayAt, s.awayRestored, s.awayFromSeq = at, true, 0
 }
 
-// takeAway returns when the last connection ended, once, and whether that
-// came from the session store.
-func (s *session) takeAway() (at time.Time, restored, ok bool) {
+// away is what takeAway hands the replay.
+type away struct {
+	at       time.Time
+	restored bool // read from the session store; see session.awayRestored
+	fromSeq  uint64
+}
+
+// takeAway returns when the last connection ended, once.
+func (s *session) takeAway() (a away, ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	at, restored = s.awayAt, s.awayRestored
-	s.awayAt, s.awayRestored = time.Time{}, false
-	return at, restored, !at.IsZero()
+	a = away{at: s.awayAt, restored: s.awayRestored, fromSeq: s.awayFromSeq}
+	s.awayAt, s.awayRestored, s.awayFromSeq = time.Time{}, false, 0
+	return a, !a.at.IsZero()
 }
 
-// noteDelivered records a delivered message id, forgetting those older than a
-// replay could rewind to.
-func (s *session) noteDelivered(id string) {
+// deliveredSeqWindow is how far below the highest delivered queue sequence a
+// delivered id is kept however old it is. A replay may start at the lowest
+// sequence not yet delivered, and delivered messages above it must not be sent
+// again; those lie within the span two publishers' copies can arrive out of
+// order by, plus the connection's waiting messages.
+const deliveredSeqWindow = 8192
+
+// deliveredMark is when a message was delivered and the queue sequence of its
+// copy, 0 when it had none.
+type deliveredMark struct {
+	at  time.Time
+	seq uint64
+}
+
+// noteDelivered records a delivered message id. It forgets those older than a
+// time-based replay could rewind to, unless their queue sequence is near the
+// newest: a replay starting at a sequence reaches those however old they are.
+func (s *session) noteDelivered(id string, seq uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
 	if s.delivered == nil {
-		s.delivered = make(map[string]time.Time)
+		s.delivered = make(map[string]deliveredMark)
 	}
-	s.delivered[id] = now
+	s.delivered[id] = deliveredMark{at: now, seq: seq}
+	if seq > s.maxDeliveredSeq {
+		s.maxDeliveredSeq = seq
+	}
 	if len(s.delivered) > 64 && len(s.delivered)%64 == 0 {
-		for k, at := range s.delivered {
-			if now.Sub(at) > 2*offlineRewind {
+		for k, m := range s.delivered {
+			if now.Sub(m.at) > 2*offlineRewind && (m.seq == 0 || m.seq+deliveredSeqWindow < s.maxDeliveredSeq) {
 				delete(s.delivered, k)
 			}
 		}

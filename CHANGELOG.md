@@ -11,6 +11,16 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A connection that drops while behind no longer loses what was waiting for it.** The messages
+  queued for a client, and the stretch of the offline queue a catch-up had still to send, used to
+  be discarded when its connection ended, and the resume replay started only 2 seconds before
+  the disconnect, so a client minutes behind lost those minutes [MQTT-3.1.2-23], [MQTT-4.5.0-1].
+  The replay now starts at the lowest queue sequence the client had not been sent. It also no
+  longer gives up after 30 seconds: a slow client with a long backlog gets all of it, at its own
+  pace. A session restored from the session store still replays from the time it was released.
+
 ## [0.10.0] - 2026-10-08
 
 **Behaviour change for existing deployments.** The offline queue is now on by default whenever

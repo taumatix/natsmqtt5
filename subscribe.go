@@ -364,6 +364,7 @@ func (c *conn) enqueue(d *delivery) {
 // It opens by resending whatever the last connection left unacknowledged, so
 // that a resumed session's arrears go out before anything published since.
 func (c *conn) deliverLoop() {
+	defer close(c.loopDone)
 	if err := c.retransmit(); err != nil {
 		c.logger.Debug("could not resend the unacknowledged messages", "error", err)
 		c.close()
@@ -377,6 +378,14 @@ func (c *conn) deliverLoop() {
 	c.startPulling()
 
 	for {
+		// Not left to the select below, which picks at random among ready
+		// cases: once the connection has ended nothing more may be taken off its
+		// queue, or what was waiting is gone before awayFloor can see it.
+		select {
+		case <-c.done:
+			return
+		default:
+		}
 		select {
 		case <-c.done:
 			return
@@ -407,7 +416,8 @@ func (c *conn) deliverLoop() {
 				// §3.10.4); after a revoked permission it must not.
 				continue
 			}
-			if err := c.deliver(d); err != nil {
+			err := c.deliverTracked(d)
+			if err != nil {
 				c.logger.Debug("delivery failed", "topic", d.topic, "error", err)
 				c.close()
 				return
@@ -452,14 +462,16 @@ func (c *conn) deliver(d *delivery) error {
 	}
 	pub.PacketID = id
 	c.sess.trackInflight(&outbound{packetID: id, qos: d.qos, publish: pub, quotaHeld: true})
+	if d.id != "" && c.broker.queue != nil {
+		// Delivered, or discarded as too large, which counts as delivered
+		// [MQTT-3.1.2-25]: either way a replay must not send it again. Noted
+		// before the write, so one whose write failed is the in-flight message
+		// the resume resends and not also a new one the replay sends.
+		c.sess.noteDelivered(d.id, d.seq)
+	}
 	sent, err := c.writePublish(pub)
 	if err != nil {
 		return err
-	}
-	if d.id != "" && c.broker.queue != nil {
-		// Delivered, or discarded as too large, which counts as delivered
-		// [MQTT-3.1.2-25]: either way a replay must not send it again.
-		c.sess.noteDelivered(d.id)
 	}
 	if !sent {
 		// Discarded for exceeding the client's Maximum Packet Size, so no

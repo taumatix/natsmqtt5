@@ -21,27 +21,18 @@ a safety classifier (2026-10-05), so attempt this with my human present.
 ### A restored replay that can rewind
 
 v0.8.0 replays restored sessions from `AwayAt` exactly, because the ids the previous connection
-delivered are not stored, and rewinding without them could deliver a QoS 2 message twice. Storing
-the last few delivered ids in the record (bounded, as `noteDelivered` already is) would let a
-restored replay rewind like an in-memory one. That pairs with "Retransmission that survives a
-broker restart" below, which needs in-flight state in the record too. Also: a broker killed
-outright records no `AwayAt`. The record's `Attached` with no release could fall back to the
-claim time minus the queue's age, at the cost of duplicates.
+delivered are not stored, and rewinding without them could deliver a QoS 2 message twice.
 
-## A connection that drops while behind loses what was waiting for it
+**Already provided for the in-memory path:** a connection that ends records the lowest queue
+sequence it had not delivered (`session.awayFromSeq`, worked out by `conn.awayFloor`), and the
+resume replay starts there, not at a time. `noteDelivered` keeps a delivered id while its sequence
+is within 8192 of the newest, which is what makes a far rewind safe.
 
-**Today:** a connection keeps up to 2048 messages waiting for its client, and catches up from the
-offline queue when it falls further behind (`catchup.go`). If the connection drops, what was
-waiting is discarded, and the resume replay (`replayOffline`) rewinds only 2 seconds before the
-disconnect. A client minutes behind when its network failed loses those minutes
-[MQTT-3.1.2-23], [MQTT-4.5.0-1]. The resume replay also gives up after 30 seconds
-(`offlineReplayTimeout`), which a slow client with a long backlog reaches.
-
-**Shape:** the live copies now carry their stream sequence, so on detach the session can record
-the lowest sequence it has not delivered (what is waiting, or where a catch-up stood) and the
-resume replay can start there instead of at a time. That is also most of what 1b ("a restored
-replay that can rewind") needs. The replay's deadline should go, as the catch-up's did: it goes at
-the client's pace. Size M.
+**What is left:** the session record should hold that sequence and those recent ids (bounded) the
+same way, so a restored replay starts from the sequence instead of `AwayAt`. That pairs with
+"Retransmission that survives a broker restart" below, which needs in-flight state in the record
+too. Also: a broker killed outright records no `AwayAt`. The record's `Attached` with no release
+could fall back to the claim time minus the queue's age, at the cost of duplicates.
 
 ## Message Expiry Interval enforcement
 
@@ -474,3 +465,11 @@ Every QoS 1 and 2 publish now waits for a JetStream store before its PUBACK, and
 day of that traffic by default. There is no benchmark of the throughput this costs, so the README
 can only say "one round trip". A benchmark against a file-backed embedded server, and a line in
 the README with the number, would let a deployment size it before upgrading.
+
+## The slow-reader replay test only runs when asked
+
+`TestAReplayToASlowReaderIsNotCutOffAfterThirtySeconds` takes about 40 seconds (a 400-message
+backlog read at 90 ms a message with a Receive Maximum of 1), so it is skipped unless
+`NATSMQTT5_SLOW_TESTS` is set, and CI does not set it. Nothing else would notice a deadline coming
+back to the resume replay. Run it in a separate CI job (or nightly), or find a seam that makes the
+same point faster.
