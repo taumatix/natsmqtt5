@@ -28,21 +28,6 @@ broker restart" below, which needs in-flight state in the record too. Also: a br
 outright records no `AwayAt`. The record's `Attached` with no release could fall back to the
 claim time minus the queue's age, at the cost of duplicates.
 
-## A disconnected shared-subscription member loses its share
-
-**Today:** a member of a shared subscription whose client disconnects stays in the NATS queue
-group, so NATS keeps handing it its share of the group's messages, and the broker drops them
-because the session has no connection (`subscribe.go`, the handler's `currentConn() == nil`
-branch). The offline replay skips shared filters. A probe lost 27 of 40 QoS 1 messages. The CONNACK
-said Session Present=1 when the member came back, and it got none of them. The member stays in the
-group after its session expires too, because in-memory sessions are never swept.
-[MQTT-4.5.0-1], [MQTT-4.1.0-2].
-
-**Shape:** leave the queue group while the session has no connection and rejoin on resume, so
-NATS gives the share to connected members (which is also §4.8.2's SHOULD). That needs care so a
-group with no connected member does not drop everything; queue the group's messages for the
-session instead in that case. Size S–M.
-
 ## A client that falls behind loses QoS 1 and 2 messages
 
 **Today:** a connected client more than `deliveryQueueDepth` (2048) messages behind silently
@@ -263,6 +248,25 @@ deployment chooses.
 
 # Tier 3: SHOULD statements
 
+## A shared member's unacknowledged QoS 1 message dies with its session
+
+A shared subscription's backlog (`shared.go`) hands a message to a member and acknowledges it to
+JetStream as soon as the PUBLISH is in flight, so from then on the message is that session's. If
+the client never comes back and the session ends, the message ends with it. For QoS 1 the spec
+says the Server SHOULD then send it to another member of the group (MQTT-5.0 §4.8.2). Doing it
+means keeping the JetStream message unacknowledged until the PUBACK (with `InProgress` to hold
+off redelivery), and handing it back to the group when the session expires. That needs the
+session expiry sweep from "Expiring a detached session that is never resumed".
+
+## A shared subscription with no members keeps its backlog
+
+§4.8.2: a shared subscription ends when no session is subscribed to it, and its undelivered
+messages are deleted. The backlog consumer is removed by JetStream only after no member has pulled
+for longer than `MaxSessionExpiry`, so a group whose last member unsubscribed keeps collecting
+messages for that long, and a new member under the same name gets them. Deleting the consumer on
+the last UNSUBSCRIBE needs a count of members across brokers, a key-value entry per group for
+instance.
+
 ## Keeping clients off `$` topics
 
 v0.9.1 reserves `$retained` and `$queue`, the two levels the broker's own data lives under. The
@@ -305,6 +309,11 @@ consumer G" but has no concept of "unacked by member B".
 **Shape:** a separate arbitration stream with create-only compare-and-set for
 ownership, a private per-member copy of the message, and cleanup for every way
 the exchange can end — unsubscribe, disconnect, session expiry, takeover.
+
+The shared backlog changed this: a member now takes a message off the group's
+consumer and the message becomes that session's in-flight state, exactly the
+handover described above. What QoS 2 still needs is that state surviving a
+broker restart, which is "Retransmission that survives a broker restart".
 
 ## WebSocket transport
 
@@ -427,7 +436,11 @@ session's filters have to be reduced to a non-overlapping set first.
 
 ## Offline queue for messages published by plain NATS clients
 
-Only messages that pass through a broker are copied to the queue.
+Only messages that pass through a broker are copied to the queue. They also
+reach a shared subscription only through its NATS queue group, as QoS 0
+messages do, and NATS still picks members whose client is away, whose share is
+dropped. Leaving the queue group while the session has no connection would stop
+that, as long as the last member leaving does not leave the group with nobody.
 
 ## A default queue that failed at startup stays off
 
@@ -436,6 +449,12 @@ and runs without it until it is restarted, while still answering Session Present
 retries, and nothing but the log says it happened. Retrying in the background, and exposing
 whether the queue is active (a method on `Broker`, a line in the startup log at info level), would
 make the deviation visible and temporary.
+
+## A shared-subscription member pulls one message per round trip
+
+A connected member pulls one message, waits for room under its client's Receive Maximum, then
+pulls the next, so a member's rate is bounded by the round trip to JetStream. Pulling a batch the
+size of the free quota would lift that without a member holding more than it can send.
 
 ## The queue's cost per publish is unmeasured
 

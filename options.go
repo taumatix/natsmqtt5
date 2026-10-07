@@ -152,6 +152,12 @@ type Options struct {
 	// PersistentSessions, sessions restored from the session store after a
 	// restart or on another broker. Messages published straight onto NATS
 	// rather than through a broker are not queued (ROADMAP.md).
+	//
+	// The queue also backs shared subscriptions: each gets a durable consumer
+	// on the queue stream that only members with a connected client pull
+	// from, so QoS 1 and 2 work goes to members that can take it and waits
+	// when none can. Brokers sharing a SubjectPrefix must agree on whether the
+	// queue is on, or a message can reach a group twice.
 	OfflineQueue bool
 	// DisableOfflineQueue turns the default offline queue off, for a
 	// deployment that would rather not store every QoS 1 and 2 message and

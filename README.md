@@ -278,7 +278,7 @@ What it costs and what it does not cover yet:
 | An empty topic level | `./` or `/.` depending on position |
 | Filter wildcard `+` | `*` |
 | Filter wildcard `#` | `>`, plus a second subscription on the parent |
-| Shared subscription `$share/g/f` | Queue group on the subject for `f` |
+| Shared subscription `$share/g/f` | Durable JetStream consumer on the offline queue for QoS 1 and 2, pulled only by connected members; queue group on the subject for `f` for QoS 0 |
 | Retained message | JetStream stream, `MaxMsgsPerSubject: 1` |
 | Session state (opt-in) | JetStream key-value bucket, one key per Client Identifier |
 | v5 properties | NATS headers (`Mqtt5-Content-Type`, `Mqtt5-User`, …) |
@@ -360,8 +360,16 @@ What it costs and what it does not cover:
 Stated plainly, because a broker you cannot trust the limits of is worse than
 one with fewer features:
 
-- **No offline message queue.** Messages published while a session is
-  disconnected are not stored for it, whether or not the session is persisted.
+- **The offline queue needs JetStream, and covers what passes through a
+  broker.** A broker without JetStream, or with `DisableOfflineQueue`, drops QoS
+  1 and 2 messages for a session that is away, and messages published straight
+  onto NATS are never queued. See [Offline queue](#offline-queue).
+- **A shared subscription hands QoS 1 and 2 work only to connected members,
+  through a backlog in the offline queue.** Without the queue it is a plain NATS
+  queue group, which also chooses members whose client is away, and their share
+  is dropped. Brokers sharing a `SubjectPrefix` must agree on the queue, or a
+  message can reach a group twice. QoS 0 messages always go through the queue
+  group.
 - **Retransmission on reconnect reaches as far as the broker's memory.** A
   client that reconnects with Clean Start 0 to a broker still holding its
   session is resent the PUBLISH and PUBREL packets that connection left

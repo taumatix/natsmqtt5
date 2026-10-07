@@ -35,7 +35,7 @@ MQTT-3.1.2-19	3.1.2.9 Password Flag	C	CLIENT-ONLY (UNCITED)
 MQTT-3.1.2-20	3.1.2.10 Keep Alive	C	CLIENT-ONLY (UNCITED)			
 MQTT-3.1.2-21	3.1.2.10 Keep Alive	C	CLIENT-ONLY (CITED-TESTED)			broker_test.go:487 options.go:180
 MQTT-3.1.2-22	3.1.2.10 Keep Alive	S	CITED-TESTED			broker_test.go:466 conn.go:137 handshake.go:17
-MQTT-3.1.2-23	3.1.2.11.2 Session Expiry Interval	CS	CITED-TESTED	b	A disconnected shared-subscription member loses its share; Offline message queue: what it still loses	Pending QoS 1/2 messages are kept by the offline queue, on by default with JetStream since Unreleased (TestTheOfflineQueueIsOnByDefault). Still violated for a shared-subscription member, and at the boundary of a restored replay; deliberately so with DisableOfflineQueue or without JetStream.
+MQTT-3.1.2-23	3.1.2.11.2 Session Expiry Interval	CS	CITED-TESTED	b	Offline message queue: what it still loses	Pending QoS 1/2 messages are kept by the offline queue, on by default with JetStream since Unreleased (TestTheOfflineQueueIsOnByDefault). Still violated at the boundary of a restored replay; deliberately so with DisableOfflineQueue or without JetStream.
 MQTT-3.1.2-24	3.1.2.11.4 Maximum Packet Size	S	CITED-CODE			conn.go:387
 MQTT-3.1.2-25	3.1.2.11.4 Maximum Packet Size	S	CITED-TESTED			retransmit_test.go:368 conn.go:360 conn.go:372
 MQTT-3.1.2-26	3.1.2.11.5 Topic Alias Maximum	S	UNCITED	b		The local retained map stores the publisher's Properties, TopicAlias included (retain.go:240-245), and serves them until the stream consumer overwrites the entry (retain.go:177-201). A subscriber on the same broker in that window receives the publisher's Topic Alias (probe: reproduced 1 run in 3).
@@ -187,7 +187,7 @@ MQTT-3.15.2-1	3.15.2.1 Authenticate Reason Code	CS	ROADMAP	c	Enhanced authentica
 MQTT-3.15.2-2	3.15.2.2.4 Reason String	CS	ROADMAP	c	Enhanced authentication	As 3.15.2-1.
 MQTT-3.15.2-3	3.15.2.2.5 User Property	CS	ROADMAP	c	Enhanced authentication	As 3.15.2-1.
 MQTT-4.1.0-1	4.1.1 Storing Session State	CS	UNCITED	b		A connected client more than 2048 messages behind has QoS 1/2 messages dropped from its session (subscribe.go:331-338); nats.go slow-consumer limits drop more before that.
-MQTT-4.1.0-2	4.1.1 Storing Session State	S	ROADMAP	b	Expiring a detached session that is never resumed	In-memory sessions are discarded only lazily on reconnect (session.go:228-244, broker.go:322-326); an expired session still holds its NATS subscriptions, which matters for shared subscriptions (probe).
+MQTT-4.1.0-2	4.1.1 Storing Session State	S	ROADMAP	b	Expiring a detached session that is never resumed	In-memory sessions are discarded only lazily on reconnect (session.go, broker.go); an expired session still holds its NATS subscriptions. Since Unreleased that no longer costs a shared subscription its QoS 1/2 messages (they go only to connected members), but its QoS 0 share still reaches the expired member.
 MQTT-4.2.0-1	§4.2.0 (label appears only in Appendix B)	CS	UNCITED	a		Same statement as 4.2-1 under its Appendix B label.
 MQTT-4.2-1	4.2 Network Connections	CS	UNCITED	a		TCP and TLS listeners (broker.go:139-156).
 MQTT-4.3.1-1	4.3.1 QoS 0: At most once delivery	CS	UNCITED	a		Encoder clears DUP at QoS 0 (packet/publish.go:69).
@@ -211,7 +211,7 @@ MQTT-4.3.3-12	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		releaseQoS2 remov
 MQTT-4.3.3-13	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	c		Message expiry is not applied.
 MQTT-4.4.0-1	4.4 Message delivery retry	CS	CITED-TESTED			broker_test.go:548 displaced_ack_test.go:27 handshake.go:381 publish.go:196 README.md:351 ROADMAP.md:59
 MQTT-4.4.0-2	4.4 Message delivery retry	CS	CITED-TESTED			retransmit_test.go:320 publish.go:205
-MQTT-4.5.0-1	4.5 Message receipt	S	ROADMAP	b	A disconnected shared-subscription member loses its share; A client that falls behind loses QoS 1 and 2 messages	A detached session gets its messages from the offline queue, on by default with JetStream since Unreleased. Still dropped when the delivery queue overflows (subscribe.go:331-338) and when NATS routes a shared-subscription message to a detached member (probe: 27 of 40 QoS 1 messages lost).
+MQTT-4.5.0-1	4.5 Message receipt	S	CITED-TESTED	b	A client that falls behind loses QoS 1 and 2 messages	A detached session gets its messages from the offline queue, and a shared subscription hands its QoS 1/2 messages only to connected members (shared.go, TestADisconnectedSharedMemberStopsTakingWork), both on by default with JetStream since Unreleased. Still dropped when the delivery queue overflows (subscribe.go, enqueue).
 MQTT-4.5.0-2	4.5 Message receipt	C	CLIENT-ONLY (UNCITED)			
 MQTT-4.6.0-1	4.6 Message ordering	C	CLIENT-ONLY (UNCITED)			
 MQTT-4.6.0-2	4.6 Message ordering	C	CLIENT-ONLY (UNCITED)			
