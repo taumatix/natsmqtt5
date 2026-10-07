@@ -26,6 +26,8 @@ func TestParseConfigDefaults(t *testing.T) {
 	assert.Equal(t, natsmqtt5.DefaultSubjectPrefix, cfg.broker.SubjectPrefix)
 	assert.False(t, cfg.broker.DisableRetained)
 	assert.False(t, cfg.broker.PersistentSessions, "session persistence is opt-in")
+	assert.False(t, cfg.broker.OfflineQueue, "the queue is left to its default, which a broken stream only warns about")
+	assert.False(t, cfg.broker.DisableOfflineQueue, "the offline queue is on by default")
 	require.NotNil(t, cfg.broker.MaximumQoS)
 	assert.Equal(t, uint8(2), *cfg.broker.MaximumQoS)
 }
@@ -74,6 +76,16 @@ func TestFlagBeatsEnvironment(t *testing.T) {
 
 	assert.Equal(t, ":1884", cfg.broker.Listen)
 	assert.Equal(t, "nats://nats:4222", cfg.broker.NATSURL, "an unrelated variable still applies")
+}
+
+func TestTheOfflineQueueCanBeTurnedOff(t *testing.T) {
+	cfg, err := parseConfig([]string{"-no-offline-queue"}, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.DisableOfflineQueue)
+
+	cfg, err = parseConfig(nil, env(map[string]string{"NATSMQTT5_NO_OFFLINE_QUEUE": "true"}), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.DisableOfflineQueue)
 }
 
 // A variable an orchestrator interpolated from a missing value arrives empty;

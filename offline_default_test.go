@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/eclipse/paho.golang/paho"
+	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
-	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
