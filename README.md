@@ -11,19 +11,14 @@ unrelated message bus.
 
 [issue3369]: https://github.com/nats-io/nats-server/issues/3369
 
-> **Built against:** MQTT 5.0 (OASIS, 2019-03-07 — still the current revision), `nats.go` v1.53.1
-> and `nats-server` v2.14.5, checked 2026-09-24. Both NATS pins are deliberate holds: v1.54.0 and
-> v2.15.0 declare `go 1.26.0`, and taking either would raise this module's floor from Go 1.25 and
-> drop anyone building on it ([#11](https://github.com/taumatix/natsmqtt5/issues/11)). `nats.go` is
-> in the shipped build, so that hold costs you a NATS client one minor version behind — nothing is
-> broken, but it is a version you did not choose. **As of 2026-09-21 it also costs you a security
-> patch:** the hold keeps `golang.org/x/crypto` at v0.55.0, which carries two `x/crypto/ssh` DoS
-> advisories ([GO-2026-6354][g54], [GO-2026-6355][g55]) fixed in v0.56.0 — and v0.56.0 declares
-> `go 1.26.0` too, so there is no patched version reachable from a Go 1.25 floor. `govulncheck`
-> reports them as *not called* by this module, so it is not an exploitable path here; it is an
-> unpatchable one. See [UPSTREAM.md](UPSTREAM.md), [CHANGELOG.md](CHANGELOG.md) for what each
-> release changed under you, and [ROADMAP.md](ROADMAP.md) for where the broker knowingly does not
-> yet conform.
+> **Built against:** MQTT 5.0 (OASIS, 2019-03-07 — still the current revision), `nats.go` v1.54.0
+> and `nats-server` v2.15.0, checked 2026-10-07. Both are the latest releases. Since v0.9.0 this
+> module needs **Go 1.26** ([#11](https://github.com/taumatix/natsmqtt5/issues/11)). Go 1.25 left
+> upstream security support on 2026-08-19, and both NATS releases declare `go 1.26.0`. Holding the
+> floor had kept `golang.org/x/crypto` below the fix for two `x/crypto/ssh` DoS advisories
+> ([GO-2026-6354][g54], [GO-2026-6355][g55]). See [UPSTREAM.md](UPSTREAM.md),
+> [CHANGELOG.md](CHANGELOG.md) for what each release changed under you, and
+> [ROADMAP.md](ROADMAP.md) for where the broker knowingly does not yet conform.
 
 [g54]: https://pkg.go.dev/vuln/GO-2026-6354
 [g55]: https://pkg.go.dev/vuln/GO-2026-6355
@@ -103,7 +98,8 @@ As a library:
 go get github.com/taumatix/natsmqtt5@v0.8.0
 ```
 
-Requires Go 1.25 or newer, and a NATS server with JetStream enabled (or
+Requires Go 1.26 or newer (v0.8.0 and earlier build on Go 1.25), and a NATS server with JetStream
+enabled (or
 `-no-retained` / `Options.DisableRetained` to run without it).
 
 ## Use
