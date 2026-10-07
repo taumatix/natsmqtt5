@@ -11,6 +11,8 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-07
+
 ### Changed
 
 - **The minimum Go version is now 1.26** (was 1.25). If you build on Go 1.25, stay on v0.8.0.
@@ -27,6 +29,14 @@ honestly be reconstructed now.
 - `golang.org/x/crypto` v0.55.0 → v0.57.0, past [GO-2026-6354] and [GO-2026-6355], two DoS
   advisories in `x/crypto/ssh`. `govulncheck` never found them on a call path from this module,
   which does not speak SSH, but they could not be patched from a Go 1.25 floor.
+
+### Fixed
+
+- **`compose.yaml` started v0.4.2, whatever release you downloaded it from.** Its two
+  `image:` lines were not bumped from v0.4.3 to v0.8.0, so the compose quickstart the README
+  hands out at each tag ran the v0.4.2 broker. At this tag it starts v0.9.0. A new test,
+  `TestReleaseVersionsAgree`, fails when `compose.yaml` or a README install line names a version
+  other than the newest one in this file.
 
 [GO-2026-6354]: https://pkg.go.dev/vuln/GO-2026-6354
 [GO-2026-6355]: https://pkg.go.dev/vuln/GO-2026-6355
@@ -359,7 +369,13 @@ mapping `nats-server` uses for its own MQTT support.
 [#13]: https://github.com/taumatix/natsmqtt5/pull/13
 [#19]: https://github.com/taumatix/natsmqtt5/pull/19
 [#24]: https://github.com/taumatix/natsmqtt5/pull/24
-[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/taumatix/natsmqtt5/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/taumatix/natsmqtt5/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/taumatix/natsmqtt5/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/taumatix/natsmqtt5/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/taumatix/natsmqtt5/compare/v0.4.3...v0.5.0
+[0.4.3]: https://github.com/taumatix/natsmqtt5/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/taumatix/natsmqtt5/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/taumatix/natsmqtt5/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/taumatix/natsmqtt5/compare/v0.3.1...v0.4.0
