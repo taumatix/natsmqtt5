@@ -47,9 +47,9 @@ MQTT v5 clients ──TCP/TLS──▶ natsmqtt5 ──▶ your existing NATS se
   `PersistentSessions`, a client that reconnects with Clean Start 0 resumes its
   subscriptions on a broker that has never served it, and after a restart. Off
   by default; see [Persistent sessions](#persistent-sessions).
-- **Queues messages for a client that is away, if you ask it to.** With
-  `OfflineQueue`, QoS 1 and 2 messages published while a session is
-  disconnected are delivered when it resumes. Off by default; see
+- **Queues messages for a client that is away.** QoS 1 and 2 messages
+  published while a session is disconnected are delivered when it resumes, as
+  MQTT 5 requires. On by default whenever JetStream is in use; see
   [Offline queue](#offline-queue).
 - **Embeds as a library.** `natsmqtt5.New` returns a `*Broker` you run inside
   your own process, sharing your `*nats.Conn` if you want.
@@ -216,15 +216,30 @@ trusted.
 ## Offline queue
 
 Core NATS delivers a message to whoever is subscribed when it is published and
-keeps nothing, so by default a session whose client is disconnected misses what
-is published meanwhile. Turn on the queue:
+keeps nothing. MQTT 5 counts the QoS 1 and 2 messages pending for a session as
+part of its state, which outlives a disconnect while the Session Expiry Interval
+lasts [MQTT-3.1.2-23], so the broker keeps them in a JetStream stream and
+delivers them when the session resumes.
+
+The queue is on by default whenever the broker uses JetStream: with retained
+messages (the default) or `PersistentSessions`. That default is newer than
+v0.9.1; up to v0.9.1 the queue is off unless `OfflineQueue` is set. A broker run with
+`DisableRetained` and no `PersistentSessions` does not touch JetStream and has
+no queue. If the queue's stream cannot be created, because the JetStream account
+is out of streams or storage for instance, the broker logs a warning and runs
+without it. The settings:
 
 ```go
-natsmqtt5.Options{OfflineQueue: true, OfflineQueueMaxAge: 24 * time.Hour}
+natsmqtt5.Options{OfflineQueueMaxAge: 24 * time.Hour} // on by default
+natsmqtt5.Options{OfflineQueue: true}                 // required: fail to start without it
+natsmqtt5.Options{DisableOfflineQueue: true}          // off
 ```
 
-or `-offline-queue` / `NATSMQTT5_OFFLINE_QUEUE=true` (and
-`-offline-queue-max-age`) for the binary and the image.
+For the binary and the image they are `-offline-queue-max-age`,
+`-offline-queue` / `NATSMQTT5_OFFLINE_QUEUE=true` and `-no-offline-queue` /
+`NATSMQTT5_NO_OFFLINE_QUEUE=true`. Turning it off is a deviation from MQTT 5: a
+resumed session is told Session Present 1 and misses what was published while
+it was away.
 
 When the session resumes, the client gets what its filters matched while it was
 away, in publish order, before anything published after it reconnected. A

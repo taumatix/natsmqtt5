@@ -11,6 +11,30 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+### Changed
+
+- **The offline queue is on by default whenever the broker uses JetStream**, which it does with
+  retained messages (the default) or `PersistentSessions`. MQTT 5 requires it: QoS 1 and 2
+  messages pending for a session are session state that outlives a disconnect
+  [MQTT-3.1.2-23], [MQTT-4.5.0-1], and until now a resumed session was told Session Present 1
+  and given none of what was published while it was away. What changes for an existing
+  deployment that set nothing:
+  - A new stream, `MQTT5_queue` (file storage, 24 hours by default), holds every QoS 1 and 2
+    message published through a broker. Size its JetStream storage for a day of that traffic,
+    or set `OfflineQueueMaxAge`.
+  - A QoS 1 or 2 PUBACK or PUBREC now waits for JetStream to store the copy, one extra round
+    trip per publish.
+  - If the stream cannot be created, the broker logs a warning and runs as before rather than
+    failing to start.
+  - A broker with `DisableRetained` and without `PersistentSessions` is unchanged: it does not
+    use JetStream and has no queue.
+
+### Added
+
+- `Options.DisableOfflineQueue` and `-no-offline-queue` (`NATSMQTT5_NO_OFFLINE_QUEUE`) turn the
+  queue off. `OfflineQueue` and `-offline-queue` now mean the queue is required: a broker that
+  cannot create its stream does not start. Setting both is `ErrInvalidOptions`.
+
 ## [0.9.1] - 2026-10-07
 
 A security fix. No API change and no configuration change.

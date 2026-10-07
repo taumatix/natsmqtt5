@@ -117,11 +117,12 @@ type Options struct {
 	// It needs JetStream, and it caps the Client Identifier at
 	// MaxPersistentClientIDLen bytes.
 	//
-	// A resumed session carries its subscription set and nothing else.
-	// In-flight QoS 1 and QoS 2 messages are not stored, because resending
-	// them needs an offline queue the broker does not have; the Will Message is
-	// not stored because it belongs to the network connection rather than to
-	// the session (MQTT-5.0 §3.1.2.5). ROADMAP.md has both.
+	// A resumed session carries its subscription set, and the offline queue
+	// delivers what was published while it was away. Messages that were in
+	// flight to the client when its broker went down are not stored, so they
+	// are not resent; the Will Message is not stored because it belongs to the
+	// network connection rather than to the session (MQTT-5.0 §3.1.2.5).
+	// ROADMAP.md has both.
 	PersistentSessions bool
 	// SessionStorage selects file or memory storage for the session bucket.
 	// Defaults to file storage. Memory storage makes sessions survive a broker
