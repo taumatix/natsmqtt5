@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -45,6 +46,10 @@ const offlineReplayTimeout = 30 * time.Second
 type offlineQueue struct {
 	stream jetstream.Stream
 	prefix string
+	// infoMu serialises stream.Info, which writes a cached copy into the
+	// shared stream handle and so races between two connections replaying at
+	// once (found by -race on CI, once the queue became the default).
+	infoMu sync.Mutex
 }
 
 func newOfflineQueue(ctx context.Context, js jetstream.JetStream, opts *resolved) (*offlineQueue, error) {
@@ -127,7 +132,9 @@ func (q *offlineQueue) replaySeq(ctx context.Context, from uint64, fn func(*nats
 }
 
 func (q *offlineQueue) replayFrom(ctx context.Context, start jetstream.OrderedConsumerConfig, fn func(*nats.Msg)) (uint64, error) {
+	q.infoMu.Lock()
 	info, err := q.stream.Info(ctx)
+	q.infoMu.Unlock()
 	if err != nil {
 		return 0, err
 	}
