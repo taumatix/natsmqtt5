@@ -20,7 +20,7 @@ jobs:
         # The oldest supported Go and the current one. The broker embeds a NATS
         # server in its tests, so the matrix also catches nats-server breaking
         # on a newer toolchain.
-        go: ['1.25', 'stable']
+        go: ['1.26', 'stable']
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:

@@ -4,7 +4,7 @@
 # to the target, because the broker is pure Go with CGO off. That keeps a
 # multi-architecture build to one native compile per architecture instead of a
 # QEMU-emulated one.
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
 
 WORKDIR /src
 

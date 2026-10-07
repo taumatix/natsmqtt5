@@ -11,6 +11,26 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+### Changed
+
+- **The minimum Go version is now 1.26** (was 1.25). If you build on Go 1.25, stay on v0.8.0.
+  Go 1.25 has been out of upstream security support since 2026-08-19, and the NATS releases below
+  declare `go 1.26.0`, so the floor could not stay without holding them back.
+  ([#11](https://github.com/taumatix/natsmqtt5/issues/11))
+- `github.com/nats-io/nats.go` v1.53.1 → v1.54.0, the NATS client the broker is built on.
+- `github.com/nats-io/nats-server/v2` v2.14.5 → v2.15.0, used only by the tests.
+- The Docker image builds with `golang:1.26-alpine`, and CI tests Go 1.26 and the current stable
+  release.
+
+### Security
+
+- `golang.org/x/crypto` v0.55.0 → v0.57.0, past [GO-2026-6354] and [GO-2026-6355], two DoS
+  advisories in `x/crypto/ssh`. `govulncheck` never found them on a call path from this module,
+  which does not speak SSH, but they could not be patched from a Go 1.25 floor.
+
+[GO-2026-6354]: https://pkg.go.dev/vuln/GO-2026-6354
+[GO-2026-6355]: https://pkg.go.dev/vuln/GO-2026-6355
+
 ## [0.8.0] - 2026-10-05
 
 ### Added
