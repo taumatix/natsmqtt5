@@ -627,10 +627,56 @@ func (s *session) markAwayLocked(a away) {
 	s.awayAt, s.awayRestored, s.awayFromSeq = a.at, a.restored, a.fromSeq
 }
 
-func (s *session) markAwayRestored(at time.Time) {
+// markAwayRestored records the absence a session store record describes: when
+// the session was released, and, if the record has them, the sequence the
+// replay starts at and the ids delivered at or above it.
+func (s *session) markAwayRestored(at time.Time, fromSeq uint64, delivered []storedDelivered) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.awayAt, s.awayRestored, s.awayFromSeq = at, true, 0
+	s.awayAt, s.awayRestored, s.awayFromSeq = at, true, fromSeq
+	if len(delivered) == 0 {
+		return
+	}
+	if s.delivered == nil {
+		s.delivered = make(map[string]deliveredMark, len(delivered))
+	}
+	now := time.Now()
+	for _, d := range delivered {
+		s.delivered[d.ID] = deliveredMark{at: now, seq: d.Seq}
+		if d.Seq > s.maxDeliveredSeq {
+			s.maxDeliveredSeq = d.Seq
+		}
+	}
+}
+
+// maxStoredDelivered bounds the delivered ids a session record carries. The ids
+// that matter are those at or above the replay's start, which is the messages
+// the client was sent out of order or ahead of one it was not; that is a few
+// hundred at most for a client behind by its connection's queue, and the bound
+// keeps the record far below a key-value value's size limit however it came to
+// be larger. Dropping one can repeat that message on a restored replay.
+const maxStoredDelivered = 4096
+
+// awayState is what the session record keeps of the last connection's absence
+// beyond its time: the replay's starting sequence and the ids delivered at or
+// above it, lowest sequence first. dropped counts ids left out for the bound.
+func (s *session) awayState() (fromSeq uint64, delivered []storedDelivered, dropped int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.awayFromSeq == 0 {
+		return 0, nil, 0
+	}
+	for id, m := range s.delivered {
+		if m.seq >= s.awayFromSeq {
+			delivered = append(delivered, storedDelivered{ID: id, Seq: m.seq})
+		}
+	}
+	sort.Slice(delivered, func(i, j int) bool { return delivered[i].Seq < delivered[j].Seq })
+	if len(delivered) > maxStoredDelivered {
+		dropped = len(delivered) - maxStoredDelivered
+		delivered = delivered[:maxStoredDelivered]
+	}
+	return s.awayFromSeq, delivered, dropped
 }
 
 // away is what takeAway hands the replay.

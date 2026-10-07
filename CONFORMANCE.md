@@ -55,6 +55,10 @@ conforming client hits in ordinary use:
 - **Fixed, unreleased.** A connection that dropped while behind lost what was waiting for it, and
   the resume replay gave up after 30 seconds. It now starts at the lowest queue sequence the
   client had not been sent and has no deadline. [MQTT-3.1.2-23], [MQTT-4.5.0-1].
+- **Fixed, unreleased.** A session restored from the session store replayed from its release
+  time and lost what was waiting for a client that dropped while behind, and nothing was
+  replayed for a session whose broker was killed. The record now holds the replay position.
+  [MQTT-3.1.2-23], [MQTT-4.5.0-1].
 - Message Expiry is not enforced. [MQTT-3.3.2-5], [MQTT-3.3.2-6].
 - With `PersistentSessions`, a restored session resends nothing it had in flight.
   [MQTT-4.4.0-1], [MQTT-4.3.3-10].

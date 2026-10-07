@@ -173,8 +173,9 @@ func (c *conn) deliverTracked(d *delivery) error {
 // Only a sequence that was never delivered, or whose delivery is recorded by
 // id (session.noteDelivered keeps those near the newest sequence), can be
 // replayed from: starting earlier would send a delivered QoS 2 message twice.
-// The same field is where a restored session's record could later hold the
-// sequence (ROADMAP: "A restored replay that can rewind").
+// A session with a stored record has the sequence and those ids written into it
+// on release (sessionRecord.AwayFromSeq, Delivered), so a restored session
+// rewinds the same way.
 func (c *conn) awayFloor() away {
 	a := away{at: time.Now()}
 	if !c.loopStarted {

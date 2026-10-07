@@ -195,7 +195,7 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 	if sess == nil {
 		sess = newSession(clientID)
 		if !restoredAway.IsZero() {
-			sess.markAwayRestored(restoredAway)
+			sess.markAwayRestored(restoredAway, rec.awayFromSeqWas, rec.deliveredWas)
 		}
 	}
 	if rec != nil {

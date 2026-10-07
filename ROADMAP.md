@@ -9,30 +9,23 @@ today and cites the statements it violates.
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
-## Offline message queue: what it still loses
+## A killed broker's session replays the whole queue
 
-**Today:** the queue (`offline.go`) is on by default whenever the broker uses JetStream (merged
-after v0.9.1, ships on the next release train), so a session with an expiry gets what was
-published while it was away [MQTT-3.1.2-23], [MQTT-4.5.0-1]. `DisableOfflineQueue` turns it
-off, which is a deviation, and a broker without JetStream cannot have it. One gap remains inside
-it, on the restored-session path (`PersistentSessions`). Two earlier attempts were stopped by
-a safety classifier (2026-10-05), so attempt this with my human present.
+**Today:** the queue is on by default whenever the broker uses JetStream, so a session with an
+expiry gets what was published while it was away [MQTT-3.1.2-23], [MQTT-4.5.0-1], and with
+`PersistentSessions` a session restored on another broker replays from the position its record
+holds. A broker killed outright records none: the record is `Attached` with no release, and the
+next claim (when the old owner no longer answers) replays everything the queue still holds for
+the session, up to `OfflineQueueMaxAge` (a day by default). Nothing is lost, but a client that was
+caught up gets a day of repeats, QoS 2 included, which [MQTT-4.3.3-2] does not allow.
 
-### A restored replay that can rewind
-
-v0.8.0 replays restored sessions from `AwayAt` exactly, because the ids the previous connection
-delivered are not stored, and rewinding without them could deliver a QoS 2 message twice.
-
-**Already provided for the in-memory path:** a connection that ends records the lowest queue
-sequence it had not delivered (`session.awayFromSeq`, worked out by `conn.awayFloor`), and the
-resume replay starts there, not at a time. `noteDelivered` keeps a delivered id while its sequence
-is within 8192 of the newest, which is what makes a far rewind safe.
-
-**What is left:** the session record should hold that sequence and those recent ids (bounded) the
-same way, so a restored replay starts from the sequence instead of `AwayAt`. That pairs with
-"Retransmission that survives a broker restart" below, which needs in-flight state in the record
-too. Also: a broker killed outright records no `AwayAt`. The record's `Attached` with no release
-could fall back to the claim time minus the queue's age, at the cost of duplicates.
+**Shape:** bound the replay by what is known. A claim could write the time it was made into the
+record (`AttachedAt`), and a connection could write its replay position to the record as it
+advances (rate-limited, say once a second), so a dead broker's successor replays from the last
+position written and skips the ids delivered above it. The cost is one key-value write per second
+per behind client; the gain is that a kill costs a second of repeats rather than a day.
+`TestASessionLeftAttachedByAKilledBrokerIsReplayedFromTheQueue` rewrites a record to simulate the
+kill; a real one needs a harness that ends a broker without its cleanup.
 
 ## Message Expiry Interval enforcement
 
@@ -59,6 +52,13 @@ HasNothingToResend` pins that boundary so it cannot quietly be assumed wider.
 payloads do not belong in it. Persisting Packet Identifiers alone would record
 that a message was in flight without being able to resend it — a promise the
 broker cannot keep, which is why they were left out in the first place.
+
+**What the record has now:** since the restored replay can rewind, the record holds the lowest queue
+sequence the last connection had not delivered and the ids delivered above it
+(`sessionRecord.AwayFromSeq`, `Delivered`, written on release). That is the queue position;
+it is not the in-flight set. A message sent and not acknowledged sits below that position, so a
+restored session neither replays nor resends it: the loss this entry is about, and the reason the
+position is a lower bound on what must be replayed rather than a complete account.
 
 **Shape:** once the offline queue exists, the unacknowledged set is the durable
 consumer's ack-pending set and the payloads are already in the stream. What

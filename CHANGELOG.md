@@ -20,6 +20,14 @@ honestly be reconstructed now.
   The replay now starts at the lowest queue sequence the client had not been sent. It also no
   longer gives up after 30 seconds: a slow client with a long backlog gets all of it, at its own
   pace. A session restored from the session store still replays from the time it was released.
+- **A restored session replays from what it was owed, and a killed broker's sessions are replayed.**
+  With `PersistentSessions`, the session record now holds the lowest queue sequence the client had
+  not been sent and the ids it had been sent above it, so a session resumed after a restart or on
+  another broker gets what was waiting for it, not only what was published after the release
+  [MQTT-3.1.2-23], [MQTT-4.5.0-1]. Records written by earlier versions still load and replay as
+  before. A session left attached by a broker that was killed outright is replayed from the start
+  of the queue (`OfflineQueueMaxAge`) when it is resumed, which loses nothing and can repeat
+  messages the dead connection delivered.
 
 ## [0.10.0] - 2026-10-08
 
