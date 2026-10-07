@@ -31,7 +31,10 @@ type delivery struct {
 	sub *subscription
 	// id is the message's Mqtt5-Msg-Id, which ties its live delivery to its
 	// offline-queue copy. Empty for a message published straight onto NATS.
-	id      string
+	id string
+	// seq is the stream sequence of the message's offline-queue copy, or 0
+	// when it has none; see catchup.go.
+	seq     uint64
 	topic   string
 	payload []byte
 	qos     packet.QoS
@@ -80,7 +83,18 @@ type conn struct {
 	// replayed holds the ids replayOffline delivered from the offline queue,
 	// so the live copy of one is skipped. Only the delivery goroutine uses it.
 	replayed map[string]bool
-	quota    chan struct{}
+	// replayedBefore is the previous catch-up's replayed set, kept one round
+	// longer so a late live copy from it is still recognised.
+	replayedBefore map[string]bool
+	quota          chan struct{}
+
+	// Catching up from the queue stream after falling behind; see
+	// catchup.go. behind and fromSeq are guarded by catchMu; catchup wakes
+	// the delivery goroutine.
+	catchMu sync.Mutex
+	behind  bool
+	fromSeq uint64
+	catchup chan struct{}
 
 	// shared carries messages pulled from shared-subscription backlogs to the
 	// delivery goroutine, and pulling records which subscriptions this
@@ -106,6 +120,7 @@ func newConn(b *Broker, nc net.Conn) *conn {
 		deliveries: make(chan *delivery, deliveryQueueDepth),
 		replayed:   make(map[string]bool),
 		shared:     make(chan *sharedItem),
+		catchup:    make(chan struct{}, 1),
 		pulling:    make(map[*subscription]bool),
 		done:       make(chan struct{}),
 	}

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -83,8 +84,23 @@ func (q *offlineQueue) keep(ctx context.Context, js jetstream.JetStream, subject
 	// how a shared subscription knows its backlog has this message.
 	msg.Header.Set(hdrQueued, "1")
 	copied := &nats.Msg{Subject: queuedSubject(q.prefix, subject), Header: msg.Header, Data: msg.Data}
-	_, err := js.PublishMsg(ctx, copied)
-	return err
+	ack, err := js.PublishMsg(ctx, copied)
+	if err != nil {
+		return err
+	}
+	// Set after the copy is stored, so only the live copy carries it.
+	msg.Header.Set(hdrQueueSeq, strconv.FormatUint(ack.Sequence, 10))
+	return nil
+}
+
+// queueSeq is the stream sequence of a live message's queued copy, or 0 when
+// it has none.
+func queueSeq(msg *nats.Msg) uint64 {
+	if msg.Header == nil {
+		return 0
+	}
+	seq, _ := strconv.ParseUint(msg.Header.Get(hdrQueueSeq), 10, 64)
+	return seq
 }
 
 // offlineKeepTimeout bounds waiting for JetStream to store a queue copy.
@@ -94,26 +110,40 @@ const offlineKeepTimeout = 5 * time.Second
 // up to the end of the stream as it is when replay starts. The subject handed
 // to fn is the live one, without the "$queue." part.
 func (q *offlineQueue) replay(ctx context.Context, since time.Time, fn func(*nats.Msg)) error {
+	_, err := q.replayFrom(ctx, jetstream.OrderedConsumerConfig{
+		DeliverPolicy: jetstream.DeliverByStartTimePolicy,
+		OptStartTime:  &since,
+	}, fn)
+	return err
+}
+
+// replaySeq is replay from a stream sequence rather than a time. It returns
+// the last sequence it read up to, which is the stream's end when it started.
+func (q *offlineQueue) replaySeq(ctx context.Context, from uint64, fn func(*nats.Msg)) (uint64, error) {
+	return q.replayFrom(ctx, jetstream.OrderedConsumerConfig{
+		DeliverPolicy: jetstream.DeliverByStartSequencePolicy,
+		OptStartSeq:   from,
+	}, fn)
+}
+
+func (q *offlineQueue) replayFrom(ctx context.Context, start jetstream.OrderedConsumerConfig, fn func(*nats.Msg)) (uint64, error) {
 	info, err := q.stream.Info(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	last := info.State.LastSeq
 	if last == 0 {
-		return nil
+		return 0, nil
 	}
-	cons, err := q.stream.OrderedConsumer(ctx, jetstream.OrderedConsumerConfig{
-		DeliverPolicy: jetstream.DeliverByStartTimePolicy,
-		OptStartTime:  &since,
-	})
+	cons, err := q.stream.OrderedConsumer(ctx, start)
 	if err != nil {
-		return err
+		return last, err
 	}
 	queuedPrefix := queuedSubject(q.prefix, "")
 	for {
 		batch, err := cons.Fetch(256, jetstream.FetchMaxWait(500*time.Millisecond))
 		if err != nil {
-			return err
+			return last, err
 		}
 		n := 0
 		for m := range batch.Messages() {
@@ -123,23 +153,29 @@ func (q *offlineQueue) replay(ctx context.Context, since time.Time, fn func(*nat
 				continue
 			}
 			if meta.Sequence.Stream > last {
-				return nil
+				return last, nil
 			}
 			subject := m.Subject()
 			if len(subject) > len(queuedPrefix) && subject[:len(queuedPrefix)] == queuedPrefix {
 				subject = topic.Prefix(q.prefix, subject[len(queuedPrefix):])
 			}
-			fn(&nats.Msg{Subject: subject, Header: m.Headers(), Data: m.Data()})
+			// A copy read back carries its own sequence, as its live copy does.
+			header := m.Headers()
+			if header == nil {
+				header = nats.Header{}
+			}
+			header.Set(hdrQueueSeq, strconv.FormatUint(meta.Sequence.Stream, 10))
+			fn(&nats.Msg{Subject: subject, Header: header, Data: m.Data()})
 			if meta.Sequence.Stream >= last {
-				return nil
+				return last, nil
 			}
 		}
 		if err := batch.Error(); err != nil && !errors.Is(err, nats.ErrTimeout) && !errors.Is(err, jetstream.ErrNoMessages) {
-			return err
+			return last, err
 		}
 		if n == 0 {
-			// Nothing at or after `since`: the stream's end was before it.
-			return nil
+			// Nothing at or after the start: the stream's end was before it.
+			return last, nil
 		}
 	}
 }
@@ -155,6 +191,41 @@ func messageID(msg *nats.Msg) string {
 		return ""
 	}
 	return msg.Header.Get(hdrMsgID)
+}
+
+// deliverQueued delivers a message read from the queue stream to each of the
+// session's non-shared subscriptions it matches, and records it as replayed so
+// its live copy, arriving late, is skipped. It runs on the delivery goroutine.
+func (c *conn) deliverQueued(id string, msg *nats.Msg) error {
+	qos, _, _, _ := fromNATS(msg)
+	if qos == packet.QoS0 {
+		return nil
+	}
+	subject, ok := topic.TrimPrefix(c.broker.opts.SubjectPrefix, msg.Subject)
+	if !ok {
+		return nil
+	}
+	name := topic.SubjectToName(subject)
+	matched := false
+	for _, sub := range c.sess.subscriptions() {
+		if sub.share != "" || !topic.Match(sub.filter, name) {
+			// A shared subscription's messages come from its own backlog
+			// (shared.go), to whichever connected member pulls them.
+			continue
+		}
+		d := c.deliveryFor(sub, name, msg)
+		if d == nil || d.qos == packet.QoS0 {
+			continue
+		}
+		matched = true
+		if err := c.deliver(d); err != nil {
+			return err
+		}
+	}
+	if matched {
+		c.replayed[id] = true
+	}
+	return nil
 }
 
 // replayOffline delivers what the queue holds for this session since its last
@@ -189,39 +260,10 @@ func (c *conn) replayOffline() error {
 			return
 		}
 		id := messageID(msg)
-		if id == "" || delivered[id] || c.replayed[id] {
+		if id == "" || delivered[id] || c.wasReplayed(id) {
 			return
 		}
-		qos, _, _, _ := fromNATS(msg)
-		if qos == packet.QoS0 {
-			return
-		}
-		subject, ok := topic.TrimPrefix(c.broker.opts.SubjectPrefix, msg.Subject)
-		if !ok {
-			return
-		}
-		name := topic.SubjectToName(subject)
-		matched := false
-		for _, sub := range c.sess.subscriptions() {
-			if sub.share != "" || !topic.Match(sub.filter, name) {
-				// A shared subscription's messages go to the group's members
-				// that are connected; MQTT-5.0 §4.8.2 gives a disconnected
-				// member no claim on them.
-				continue
-			}
-			d := c.deliveryFor(sub, name, msg)
-			if d == nil || d.qos == packet.QoS0 {
-				continue
-			}
-			matched = true
-			if err := c.deliver(d); err != nil {
-				deliverErr = err
-				return
-			}
-		}
-		if matched {
-			c.replayed[id] = true
-		}
+		deliverErr = c.deliverQueued(id, msg)
 	})
 	if deliverErr != nil {
 		return deliverErr
