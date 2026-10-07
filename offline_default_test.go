@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -43,15 +44,23 @@ func startNATSWithoutJetStream(t *testing.T) string {
 // A broker told not to use JetStream does not start using it for the queue:
 // it starts, and a session that was away gets nothing, as before.
 func TestABrokerWithoutJetStreamStillStartsWithNoQueue(t *testing.T) {
-	addr := startBroker(t, startNATSWithoutJetStream(t), func(o *natsmqtt5.Options) { o.DisableRetained = true })
+	var logs syncBuffer
+	addr := startBroker(t, startNATSWithoutJetStream(t), func(o *natsmqtt5.Options) {
+		o.DisableRetained = true
+		o.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	})
 
 	away := dialRaw(t, addr)
 	away.connect(rawConnect("no-js", 300))
 	away.subscribe("q/#", packet.QoS1)
 	away.drop()
+	waitDetached(t, &logs, "no-js")
 
 	pub, _ := connectClient(t, addr, connectOpts("pub-no-js"))
 	pub.publish(&paho.Publish{Topic: "q/1", QoS: 1, Payload: []byte("1")})
+	// As in TestWithoutTheOfflineQueueNothingPublishedWhileAwayArrives: let
+	// the live copy reach the detached session before it resumes.
+	time.Sleep(200 * time.Millisecond)
 
 	back := dialRaw(t, addr)
 	require.True(t, back.connect(rawConnect("no-js", 300)).SessionPresent)
@@ -128,4 +137,18 @@ func TestAnExplicitQueueThatCannotBeCreatedFailsTheBroker(t *testing.T) {
 func TestAskingForTheQueueAndDisablingItIsRefused(t *testing.T) {
 	_, err := natsmqtt5.New(natsmqtt5.Options{OfflineQueue: true, DisableOfflineQueue: true})
 	require.ErrorIs(t, err, natsmqtt5.ErrInvalidOptions)
+}
+
+// waitDetached waits until the broker logging to logs has detached clientID's
+// session, which it logs once the connection's teardown is done.
+func waitDetached(t *testing.T, logs *syncBuffer, clientID string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		for _, line := range strings.Split(logs.String(), "\n") {
+			if strings.Contains(line, `msg="mqtt client disconnected"`) && strings.Contains(line, "client_id="+clientID+" ") {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 5*time.Millisecond, "the broker never detached %s", clientID)
 }
