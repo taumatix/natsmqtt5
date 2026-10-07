@@ -131,18 +131,32 @@ type Options struct {
 	// Defaults to 1.
 	SessionReplicas int
 
-	// OfflineQueue keeps QoS 1 and QoS 2 messages for a session while its
-	// client is disconnected, and delivers them when the session resumes, in
-	// publish order and before anything published after the resume. Without
-	// it they are dropped for that session, as core NATS keeps nothing.
+	// OfflineQueue requires the offline queue, so a broker that cannot set it
+	// up fails to start.
+	//
+	// The queue keeps QoS 1 and QoS 2 messages for a session while its client
+	// is disconnected, and delivers them when the session resumes, in publish
+	// order and before anything published after the resume. MQTT-5.0 counts
+	// those messages as session state that MUST outlive the connection
+	// [MQTT-3.1.2-23], [MQTT-4.5.0-1], so the queue is on by default whenever
+	// the broker uses JetStream (retained messages, the default, or
+	// PersistentSessions); then a stream that cannot be created is logged at
+	// warn level and the broker runs without it. Without the queue, messages
+	// are dropped for an absent session, as core NATS keeps nothing.
 	//
 	// Each such message is published a second time, under
 	// <SubjectPrefix>.$queue.<subject>, into a JetStream stream that keeps it
-	// for OfflineQueueMaxAge. It covers sessions held in this broker's memory
-	// and, with PersistentSessions, sessions restored from the session store
-	// after a restart or on another broker. Messages published straight onto
-	// NATS rather than through a broker are not queued (ROADMAP.md).
+	// for OfflineQueueMaxAge, and the PUBACK or PUBREC waits for JetStream to
+	// store it. It covers sessions held in this broker's memory and, with
+	// PersistentSessions, sessions restored from the session store after a
+	// restart or on another broker. Messages published straight onto NATS
+	// rather than through a broker are not queued (ROADMAP.md).
 	OfflineQueue bool
+	// DisableOfflineQueue turns the default offline queue off, for a
+	// deployment that would rather not store every QoS 1 and 2 message and
+	// accepts that a resumed session misses what was published while it was
+	// away. Setting it together with OfflineQueue is an error.
+	DisableOfflineQueue bool
 	// OfflineQueueMaxAge is how long a queued message is kept. Defaults to 24
 	// hours. A session away for longer loses what is older.
 	OfflineQueueMaxAge time.Duration
@@ -211,6 +225,9 @@ type resolved struct {
 	maximumPacketSize uint32
 	receiveMaximum    uint16
 	logger            *slog.Logger
+	// defaultQueue is set when the offline queue is on only because it is
+	// the default, so failing to create it is a warning, not a failure.
+	defaultQueue bool
 }
 
 func (o Options) resolve() (*resolved, error) {
@@ -283,6 +300,10 @@ func (o Options) resolve() (*resolved, error) {
 		return nil, fmt.Errorf("%w: StreamPrefix %q contains a character that is not valid in a JetStream stream name",
 			ErrInvalidOptions, r.StreamPrefix)
 	}
+	if o.OfflineQueue && o.DisableOfflineQueue {
+		return nil, fmt.Errorf("%w: OfflineQueue and DisableOfflineQueue are both set", ErrInvalidOptions)
+	}
+	r.defaultQueue = !o.OfflineQueue && !o.DisableOfflineQueue && (!o.DisableRetained || o.PersistentSessions)
 	return r, nil
 }
 

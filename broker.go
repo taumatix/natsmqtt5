@@ -111,6 +111,14 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 		}
 	}
 
+	if r.defaultQueue {
+		var err error
+		if b.queue, err = newOfflineQueue(ctx, b.js, r); err != nil {
+			b.logger.Warn("running without the offline queue: QoS 1 and 2 messages published while a session "+
+				"is disconnected are dropped for it; set DisableOfflineQueue to silence this, or OfflineQueue to "+
+				"make it a startup failure", "error", err)
+		}
+	}
 	if r.OfflineQueue {
 		var err error
 		if b.queue, err = newOfflineQueue(ctx, b.js, r); err != nil {

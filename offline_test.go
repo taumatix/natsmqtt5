@@ -89,10 +89,36 @@ func TestTheOfflineQueueHoldsNoQoS0AndNothingForACleanStart(t *testing.T) {
 	clean.expectNothing()
 }
 
-// Without the option nothing changes: a resumed session gets only what was
-// already in flight.
-func TestWithoutTheOfflineQueueNothingPublishedWhileAwayArrives(t *testing.T) {
+// The queue is on by default whenever the broker uses JetStream, because
+// MQTT-5.0 makes it part of the session state: a session with an expiry keeps
+// its pending QoS 1 and 2 messages across a disconnect [MQTT-3.1.2-23], and a
+// message is added to the session of every matching subscriber, connected or
+// not [MQTT-4.5.0-1]. A broker with no options set must not answer Session
+// Present 1 and then deliver nothing.
+func TestTheOfflineQueueIsOnByDefault(t *testing.T) {
 	addr := startBroker(t, startNATS(t))
+
+	away := dialRaw(t, addr)
+	away.connect(rawConnect("offline-default", 300))
+	away.subscribe("q/#", packet.QoS1)
+	away.drop()
+
+	pub, _ := connectClient(t, addr, connectOpts("pub-offline-default"))
+	pub.publish(&paho.Publish{Topic: "q/1", QoS: 1, Payload: []byte("1")})
+
+	back := dialRaw(t, addr)
+	require.True(t, back.connect(rawConnect("offline-default", 300)).SessionPresent)
+	got := back.expectPublish()
+	assert.Equal(t, "q/1", got.Topic, "the message published while away [MQTT-3.1.2-23]")
+	back.send(&packet.Puback{Ack: packet.Ack{PacketID: got.PacketID}})
+	back.expectNothing()
+}
+
+// DisableOfflineQueue is the opt-out, for a deployment that would rather not
+// store every QoS 1 and 2 message and accepts the deviation: a resumed session
+// gets only what was already in flight.
+func TestWithoutTheOfflineQueueNothingPublishedWhileAwayArrives(t *testing.T) {
+	addr := startBroker(t, startNATS(t), func(o *natsmqtt5.Options) { o.DisableOfflineQueue = true })
 
 	away := dialRaw(t, addr)
 	away.connect(rawConnect("offline-off", 300))
