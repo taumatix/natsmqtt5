@@ -79,6 +79,9 @@ func queuedSubject(prefix, subject string) string {
 // was away and its queued copy stored too late for the replay, and was lost
 // (found on CI, on #36's merge commit).
 func (q *offlineQueue) keep(ctx context.Context, js jetstream.JetStream, subject string, msg *nats.Msg) error {
+	// The mark travels on the live copy too, which shares the header: that is
+	// how a shared subscription knows its backlog has this message.
+	msg.Header.Set(hdrQueued, "1")
 	copied := &nats.Msg{Subject: queuedSubject(q.prefix, subject), Header: msg.Header, Data: msg.Data}
 	_, err := js.PublishMsg(ctx, copied)
 	return err
