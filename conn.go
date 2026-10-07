@@ -37,6 +37,9 @@ type delivery struct {
 	qos     packet.QoS
 	retain  bool
 	props   *packet.Properties
+	// quotaHeld is set when the send-quota slot for this delivery was taken
+	// before it was queued, as a shared-subscription puller does.
+	quotaHeld bool
 }
 
 // conn is one MQTT network connection and the state that belongs to it rather
@@ -79,6 +82,13 @@ type conn struct {
 	replayed map[string]bool
 	quota    chan struct{}
 
+	// shared carries messages pulled from shared-subscription backlogs to the
+	// delivery goroutine, and pulling records which subscriptions this
+	// connection is pulling for; see shared.go.
+	shared  chan *sharedItem
+	pullMu  sync.Mutex
+	pulling map[*subscription]bool
+
 	closeOnce sync.Once
 	done      chan struct{}
 	// connected is set once CONNACK with a success code has gone out. Until
@@ -95,6 +105,8 @@ func newConn(b *Broker, nc net.Conn) *conn {
 		aliases:    make(map[uint16]string),
 		deliveries: make(chan *delivery, deliveryQueueDepth),
 		replayed:   make(map[string]bool),
+		shared:     make(chan *sharedItem),
+		pulling:    make(map[*subscription]bool),
 		done:       make(chan struct{}),
 	}
 }

@@ -47,8 +47,9 @@ conforming client hits in ordinary use:
 - **Fixed, unreleased.** QoS 1 and 2 messages published while a session was disconnected were
   dropped unless `OfflineQueue` was on, while the CONNACK said Session Present=1. The queue is now
   on by default whenever the broker uses JetStream. [MQTT-3.1.2-23], [MQTT-4.5.0-1].
-- A disconnected shared-subscription member keeps receiving, and dropping, its share.
-  [MQTT-4.5.0-1], [MQTT-4.1.0-2].
+- **Fixed, unreleased.** A disconnected shared-subscription member kept receiving, and dropping,
+  its share. QoS 1 and 2 work now goes only to connected members, through a backlog in the
+  offline queue. [MQTT-4.5.0-1], [MQTT-4.1.0-2].
 - A client that falls behind loses QoS 1 and 2 messages. [MQTT-4.1.0-1].
 - Message Expiry is not enforced. [MQTT-3.3.2-5], [MQTT-3.3.2-6].
 - With `PersistentSessions`, a restored session resends nothing it had in flight.

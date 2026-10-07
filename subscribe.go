@@ -68,6 +68,7 @@ func (c *conn) handleSubscribe(ctx context.Context, p *packet.Subscribe) error {
 			continue
 		}
 		c.sendRetained(sub, p.Subscriptions[i].RetainHandling, replaced[i])
+		c.startPull(sub)
 	}
 	return nil
 }
@@ -191,10 +192,23 @@ func (c *conn) bindNATS(sub *subscription) error {
 	// resumed on a new connection keeps its subscriptions (MQTT-5.0 §4.1), and
 	// capturing would leave them delivering into the closed socket.
 	sess := c.sess
+	if q := c.broker.queue; q != nil && sub.share != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), natsFlushTimeout)
+		backlog, err := q.sharedConsumer(ctx, c.broker.opts, sub)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("creating the shared subscription's backlog: %w", err)
+		}
+		sub.backlog = backlog
+	}
 	handler := func(msg *nats.Msg) {
 		if !sub.live.Load() {
 			// Bound but not installed, or already removed: no connection has
 			// been cleared to receive through it.
+			return
+		}
+		if sub.backlog != nil && msg.Header.Get(hdrQueued) != "" {
+			// The backlog delivers this one, to whichever member pulls it.
 			return
 		}
 		if cur := sess.currentConn(); cur != nil {
@@ -355,11 +369,20 @@ func (c *conn) deliverLoop() {
 		c.close()
 		return
 	}
+	c.startPulling()
 
 	for {
 		select {
 		case <-c.done:
 			return
+		case it := <-c.shared:
+			taken, err := c.deliverShared(it)
+			it.done <- taken
+			if err != nil {
+				c.logger.Debug("delivery failed", "topic", it.msg.Subject, "error", err)
+				c.close()
+				return
+			}
 		case d := <-c.deliveries:
 			if d.id != "" && c.replayed[d.id] {
 				// Its queued copy was replayed; this is the live copy arriving
@@ -396,10 +419,12 @@ func (c *conn) deliver(d *delivery) error {
 
 	// Receive Maximum limits how many QoS 1 and QoS 2 publications may be in
 	// flight towards the client at once (MQTT-5.0 §4.9).
-	select {
-	case c.quota <- struct{}{}:
-	case <-c.done:
-		return nil
+	if !d.quotaHeld {
+		select {
+		case c.quota <- struct{}{}:
+		case <-c.done:
+			return nil
+		}
 	}
 	if d.sub != nil && !d.sub.live.Load() {
 		// Revoked or unsubscribed while this waited for room, which is

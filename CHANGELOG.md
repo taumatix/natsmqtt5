@@ -29,6 +29,14 @@ honestly be reconstructed now.
   - A broker with `DisableRetained` and without `PersistentSessions` is unchanged: it does not
     use JetStream and has no queue.
 
+- **A shared subscription's QoS 1 and 2 messages go only to members whose client is connected**,
+  on any broker, and wait for the first member back when none is. Before, NATS chose among all
+  members, and a member whose client was away dropped its share: a probe lost 27 of 40 messages
+  [MQTT-4.5.0-1], [MQTT-4.1.0-2]. Each shared subscription now has a durable consumer on the
+  offline-queue stream (`MQTT5_share_<hash>`), removed by JetStream once no member has pulled for
+  longer than `MaxSessionExpiry`. It needs the offline queue; without it, shared subscriptions
+  behave as before. Brokers sharing a `SubjectPrefix` must agree on whether the queue is on.
+
 ### Added
 
 - `Options.DisableOfflineQueue` and `-no-offline-queue` (`NATSMQTT5_NO_OFFLINE_QUEUE`) turn the
