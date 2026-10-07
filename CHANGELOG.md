@@ -26,7 +26,10 @@ A security fix. No API change and no configuration change.
   QoS 2 message on the broker, and to `$retained/#` every retained-message write. Topic Names and
   Filters whose first level is `$retained` or `$queue` are now refused: PUBLISH with `0x90`, SUBSCRIBE
   with `0x8F`, a Will with a `0x90` CONNACK. Other `$` topics are unaffected. Found by a
-  conformance review against the MQTT 5 specification.
+  conformance review against the MQTT 5 specification. The retained-message forgery affects
+  every release with retained messages; reading the queue affects v0.7.0 to v0.9.0 with
+  `OfflineQueue` on (reproduced on v0.9.0: a `$queue/#` subscriber received another client's
+  `private/payroll` message).
 
   **Check your retained messages** if untrusted clients could publish: any retained message may
   have been replaced. A session that had subscribed to one of these filters before the upgrade
