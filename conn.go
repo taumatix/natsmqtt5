@@ -96,6 +96,26 @@ type conn struct {
 	fromSeq uint64
 	catchup chan struct{}
 
+	// Where this connection stands in the queue stream, for the replay after
+	// it ends; see awayFloor. All but loopDone belong to the delivery
+	// goroutine, and finish reads them once loopDone is closed.
+	//
+	// inHand is the sequence of the delivery being sent, streamNext the
+	// sequence the stream read (resume replay or catch-up round) has yet to
+	// handle, 0 for none. resume is the replay's start, kept until it has
+	// handled a message, so a connection that ends before that does not lose
+	// the replay it was owed.
+	inHand     uint64
+	streamNext uint64
+	resume     *away
+	loopDone   chan struct{}
+	// loopStarted is set by serve before it starts deliverLoop, which is the
+	// goroutine that closes loopDone.
+	loopStarted bool
+	// ended is closed once finish has handed the session what a replay needs.
+	ended     chan struct{}
+	endedOnce sync.Once
+
 	// shared carries messages pulled from shared-subscription backlogs to the
 	// delivery goroutine, and pulling records which subscriptions this
 	// connection is pulling for; see shared.go.
@@ -121,6 +141,8 @@ func newConn(b *Broker, nc net.Conn) *conn {
 		replayed:   make(map[string]bool),
 		shared:     make(chan *sharedItem),
 		catchup:    make(chan struct{}, 1),
+		loopDone:   make(chan struct{}),
+		ended:      make(chan struct{}),
 		pulling:    make(map[*subscription]bool),
 		done:       make(chan struct{}),
 	}
@@ -153,6 +175,7 @@ func (c *conn) serve(ctx context.Context) {
 	c.logger = c.logger.With("client_id", c.sess.clientID)
 	c.logger.Info("mqtt client connected")
 
+	c.loopStarted = true
 	go c.deliverLoop()
 
 	err = c.readLoop(ctx, keepAlive)
@@ -308,10 +331,17 @@ func (c *conn) finish(cause error) {
 		c.scheduleWill()
 	}
 
-	c.sess.detach(c)
+	// Worked out before the session lets go of the connection, and recorded
+	// with it, so a successor never finds the session without the replay it
+	// is owed; see session.awaitPredecessor.
+	defer c.markEnded()
+	var a *away
 	if c.broker.queue != nil && c.sess.expiry() > 0 {
-		c.sess.markAway(time.Now())
+		floor := c.awayFloor()
+		a = &floor
 	}
+	c.sess.detach(c, a)
+	c.markEnded()
 	// Hand the durable record back before tearing the session down, so the
 	// snapshot it writes still describes the session that existed.
 	c.broker.releaseStoredSession(c)
@@ -449,6 +479,11 @@ func (c *conn) sendDisconnect(code packet.ReasonCode, reason string) {
 func (c *conn) shutdown(code packet.ReasonCode, reason string) {
 	c.sendDisconnect(code, reason)
 	c.close()
+}
+
+// markEnded releases whoever waits in session.awaitPredecessor.
+func (c *conn) markEnded() {
+	c.endedOnce.Do(func() { close(c.ended) })
 }
 
 func (c *conn) close() {

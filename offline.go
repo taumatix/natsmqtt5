@@ -27,21 +27,22 @@ import (
 // wildcard subscription [MQTT-4.7.2-1].
 //
 // When a session resumes, its delivery loop replays from the stream what the
-// session's filters match, from a little before the previous connection ended
-// up to the stream's end, before it starts on live deliveries. Two sets of
+// session's filters match, up to the stream's end, before it starts on live
+// deliveries. It starts at the lowest sequence the previous connection had not
+// delivered (conn.awayFloor), which can be minutes back for a client that was
+// behind, or when there is none from a little before that connection ended.
+// The replay has no deadline: it goes at the client's pace. Two sets of
 // message ids keep that exactly once: what the previous connection delivered
-// (so the rewind does not repeat it), and what the replay delivered (so a live
+// (so a rewind does not repeat it), and what the replay delivered (so a live
 // copy that arrives late is skipped).
 
 // offlineRewind is how far before the previous connection ended a replay
-// starts. A message published while the connection was going down may have
-// reached neither the client nor anything that resends it; starting earlier
-// and skipping what was delivered catches it.
+// starts when it has no better one. A message published while the connection was
+// going down may have reached neither the client nor anything that resends it;
+// starting earlier and skipping what was delivered catches it. A connection
+// that ended with messages undelivered gives the lowest of their sequences
+// instead (conn.awayFloor), however long ago they were published.
 const offlineRewind = 2 * time.Second
-
-// offlineReplayTimeout bounds one replay, so a slow stream cannot hold the
-// connection's delivery loop for ever.
-const offlineReplayTimeout = 30 * time.Second
 
 type offlineQueue struct {
 	stream jetstream.Stream
@@ -148,6 +149,9 @@ func (q *offlineQueue) replayFrom(ctx context.Context, start jetstream.OrderedCo
 	}
 	queuedPrefix := queuedSubject(q.prefix, "")
 	for {
+		if err := ctx.Err(); err != nil {
+			return last, err
+		}
 		batch, err := cons.Fetch(256, jetstream.FetchMaxWait(500*time.Millisecond))
 		if err != nil {
 			return last, err
@@ -244,40 +248,56 @@ func (c *conn) replayOffline() error {
 	if q == nil {
 		return nil
 	}
-	awayAt, restored, ok := c.sess.takeAway()
+	c.sess.awaitPredecessor(c)
+	a, ok := c.sess.takeAway()
 	if !ok {
 		return nil
 	}
-	since := awayAt.Add(-offlineRewind)
-	if restored {
+	c.resume = &a
+	since := a.at.Add(-offlineRewind)
+	if a.restored {
 		// Restored from the session store: the ids delivered before the
 		// release are not stored, so a rewind could deliver a message twice,
 		// which QoS 2 forbids. A message lost in the moments the connection
 		// was going down is the cost, as for the in-flight messages a restored
 		// session does not carry either.
-		since = awayAt
+		since = a.at
 	}
 	delivered := c.sess.deliveredIDs()
 
-	ctx, cancel := context.WithTimeout(context.Background(), offlineReplayTimeout)
+	// No deadline: the replay goes at the client's pace, as a catch-up does,
+	// and ends with the connection.
+	ctx, cancel := c.streamContext()
 	defer cancel()
 	var deliverErr error
-	err := q.replay(ctx, since, func(msg *nats.Msg) {
-		if deliverErr != nil {
+	handle := func(msg *nats.Msg) {
+		if deliverErr != nil || c.isClosed() {
 			return
 		}
 		id := messageID(msg)
-		if id == "" || delivered[id] || c.wasReplayed(id) {
-			return
+		if id != "" && !delivered[id] && !c.wasReplayed(id) {
+			deliverErr = c.deliverQueued(id, msg)
 		}
-		deliverErr = c.deliverQueued(id, msg)
-	})
+		if deliverErr == nil && !c.isClosed() {
+			c.streamNext = queueSeq(msg) + 1
+		}
+	}
+	var err error
+	if a.fromSeq != 0 && !a.restored {
+		c.streamNext = a.fromSeq
+		_, err = q.replaySeq(ctx, a.fromSeq, handle)
+	} else {
+		err = q.replay(ctx, since, handle)
+	}
 	if deliverErr != nil {
 		return deliverErr
 	}
 	if err != nil && !errors.Is(err, context.Canceled) {
 		c.logger.Warn("replaying the offline queue failed; what it held is lost for this session",
 			"client_id", c.sess.clientID, "error", err)
+	}
+	if err == nil || !errors.Is(err, context.Canceled) {
+		c.resume, c.streamNext = nil, 0
 	}
 	if n := len(c.replayed); n > 0 {
 		c.logger.Info("delivered messages queued while the client was away",
