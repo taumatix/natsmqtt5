@@ -321,6 +321,7 @@ func (c *conn) deliveryFor(sub *subscription, name string, msg *nats.Msg) *deliv
 	return &delivery{
 		sub:   sub,
 		id:    messageID(msg),
+		seq:   queueSeq(msg),
 		topic: name,
 		// "The QoS of Application Messages sent in response to a Subscription
 		// MUST be the minimum of the QoS of the originally published message
@@ -343,6 +344,10 @@ func minQoS(a, b packet.QoS) packet.QoS {
 // too far behind. Blocking here would stall the NATS dispatcher for every
 // other subscriber on this connection.
 func (c *conn) enqueue(d *delivery) {
+	if d.seq != 0 && d.qos > packet.QoS0 {
+		c.enqueueQueued(d)
+		return
+	}
 	select {
 	case c.deliveries <- d:
 	case <-c.done:
@@ -375,6 +380,12 @@ func (c *conn) deliverLoop() {
 		select {
 		case <-c.done:
 			return
+		case <-c.catchup:
+			if err := c.catchUp(); err != nil {
+				c.logger.Debug("catching up from the offline queue failed", "error", err)
+				c.close()
+				return
+			}
 		case it := <-c.shared:
 			taken, err := c.deliverShared(it)
 			it.done <- taken
@@ -384,7 +395,7 @@ func (c *conn) deliverLoop() {
 				return
 			}
 		case d := <-c.deliveries:
-			if d.id != "" && c.replayed[d.id] {
+			if d.id != "" && c.wasReplayed(d.id) {
 				// Its queued copy was replayed; this is the live copy arriving
 				// late, and QoS 2 must not deliver twice.
 				continue

@@ -186,7 +186,7 @@ MQTT-3.15.1-1	3.15.1 AUTH Fixed Header	CS	UNCITED	a		reservedFlags AUTH=0 (packe
 MQTT-3.15.2-1	3.15.2.1 Authenticate Reason Code	CS	ROADMAP	c	Enhanced authentication	The broker never sends AUTH (enhanced authentication refused with 0x8C).
 MQTT-3.15.2-2	3.15.2.2.4 Reason String	CS	ROADMAP	c	Enhanced authentication	As 3.15.2-1.
 MQTT-3.15.2-3	3.15.2.2.5 User Property	CS	ROADMAP	c	Enhanced authentication	As 3.15.2-1.
-MQTT-4.1.0-1	4.1.1 Storing Session State	CS	UNCITED	b		A connected client more than 2048 messages behind has QoS 1/2 messages dropped from its session (subscribe.go:331-338); nats.go slow-consumer limits drop more before that.
+MQTT-4.1.0-1	4.1.1 Storing Session State	CS	CITED-TESTED	b	Without the queue, a client that falls behind still loses QoS 1 and 2	With the offline queue (the default with JetStream) a connected client that falls behind catches up from the stream (catchup.go, TestAClientThatFallsBehindLosesNothing) since Unreleased. Without the queue, QoS 1/2 messages past 2048 waiting are still dropped.
 MQTT-4.1.0-2	4.1.1 Storing Session State	S	ROADMAP	b	Expiring a detached session that is never resumed	In-memory sessions are discarded only lazily on reconnect (session.go, broker.go); an expired session still holds its NATS subscriptions. Since Unreleased that no longer costs a shared subscription its QoS 1/2 messages (they go only to connected members), but its QoS 0 share still reaches the expired member.
 MQTT-4.2.0-1	§4.2.0 (label appears only in Appendix B)	CS	UNCITED	a		Same statement as 4.2-1 under its Appendix B label.
 MQTT-4.2-1	4.2 Network Connections	CS	UNCITED	a		TCP and TLS listeners (broker.go:139-156).
@@ -211,7 +211,7 @@ MQTT-4.3.3-12	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		releaseQoS2 remov
 MQTT-4.3.3-13	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	c		Message expiry is not applied.
 MQTT-4.4.0-1	4.4 Message delivery retry	CS	CITED-TESTED			broker_test.go:548 displaced_ack_test.go:27 handshake.go:381 publish.go:196 README.md:351 ROADMAP.md:59
 MQTT-4.4.0-2	4.4 Message delivery retry	CS	CITED-TESTED			retransmit_test.go:320 publish.go:205
-MQTT-4.5.0-1	4.5 Message receipt	S	CITED-TESTED	b	A client that falls behind loses QoS 1 and 2 messages	A detached session gets its messages from the offline queue, and a shared subscription hands its QoS 1/2 messages only to connected members (shared.go, TestADisconnectedSharedMemberStopsTakingWork), both on by default with JetStream since Unreleased. Still dropped when the delivery queue overflows (subscribe.go, enqueue).
+MQTT-4.5.0-1	4.5 Message receipt	S	CITED-TESTED	b	A connection that drops while behind loses what was waiting for it	A detached session gets its messages from the offline queue, and a shared subscription hands its QoS 1/2 messages only to connected members (shared.go, TestADisconnectedSharedMemberStopsTakingWork), both on by default with JetStream since Unreleased. A client that falls behind catches up from the stream (catchup.go). Still lost: what was waiting for a connection when it drops, beyond the 2 s resume rewind.
 MQTT-4.5.0-2	4.5 Message receipt	C	CLIENT-ONLY (UNCITED)			
 MQTT-4.6.0-1	4.6 Message ordering	C	CLIENT-ONLY (UNCITED)			
 MQTT-4.6.0-2	4.6 Message ordering	C	CLIENT-ONLY (UNCITED)			

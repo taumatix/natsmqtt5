@@ -31,6 +31,10 @@ const (
 	// hdrMsgID identifies one published message across its live delivery and
 	// its offline-queue copy, so a session resuming does not get it twice.
 	hdrMsgID = "Mqtt5-Msg-Id"
+	// hdrQueueSeq is the offline-queue stream sequence of a message's copy,
+	// carried on the live copy so a connection that falls behind knows where
+	// in the stream to catch up from.
+	hdrQueueSeq = "Mqtt5-Queue-Seq"
 )
 
 // Header values must survive the NATS protocol's line-oriented framing, and

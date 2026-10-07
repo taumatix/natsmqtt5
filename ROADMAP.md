@@ -28,16 +28,20 @@ broker restart" below, which needs in-flight state in the record too. Also: a br
 outright records no `AwayAt`. The record's `Attached` with no release could fall back to the
 claim time minus the queue's age, at the cost of duplicates.
 
-## A client that falls behind loses QoS 1 and 2 messages
+## A connection that drops while behind loses what was waiting for it
 
-**Today:** a connected client more than `deliveryQueueDepth` (2048) messages behind silently
-loses QoS 1/2 messages (`subscribe.go`, `enqueue`'s default branch), and nats.go's slow-consumer
-limit can drop more before that. Both are MUST violations for QoS 1/2 [MQTT-4.1.0-1],
-[MQTT-4.5.0-1]. QoS 0 may be dropped.
+**Today:** a connection keeps up to 2048 messages waiting for its client, and catches up from the
+offline queue when it falls further behind (`catchup.go`). If the connection drops, what was
+waiting is discarded, and the resume replay (`replayOffline`) rewinds only 2 seconds before the
+disconnect. A client minutes behind when its network failed loses those minutes
+[MQTT-3.1.2-23], [MQTT-4.5.0-1]. The resume replay also gives up after 30 seconds
+(`offlineReplayTimeout`), which a slow client with a long backlog reaches.
 
-**Shape:** for QoS 1/2, apply back-pressure instead of dropping (the delivery queue blocks the
-NATS handler only for that subscription), or spill to the offline queue when it is on. Measure
-first; the 2048 figure was never chosen against a load. Size M.
+**Shape:** the live copies now carry their stream sequence, so on detach the session can record
+the lowest sequence it has not delivered (what is waiting, or where a catch-up stood) and the
+resume replay can start there instead of at a time. That is also most of what 1b ("a restored
+replay that can rewind") needs. The replay's deadline should go, as the catch-up's did: it goes at
+the client's pace. Size M.
 
 ## Message Expiry Interval enforcement
 
@@ -455,6 +459,14 @@ make the deviation visible and temporary.
 A connected member pulls one message, waits for room under its client's Receive Maximum, then
 pulls the next, so a member's rate is bounded by the round trip to JetStream. Pulling a batch the
 size of the free quota would lift that without a member holding more than it can send.
+
+## Without the queue, a client that falls behind still loses QoS 1 and 2
+
+With `DisableOfflineQueue` or without JetStream there is no copy to catch up from, so past 2048
+waiting messages the broker drops, as before. Back-pressure (blocking the subscription's NATS
+handler, which holds back only that client's subscriptions) would move the limit to nats.go's
+pending limits rather than remove it. QoS 0, and messages published straight onto NATS, are
+dropped the same way with the queue on.
 
 ## The queue's cost per publish is unmeasured
 

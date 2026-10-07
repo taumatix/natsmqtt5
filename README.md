@@ -241,6 +241,12 @@ For the binary and the image they are `-offline-queue-max-age`,
 resumed session is told Session Present 1 and misses what was published while
 it was away.
 
+The same stream serves a client that is connected but slower than its
+publishers. A connection holds up to 2048 messages waiting for its client;
+past that it reads the rest from the stream, at the client's pace and in order,
+and goes back to live delivery once it has caught up. Without the queue, QoS 1
+and 2 messages past that point are dropped, as QoS 0 always is.
+
 When the session resumes, the client gets what its filters matched while it was
 away, in publish order, before anything published after it reconnected. A
 message is delivered once: what the client received before it dropped and what

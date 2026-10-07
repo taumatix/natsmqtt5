@@ -37,6 +37,13 @@ honestly be reconstructed now.
   longer than `MaxSessionExpiry`. It needs the offline queue; without it, shared subscriptions
   behave as before. Brokers sharing a `SubjectPrefix` must agree on whether the queue is on.
 
+- **A connected client that falls behind no longer loses QoS 1 and 2 messages.** Past 2048
+  messages waiting for one connection the broker dropped them [MQTT-4.1.0-1], [MQTT-4.5.0-1]. With
+  the offline queue on, the connection now reads the stream from the first message it could not
+  hold, at the client's pace, in order, and returns to live delivery once it has caught up. A
+  message's live copy carries its stream position in a new `Mqtt5-Queue-Seq` header. QoS 0, and
+  everything when the queue is off, is still dropped at that point.
+
 ### Added
 
 - `Options.DisableOfflineQueue` and `-no-offline-queue` (`NATSMQTT5_NO_OFFLINE_QUEUE`) turn the
