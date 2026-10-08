@@ -136,6 +136,14 @@ func (q *offlineQueue) replay(ctx context.Context, since time.Time, fn func(*nat
 	return err
 }
 
+// storedAfter reports whether the queue copy at seq was stored after t, so that
+// a replay from t starts before it. A copy that is gone, or that cannot be read,
+// is not: the replay from the sequence is the one that reports it.
+func (q *offlineQueue) storedAfter(ctx context.Context, seq uint64, t time.Time) bool {
+	raw, err := q.stream.GetMsg(ctx, seq)
+	return err == nil && raw.Time.After(t)
+}
+
 // replaySeq is replay from a stream sequence rather than a time. It returns
 // the last sequence it read up to, which is the stream's end when it started.
 func (q *offlineQueue) replaySeq(ctx context.Context, from uint64, fn func(*nats.Msg)) (uint64, error) {
@@ -301,7 +309,18 @@ func (c *conn) replayOffline() error {
 		}
 	}
 	var err error
-	if a.fromSeq != 0 {
+	if a.fromSeq != 0 && !a.restored && q.storedAfter(ctx, a.fromSeq, since) {
+		// The sequence is the lowest message the connection knew it owed. A
+		// message stored before it, whose live copy was still on its way when
+		// the connection ended, is owed too and has no sequence to name: a live
+		// copy reaching an ended connection is dropped. So the replay starts
+		// from the rewind time instead, which is earlier, and the ids of what
+		// the connection delivered since then (the session keeps them for as
+		// long as this rewind reaches) stop it sending those again. Position is
+		// left unset until a message is handled, so a connection that ends
+		// first hands the same absence on (awayFloor).
+		err = q.replay(ctx, since, handle)
+	} else if a.fromSeq != 0 {
 		c.streamNext.Store(a.fromSeq)
 		_, err = q.replaySeq(ctx, a.fromSeq, handle)
 	} else {

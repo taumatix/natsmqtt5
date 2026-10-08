@@ -98,6 +98,9 @@ conforming client hits in ordinary use:
 - **Fixed, unreleased.** A QoS 2 message sent to a client is recorded before its PUBLISH and before its
   PUBREL go out, so a broker killed at any step resends the PUBLISH or the PUBREL and never delivers the
   message again as a new one (`killed_qos2_outbound_test.go`, SIGKILL). [MQTT-4.3.3-6], [MQTT-4.4.0-1].
+- **Fixed, unreleased.** A message whose live copy reaches the broker after the subscriber's connection
+  ended is still sent on resume (`late_live_copy_test.go`); a restored session is not covered yet.
+  [MQTT-4.4.0-1].
 - **Fixed, unreleased.** A retained message could carry its publisher's Topic Alias to a subscriber
   on the same broker, an alias that means nothing on its connection. [MQTT-3.1.2-26],
   [MQTT-3.1.2-27], [MQTT-3.3.2-11].
