@@ -89,6 +89,9 @@ published up to about 4.5 `WillCheckInterval` later than before (see the fourth 
   read as another broker taking the session, disconnecting the client that had just arrived there
   and dropping its subscriptions [MQTT-3.1.4-3]; only a write newer than this broker's own claim
   counts now. Several timing-sensitive tests no longer depend on a fixed wait.
+- **Fixed.** `Broker.Close` cleared its session store field while a late NATS callback could still
+  read it to persist a copy, a data race under `-race`. Close now leaves the field set; a write that
+  arrives after the store is closed fails and is logged.
 - **Tests.** The restore of a session record is now driven over the wire for a queue copy
   that aged out between the release and the resume (dropped, the session carries on) and for a message
   still unacknowledged when its filter was unsubscribed (still resent). [MQTT-4.4.0-1].
