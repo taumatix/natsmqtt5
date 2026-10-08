@@ -33,13 +33,6 @@ subscribing, or any with the queue off) is kept in the session record as its enc
 sequence in the record, so the record stays within `max_payload`. Needs a test with a 100 KiB
 retained payload and a SIGKILL.
 
-## The restore paths without a test over the wire
-
-**Today:** the restore is driven end to end for QoS 1, QoS 2 in both states, the inbound QoS 2
-identifier, expiry, a denied filter, no queue, and a record cut for size. Not driven: a queue copy
-that has aged out (`OfflineQueueMaxAge`) between the release and the resume, which is logged and
-the message dropped, and a filter unsubscribed before the release whose message is still owed.
-
 ## Timing-sensitive tests that fail on a loaded CI runner
 
 **Today:** the CI history since 2026-10-07 shows tests with tight wall-clock margins failing once
