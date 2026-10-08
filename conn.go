@@ -127,6 +127,10 @@ type conn struct {
 	pullMu  sync.Mutex
 	pulling map[*subscription]bool
 
+	// disconnectSent is set, under writeMu, once the server's DISCONNECT has
+	// been written: nothing may follow it [MQTT-3.14.4-1].
+	disconnectSent bool
+
 	closeOnce sync.Once
 	done      chan struct{}
 	// connected is set once CONNACK with a success code has gone out. Until
@@ -440,6 +444,13 @@ func (c *conn) writePublish(p *packet.Publish) (sent bool, err error) {
 }
 
 func (c *conn) writeReportingDiscard(p packet.Packet) (discarded bool, err error) {
+	return c.writePacket(p, false)
+}
+
+// writePacket is the one place a packet reaches the socket. final marks the
+// server's DISCONNECT: once it has been written, or decided against, no later
+// packet may follow it on this connection [MQTT-3.14.4-1].
+func (c *conn) writePacket(p packet.Packet, final bool) (discarded bool, err error) {
 	raw, err := packet.Encode(p)
 	if err != nil {
 		return false, fmt.Errorf("encoding %s: %w", p.Type(), err)
@@ -460,6 +471,12 @@ func (c *conn) writeReportingDiscard(p packet.Packet) (discarded bool, err error
 		// [MQTT-3.1.2-24]: the server must not send it.
 		c.logger.Warn("discarding a packet larger than the client's Maximum Packet Size",
 			"type", p.Type().String(), "size", len(raw), "limit", c.clientMaxPacketSize)
+		if final {
+			// Not sent, but the broker has decided to end the connection.
+			c.writeMu.Lock()
+			c.disconnectSent = true
+			c.writeMu.Unlock()
+		}
 		return true, nil
 	}
 
@@ -469,6 +486,14 @@ func (c *conn) writeReportingDiscard(p packet.Packet) (discarded bool, err error
 	case <-c.done:
 		return false, net.ErrClosed
 	default:
+	}
+	if c.disconnectSent {
+		// The delivery goroutine and the read loop write independently, so a
+		// PUBLISH can be waiting on the lock while the DISCONNECT goes out.
+		return false, net.ErrClosed
+	}
+	if final {
+		c.disconnectSent = true
 	}
 	if _, err := c.nc.Write(raw); err != nil {
 		return false, fmt.Errorf("writing %s: %w", p.Type(), err)
@@ -542,7 +567,7 @@ func (c *conn) sendDisconnect(code packet.ReasonCode, reason string) {
 	if reason != "" {
 		d.Properties = &packet.Properties{ReasonString: reason}
 	}
-	_ = c.write(d)
+	_, _ = c.writePacket(d, true)
 }
 
 // shutdown disconnects the client with a reason and closes the socket.

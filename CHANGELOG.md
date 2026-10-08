@@ -13,6 +13,11 @@ honestly be reconstructed now.
 
 ### Fixed
 
+- **Nothing follows a server DISCONNECT.** A PUBLISH queued for a client could still be written
+  after the broker's DISCONNECT, because the delivery goroutine and the read loop write
+  independently. Once the DISCONNECT is written, or decided against, every later write on that
+  connection is refused [MQTT-3.14.4-1].
+
 - **An acknowledgement over the client's Maximum Packet Size is sent without its Reason String.**
   A CONNACK, PUBACK, PUBREC or DISCONNECT that would exceed the limit was discarded whole, so a
   refused CONNECT, or a refused QoS 1 or 2 PUBLISH, got no answer at all and the client's exchange
