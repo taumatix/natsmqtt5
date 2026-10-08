@@ -54,6 +54,10 @@ func (b *Broker) restoreSessionState(ctx context.Context, s *session, rec *sessi
 		o := b.restoreEntry(ctx, s.clientID, st)
 		if o == nil {
 			lost++
+			if st.Ack != "" {
+				// Nothing will be sent, so no PUBACK will settle it.
+				b.handBack([]string{st.Ack})
+			}
 			continue
 		}
 		s.restoreInflight(o)
@@ -120,9 +124,10 @@ func (b *Broker) restoreEntry(ctx context.Context, clientID string, st storedInf
 			Payload:    d.payload,
 			Properties: d.props,
 		},
-		arrived:  d.arrived,
-		expiry:   d.expiry,
-		queueSeq: st.Seq,
+		arrived:    d.arrived,
+		expiry:     d.expiry,
+		queueSeq:   st.Seq,
+		ackSubject: st.Ack,
 	}
 }
 

@@ -203,6 +203,7 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 
 	if sess == nil {
 		sess = newSession(clientID)
+		sess.holds = c.broker
 		if rec != nil && (len(rec.inflightWas) > 0 || len(rec.receivedQoS2Was) > 0) {
 			c.broker.restoreSessionState(ctx, sess, rec)
 		}

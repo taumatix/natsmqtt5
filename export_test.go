@@ -1,5 +1,7 @@
 package natsmqtt5
 
+import "time"
+
 // Seams for the external tests. They exist only in the test binary.
 
 // SetResendGate makes a connection's resend call f(id) after it has claimed
@@ -87,4 +89,15 @@ func Kill(b *Broker) {
 	for _, c := range conns {
 		_ = c.nc.Close()
 	}
+}
+
+// SetSharedAckWait changes how long JetStream waits for a sign of life from the
+// member holding a shared subscription's message, for the rest of the test. Set
+// it before the broker starts.
+func SetSharedAckWait(t interface {
+	Cleanup(func())
+}, d time.Duration) {
+	was := sharedAckWait
+	sharedAckWait = d
+	t.Cleanup(func() { sharedAckWait = was })
 }

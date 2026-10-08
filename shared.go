@@ -46,11 +46,12 @@ const hdrQueued = "Mqtt5-Queued"
 // its subscription was removed.
 const sharedPullWait = 2 * time.Second
 
-// sharedAckWait is how long a member may hold a message it pulled before
-// JetStream hands it to another member. The hand-off to the session is
-// immediate, since the member pulls only when it has send quota, so this only
-// matters when a broker dies holding a message.
-const sharedAckWait = 30 * time.Second
+// sharedAckWait is how long JetStream waits for a sign of life from the member
+// holding a message before it hands the message to another member. A member
+// keeps the message until its client's PUBACK, and says it is still holding it
+// every sharedAckWait/3 (holdLoop), so this only elapses when the broker holding
+// the message has died. A variable so that a test need not wait it out.
+var sharedAckWait = 30 * time.Second
 
 // sharedConsumerName names the durable consumer behind a shared subscription.
 // Brokers sharing a StreamPrefix compute the same name, which is what makes the
@@ -99,9 +100,18 @@ func (q *offlineQueue) liveSubject(subject string) string {
 // sharedItem is a message a member pulled from a backlog, on its way to the
 // delivery goroutine. done receives whether the session took it.
 type sharedItem struct {
-	sub  *subscription
-	msg  *nats.Msg
+	sub *subscription
+	msg *nats.Msg
+	// ack is the JetStream acknowledgement subject of the pulled message, and
+	// seq its sequence in the queue stream.
+	ack  string
+	seq  uint64
 	done chan bool
+	// held is set by the delivery goroutine, before it answers on done, when a
+	// PUBLISH awaiting a PUBACK now stands for the message. The session then
+	// owns the JetStream acknowledgement (see session.completeInflight and
+	// session.handBackHeld) and the puller must not give it.
+	held bool
 }
 
 // startPulling makes this connection a puller for every shared subscription
@@ -156,12 +166,16 @@ func (c *conn) pull(sub *subscription) {
 		}
 
 		header := m.Headers()
+		var seq uint64
 		if meta, err := m.Metadata(); err == nil {
 			header = setArrived(header, meta.Timestamp)
+			seq = meta.Sequence.Stream
 		}
 		it := &sharedItem{
+			seq:  seq,
 			sub:  sub,
 			msg:  &nats.Msg{Subject: c.broker.queue.liveSubject(m.Subject()), Header: header, Data: m.Data()},
+			ack:  m.Reply(),
 			done: make(chan bool, 1),
 		}
 		var taken bool
@@ -176,7 +190,13 @@ func (c *conn) pull(sub *subscription) {
 			c.releaseQuota()
 		}
 		if taken {
-			_ = m.Ack()
+			// A QoS 1 message in flight stays unacknowledged until the PUBACK, so
+			// that it can go to another member if this session ends first
+			// (MQTT-5.0 §4.8.2). Anything else is settled: QoS 0 has no
+			// acknowledgement, and a message no member wants is done with.
+			if !it.held {
+				_ = m.Ack()
+			}
 		} else {
 			// Not this member's after all: another can have it now.
 			_ = m.Nak()
@@ -225,11 +245,14 @@ func (c *conn) deliverShared(it *sharedItem) (bool, error) {
 		c.releaseQuota()
 		return false, nil
 	}
+	d.ackSubject, d.recordSeq = it.ack, it.seq
 	d.quotaHeld = true
 	if d.qos == packet.QoS0 {
 		// Granted QoS 0: nothing will be in flight to hold the slot.
 		c.releaseQuota()
 		d.quotaHeld = false
 	}
-	return true, c.deliver(d)
+	err := c.deliver(d)
+	it.held = d.held
+	return true, err
 }
