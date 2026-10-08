@@ -182,3 +182,38 @@ func TestAnOversizePayloadOfAMessageLeftUnacknowledgedIsKeptAlive(t *testing.T) 
 	require.NoError(t, err, "the payload is still there after the bucket's time to live")
 	assert.Len(t, keys, 1)
 }
+
+// [MQTT-4.4.0-1]: a retained message too large for a session record but within
+// what the NATS server accepts is still resent after the broker serving it
+// stops. The payload bucket's limit is the server's max_payload less the room a
+// key-value write needs, not the 7/8 a session record is held to.
+func TestAnInflightRetainedPublishNearMaxPayloadIsRestored(t *testing.T) {
+	const maxPayload = 64 << 10
+	natsURL := startNATSWithMaxPayload(t, maxPayload)
+	noQueue := func(o *natsmqtt5.Options) { o.PersistentSessions, o.DisableOfflineQueue = true, true }
+	addrA, stopA := startStoppableBroker(t, natsURL, noQueue)
+	addrB := startBroker(t, natsURL, noQueue)
+
+	// Over seven eighths of max_payload (57344), so over what a session record
+	// holds, and under max_payload less the publish's own headers.
+	big := bytes.Repeat([]byte("z"), maxPayload-maxPayload/8+1024)
+	pub, _ := connectClient(t, addrA, connectOpts("pub-near-max"))
+	pub.publish(&paho.Publish{Topic: "nm/a", QoS: 1, Retain: true, Payload: big})
+	time.Sleep(200 * time.Millisecond)
+
+	c := dialRaw(t, addrA)
+	c.connect(rawConnect("near-max", 300))
+	c.subscribe("nm/#", packet.QoS1)
+	first := c.expectPublish()
+	require.Equal(t, big, first.Payload)
+	c.drop()
+	time.Sleep(200 * time.Millisecond)
+	stopA()
+
+	back := dialRaw(t, addrB)
+	require.True(t, back.connect(rawConnect("near-max", 300)).SessionPresent)
+	got := back.expectPublish()
+	assert.Equal(t, first.PacketID, got.PacketID)
+	assert.True(t, got.Dup)
+	assert.Equal(t, big, got.Payload)
+}

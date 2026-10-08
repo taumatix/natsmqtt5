@@ -1524,7 +1524,7 @@ func (s *session) inflightState(blobs *sessionStore) (inflight []storedInflight,
 				continue
 			case len(raw) <= maxStoredPublish:
 				st.Pub = raw
-			case blobs == nil || len(raw) > blobs.valueLimit():
+			case blobs == nil || len(raw) > blobs.blobLimit():
 				unrecorded++
 				continue
 			case o.blobKey != "" && !blobs.blobStale(o.blobAt):
