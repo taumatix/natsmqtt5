@@ -69,7 +69,9 @@ conforming client hits in ordinary use:
   message's identifier, QoS state and queue sequence, and the QoS 2 identifiers received and not
   released. What is still not covered: messages with no copy in the offline queue, and a broker
   killed outright. [MQTT-4.4.0-1], [MQTT-4.3.3-10].
-- A retained message can carry its publisher's Topic Alias to another client. [MQTT-3.3.2-11].
+- **Fixed, unreleased.** A retained message could carry its publisher's Topic Alias to a subscriber
+  on the same broker, an alias that means nothing on its connection. [MQTT-3.1.2-26],
+  [MQTT-3.1.2-27], [MQTT-3.3.2-11].
 
 Features the specification defines and the broker does not offer (enhanced AUTH, server-to-client
 topic aliases, WebSocket, QoS 2 on shared subscriptions) are refused or left unadvertised the way
