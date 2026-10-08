@@ -208,7 +208,7 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 			c.broker.restoreSessionState(ctx, sess, rec)
 		}
 		if !restoredAway.IsZero() {
-			sess.markAwayRestored(restoredAway, rec.awayFromSeqWas, rec.deliveredWas)
+			sess.markAwayRestored(restoredAway, rec.awayFromSeqWas, rec.awayLateSeqWas, rec.deliveredWas)
 		}
 		sess.setUnrestored(stored)
 	} else if len(stored) == 0 {

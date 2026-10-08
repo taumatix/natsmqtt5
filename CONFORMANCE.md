@@ -99,7 +99,9 @@ conforming client hits in ordinary use:
   PUBREL go out, so a broker killed at any step resends the PUBLISH or the PUBREL and never delivers the
   message again as a new one (`killed_qos2_outbound_test.go`, SIGKILL). [MQTT-4.3.3-6], [MQTT-4.4.0-1].
 - **Fixed, unreleased.** A message whose live copy reaches the broker after the subscriber's connection
-  ended is still sent on resume (`late_live_copy_test.go`); a restored session is not covered yet.
+  ended is still sent on resume, however long the copy was delayed, on the same broker and on a broker
+  that restores the session from its record (`late_live_copy_delay_test.go`). Not covered: a copy that
+  arrives after another broker claimed the record, or after 8192 further queue sequences were delivered.
   [MQTT-4.4.0-1].
 - **Fixed, unreleased.** A retained message could carry its publisher's Topic Alias to a subscriber
   on the same broker, an alias that means nothing on its connection. [MQTT-3.1.2-26],

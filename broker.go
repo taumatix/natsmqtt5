@@ -466,7 +466,7 @@ func (b *Broker) releaseStoredSession(c *conn) {
 	// Where the next broker's replay starts, so that it does not begin at the
 	// release time and lose what the client was still owed.
 	var dropped int
-	rec.AwayFromSeq, rec.Delivered, dropped = s.awayState()
+	rec.AwayFromSeq, rec.AwayLateSeq, rec.Delivered, dropped = s.awayState()
 	if dropped > 0 {
 		b.logger.Warn("the session record keeps only some of the delivered message ids; "+
 			"a restored replay may repeat the rest", "client_id", s.clientID, "dropped", dropped)
@@ -506,6 +506,33 @@ func (b *Broker) releaseStoredSession(c *conn) {
 		return
 	}
 	s.commitRecord(c.claimGen, rec, newRev)
+}
+
+// persistLateCopy rewrites the record of a released session so that the broker
+// which claims it next replays from the sequence of a live copy that reached it
+// after the release [MQTT-4.4.0-1]. The write is a compare-and-swap at the
+// revision the release left: a broker that has claimed the session already
+// wins, and the copy is then a live delivery for that broker's own replay to
+// find, as far as its rewind reaches.
+func (b *Broker) persistLateCopy(s *session) {
+	if b.store == nil {
+		return
+	}
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+	rec, rev, gen := s.lateRecord()
+	if rec == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
+	defer cancel()
+	newRev, err := b.store.save(ctx, rec, rev)
+	if err != nil {
+		b.logger.Debug("could not record a late live copy in the stored session",
+			"client_id", s.clientID, "error", err)
+		return
+	}
+	s.commitRecord(gen, rec, newRev)
 }
 
 // sessionLost runs when another broker claims a Client Identifier this one is

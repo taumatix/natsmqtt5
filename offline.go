@@ -308,8 +308,17 @@ func (c *conn) replayOffline() error {
 			c.streamNext.Store(queueSeq(msg) + 1)
 		}
 	}
+	// A live copy that reached the session after its connection ended names a
+	// message the queue stored before then, however long ago: the replay starts
+	// at or below it [MQTT-4.4.0-1]. The time start already reaches it when it
+	// was stored after that.
+	fromSeq := a.fromSeq
+	if a.lateSeq != 0 && (fromSeq == 0 || a.lateSeq < fromSeq) &&
+		!(fromSeq == 0 && q.storedAfter(ctx, a.lateSeq, since)) {
+		fromSeq = a.lateSeq
+	}
 	var err error
-	if a.fromSeq != 0 && !a.restored && q.storedAfter(ctx, a.fromSeq, since) {
+	if fromSeq != 0 && !a.restored && q.storedAfter(ctx, fromSeq, since) {
 		// The sequence is the lowest message the connection knew it owed. A
 		// message stored before it, whose live copy was still on its way when
 		// the connection ended, is owed too and has no sequence to name: a live
@@ -320,9 +329,9 @@ func (c *conn) replayOffline() error {
 		// left unset until a message is handled, so a connection that ends
 		// first hands the same absence on (awayFloor).
 		err = q.replay(ctx, since, handle)
-	} else if a.fromSeq != 0 {
-		c.streamNext.Store(a.fromSeq)
-		_, err = q.replaySeq(ctx, a.fromSeq, handle)
+	} else if fromSeq != 0 {
+		c.streamNext.Store(fromSeq)
+		_, err = q.replaySeq(ctx, fromSeq, handle)
 	} else {
 		err = q.replay(ctx, since, handle)
 	}

@@ -47,7 +47,7 @@ func TestOnlyIDsAtOrAboveTheReplayStartAreStored(t *testing.T) {
 	s.noteDelivered("unqueued", 0)
 	s.markAwayLocked(away{at: time.Now(), fromSeq: 5})
 
-	from, ids, dropped := s.awayState()
+	from, _, ids, dropped := s.awayState()
 	assert.Equal(t, uint64(5), from)
 	assert.Equal(t, []storedDelivered{{ID: "at", Seq: 5}, {ID: "above", Seq: 8}}, ids)
 	assert.Zero(t, dropped)
@@ -58,7 +58,7 @@ func TestNothingIsStoredWhenThereIsNoReplayPosition(t *testing.T) {
 	s.noteDelivered("a", 5)
 	s.markAwayLocked(away{at: time.Now()})
 
-	from, ids, _ := s.awayState()
+	from, _, ids, _ := s.awayState()
 	assert.Zero(t, from)
 	assert.Empty(t, ids)
 }
@@ -70,7 +70,7 @@ func TestTheStoredIDsAreBounded(t *testing.T) {
 	}
 	s.markAwayLocked(away{at: time.Now(), fromSeq: 1})
 
-	_, ids, dropped := s.awayState()
+	_, _, ids, dropped := s.awayState()
 	assert.Len(t, ids, maxStoredDelivered)
 	assert.Equal(t, 10, dropped)
 }
@@ -79,7 +79,7 @@ func TestTheStoredIDsAreBounded(t *testing.T) {
 // restored session knows the ids, so the replay that starts below them skips them.
 func TestARestoredSessionKnowsWhatItAlreadyDelivered(t *testing.T) {
 	s := newSession("c")
-	s.markAwayRestored(time.Now(), 5, []storedDelivered{{ID: "seen", Seq: 8}})
+	s.markAwayRestored(time.Now(), 5, 0, []storedDelivered{{ID: "seen", Seq: 8}})
 
 	a, ok := s.takeAway()
 	require.True(t, ok)
