@@ -392,6 +392,9 @@ func restoredRewind(t *testing.T, listDelivered bool) (second *packet.Publish) {
 	deliveredID, deliveredPayload := queuedCopy(t, natsURL, 2)
 	require.Equal(t, "delivered", deliveredPayload)
 	rewriteRecord(t, natsURL, "q2-rewind", func(rec map[string]any) {
+		// The real record also carries the PUBREL g/1 is owed; this test is
+		// about the replay's position, so only that is left.
+		delete(rec, "Inflight")
 		rec["AwayFromSeq"] = 1
 		if listDelivered {
 			rec["Delivered"] = []map[string]any{{"ID": deliveredID, "Seq": 2}}

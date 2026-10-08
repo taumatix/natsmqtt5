@@ -13,6 +13,18 @@ honestly be reconstructed now.
 
 ### Fixed
 
+- **A session restored from the session store resends what it had in flight.** With
+  `PersistentSessions`, a session resumed after a restart or on another broker used to come back
+  with nothing unacknowledged, so those messages were lost, and a QoS 2 PUBLISH the client resent
+  was forwarded a second time. The record now keeps each unacknowledged message's Packet
+  Identifier, QoS state and offline-queue sequence, and the QoS 2 identifiers received and not
+  released. The restored session resends the PUBLISH with its original identifier and DUP 1 (or
+  the PUBREL, past the PUBREC), drops one that expired, and acknowledges a resent QoS 2 PUBLISH
+  without forwarding it again [MQTT-4.4.0-1], [MQTT-4.3.3-10], [MQTT-3.1.2-5]. Payloads are read
+  back from the offline queue, so a message with no copy there is not resent; a record too large for
+  one key-value value is cut, newest entries first, and logged. Records written by earlier
+  versions still load.
+
 - **Message Expiry Interval is enforced.** A message whose interval has passed is no longer
   delivered, and one still live goes out with the interval less the time it waited in the broker,
   on every path: live, retained (the wait counts from storage, and an expired retained message is

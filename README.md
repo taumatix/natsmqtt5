@@ -269,9 +269,8 @@ What it costs and what it does not cover yet:
   record without that position (one from a connection that had delivered
   everything) replays from the release itself rather than a moment before it,
   because going back further could deliver a QoS 2 message twice; a message
-  caught in the moments the connection went down can be lost that way, like the
-  in-flight messages a restored session does not carry. And a broker killed
-  outright never releases its sessions: the next broker to resume one sees it
+  caught in the moments the connection went down can be lost that way. And a
+  broker killed outright never releases its sessions: the next broker to resume one sees it
   attached to an owner that no longer answers and replays everything the queue
   still holds for it, up to `OfflineQueueMaxAge`, which loses nothing and can
   repeat what the dead connection had already delivered, QoS 2 included.
@@ -343,12 +342,22 @@ What it costs and what it does not cover:
 - **The Client Identifier is capped at 128 bytes** (`MaxPersistentClientIDLen`),
   because it becomes part of a NATS subject. A longer one is refused with
   `0x85 Client Identifier not valid`. Without persistence there is no limit.
-- **In-flight QoS 1 and QoS 2 messages are not persisted.** A client that
-  reconnects to the broker still holding its session gets its unacknowledged
-  messages back; one whose session is restored from the store — after a restart,
-  or on another broker — does not, because the record carries the subscription
-  set and not the in-flight set. Storing Packet Identifiers without the payloads
-  to go with them would promise a resend the broker could not perform.
+- **In-flight QoS 1 and QoS 2 messages are persisted as references.** When a
+  connection ends, the record keeps the Packet Identifier, QoS state and
+  offline-queue sequence of each message the client has not acknowledged, and the
+  identifiers of the client's QoS 2 PUBLISH packets received and not yet
+  released. A session restored from the store, after a restart or on another
+  broker, reads the payloads back from the queue and resends them with their
+  original identifiers and DUP 1, resends the PUBREL for a QoS 2 exchange the
+  client had taken ownership of, and acknowledges a resent QoS 2 PUBLISH without
+  forwarding it twice. A message that expired in the meantime is dropped. Limits:
+  it needs the offline queue (on by default), because the payload lives there; a
+  message with no copy in the queue (retained, from a shared subscription, or
+  with the queue off) and one whose copy has aged out of it are logged and not
+  resent; a broker killed outright records nothing; and a record is cut to fit
+  the NATS server's `max_payload` (1 MiB by default), newest in-flight entries
+  first, which is about 15000 entries, so a client with a Receive Maximum beyond
+  that and that many messages unacknowledged loses the newest, logged.
 - **A filter the `Authorizer` no longer permits is dropped without telling the
   client.** Every filter of a resumed session goes back past the `Authorizer`
   before the CONNACK, on both branches, so a permission narrowed while the

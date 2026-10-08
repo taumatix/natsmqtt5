@@ -475,7 +475,7 @@ func (c *conn) deliver(d *delivery) error {
 	}
 	pub.PacketID = id
 	c.sess.trackInflight(&outbound{packetID: id, qos: d.qos, publish: pub, quotaHeld: true,
-		arrived: d.arrived, expiry: d.expiry})
+		arrived: d.arrived, expiry: d.expiry, queueSeq: d.seq})
 	if d.id != "" && c.broker.queue != nil {
 		// Delivered, or discarded as too large, which counts as delivered
 		// [MQTT-3.1.2-25]: either way a replay must not send it again. Noted

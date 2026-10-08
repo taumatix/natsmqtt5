@@ -261,8 +261,7 @@ func (c *conn) replayOffline() error {
 		// delivered everything): the ids delivered before the release are not
 		// known, so a rewind could deliver a message twice, which QoS 2
 		// forbids. A message lost in the moments the connection was going
-		// down is the cost, as for the in-flight messages a restored session
-		// does not carry either.
+		// down is the cost.
 		since = a.at
 	}
 	delivered := c.sess.deliveredIDs()

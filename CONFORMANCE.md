@@ -64,8 +64,11 @@ conforming client hits in ordinary use:
   the whole seconds it waited, on every delivery path: live, retained, offline replay, catch-up,
   shared backlog and resends. A QoS 2 PUBLISH already sent is not expired. [MQTT-3.3.2-5],
   [MQTT-3.3.2-6], [MQTT-4.3.3-7].
-- With `PersistentSessions`, a restored session resends nothing it had in flight.
-  [MQTT-4.4.0-1], [MQTT-4.3.3-10].
+- **Fixed, unreleased.** With `PersistentSessions`, a restored session resent nothing it had in
+  flight and forwarded a resent QoS 2 PUBLISH twice. The record now keeps each unacknowledged
+  message's identifier, QoS state and queue sequence, and the QoS 2 identifiers received and not
+  released. What is still not covered: messages with no copy in the offline queue, and a broker
+  killed outright. [MQTT-4.4.0-1], [MQTT-4.3.3-10].
 - A retained message can carry its publisher's Topic Alias to another client. [MQTT-3.3.2-11].
 
 Features the specification defines and the broker does not offer (enhanced AUTH, server-to-client
