@@ -463,7 +463,9 @@ one with fewer features:
 - **A shared subscription hands QoS 1 and 2 work only to connected members,
   through a backlog in the offline queue.** A QoS 1 message stays unacknowledged
   in the backlog until the member's PUBACK, and goes to another member if the
-  member's session ends first. Without the queue it is a plain NATS
+  member's session ends first. The backlog is deleted when no session is
+  subscribed to the group any more (§4.8.2), tracked in a key-value bucket
+  `<StreamPrefix>_share_members`. Without the queue it is a plain NATS
   queue group, which also chooses members whose client is away, and their share
   is dropped. Brokers sharing a `SubjectPrefix` must agree on the queue, or a
   message can reach a group twice. QoS 0 messages always go through the queue

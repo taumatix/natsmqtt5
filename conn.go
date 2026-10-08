@@ -373,7 +373,7 @@ func (c *conn) finish(cause error) {
 	// snapshot it writes still describes the session that existed.
 	c.broker.releaseStoredSession(c)
 	if c.sess.expiry() == 0 {
-		c.sess.discard()
+		c.broker.leaveGroups(c.sess, c.sess.discard())
 		c.broker.releaseSession(c.sess)
 	}
 	c.logger.Info("mqtt client disconnected", "cause", causeString(cause))

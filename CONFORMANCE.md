@@ -55,6 +55,11 @@ conforming client hits in ordinary use:
   session ends (the §4.8.2 SHOULD, which has no statement id). [MQTT-4.8.2-6] is held by the
   same tests: a PUBACK with a Reason Code of 0x80 or more settles the message and nothing is
   handed on.
+- **Fixed, unreleased.** A shared subscription whose last member left kept its backlog for up to
+  `MaxSessionExpiry`, and a client that subscribed to the name afterwards was given it. The
+  backlog is now deleted with the subscription (the §4.8.2 sentence "ends, and any undelivered
+  messages associated with it are deleted", which has no statement id). Proven by
+  `shared_ends_test.go`.
 - **Fixed, unreleased.** A client that fell behind lost QoS 1 and 2 messages. With the queue
   on, it now catches up from the stream. [MQTT-4.1.0-1].
 - **Fixed, unreleased.** A connection that dropped while behind lost what was waiting for it, and

@@ -86,6 +86,7 @@ func (b *Broker) reauthorizeLocal(ctx context.Context, clientID string) (held bo
 		denied = append(denied, sub.filter)
 		if removed, ok := s.removeSubscription(sub.filter); ok {
 			unsubscribeAll(removed)
+			b.leaveGroup(s, sub.filter)
 		}
 	}
 	if len(denied) > 0 {

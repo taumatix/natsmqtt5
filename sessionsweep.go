@@ -33,9 +33,9 @@ func (b *Broker) sweepSessionsLoop(interval time.Duration) {
 // Expiring tears down the session's NATS subscriptions, which also leaves a
 // shared subscription's queue group, and drops the session from memory with the
 // in-flight state, the replay position and the delivered ids it holds. A shared
-// subscription's backlog consumer belongs to the whole group and is not
-// removed; a session's membership of it is its connection's pulling, which
-// ended with the connection.
+// subscription's backlog consumer belongs to the whole group: the session
+// leaves the group's members, and the consumer is deleted if it was the last
+// (sharedmembers.go).
 func (b *Broker) sweepSessions() int {
 	b.mu.Lock()
 	candidates := make([]*session, 0, len(b.sessions))
@@ -60,6 +60,7 @@ func (b *Broker) sweepSessions() int {
 		for _, sub := range subs {
 			unsubscribeAll(sub)
 		}
+		b.leaveGroups(s, subs)
 		b.logger.Info("a detached session expired", "client_id", s.clientID, "subscriptions", len(subs))
 		if hook := b.onSessionExpired.Load(); hook != nil {
 			(*hook)(s, subs)
