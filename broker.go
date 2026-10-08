@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"sync/atomic"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -31,6 +32,10 @@ type Broker struct {
 	logger *slog.Logger
 
 	listener net.Listener
+
+	// resendGate, when set, is called by a resend between claiming the in-flight
+	// entry and writing it. It is a seam for tests; see export_test.go.
+	resendGate atomic.Pointer[func(id uint16)]
 
 	mu       sync.Mutex
 	sessions map[string]*session

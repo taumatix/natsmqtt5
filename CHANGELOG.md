@@ -13,6 +13,11 @@ honestly be reconstructed now.
 
 ### Fixed
 
+- **A late acknowledgement no longer disconnects the client.** An acknowledgement that landed
+  between a resend reading the in-flight entry and writing it left the broker resending a finished
+  exchange, and the client's acknowledgement of that copy was answered with 0x82 Protocol Error. The
+  connection now remembers which identifiers it resent and ignores the unmatched acknowledgement it
+  is owed for them [MQTT-4.4.0-1].
 - **A resume no longer skips a message the dropped connection was sending.** The resumed
   connection took its list of unacknowledged messages while the old connection's delivery
   goroutine could still send and track one more, so that message was missing from the resend and
