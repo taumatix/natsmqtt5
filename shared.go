@@ -79,7 +79,39 @@ func (q *offlineQueue) joinGroup(ctx context.Context, opts *resolved, s *session
 			return nil, fmt.Errorf("recording the member of a shared subscription: %w", err)
 		}
 	}
-	return q.sharedConsumer(ctx, opts, sub)
+	return q.sharedConsumerRetrying(ctx, opts, sub)
+}
+
+// sharedConsumerRetrying is sharedConsumer, tried again while the answer is one
+// JetStream gives when the consumer is being deleted underneath the call: the
+// last member of the group leaving as this one joins (sharedmembers.go) makes
+// an update of the consumer find it gone ("consumer does not exist") or fail
+// to build its store while it is torn down. The deletion is over within
+// moments, and then the same call creates the consumer afresh.
+func (q *offlineQueue) sharedConsumerRetrying(ctx context.Context, opts *resolved, sub *subscription) (jetstream.Consumer, error) {
+	var (
+		cons jetstream.Consumer
+		err  error
+	)
+	for delay := 5 * time.Millisecond; ; delay *= 2 {
+		cons, err = q.sharedConsumer(ctx, opts, sub)
+		if err == nil || !consumerBeingDeleted(err) {
+			return cons, err
+		}
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return nil, err
+		}
+	}
+}
+
+// consumerBeingDeleted reports whether err is what creating a consumer returns
+// while a deletion of the same consumer is in progress.
+func consumerBeingDeleted(err error) bool {
+	return errors.Is(err, jetstream.ErrConsumerDoesNotExist) ||
+		errors.Is(err, jetstream.ErrConsumerNotFound) ||
+		errors.Is(err, jetstream.ErrConsumerCreate)
 }
 
 // sharedConsumer creates, or finds, the durable consumer for a shared

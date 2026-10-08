@@ -11,6 +11,11 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed.** A SUBSCRIBE to a shared subscription could be refused with 0x83 when it raced the last
+  other member's UNSUBSCRIBE: the leaver was deleting the group's JetStream consumer as the joiner
+  updated it, and the joiner saw "consumer does not exist" or a failed store. The joiner now tries
+  again until the deletion is over and creates the consumer afresh.
+
 ## [0.11.1] - 2026-10-09
 
 A patch release: every entry is a fix, there is no API change, and the Go floor is unchanged. One
