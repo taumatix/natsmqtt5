@@ -15,6 +15,17 @@ honestly be reconstructed now.
   other member's UNSUBSCRIBE: the leaver was deleting the group's JetStream consumer as the joiner
   updated it, and the joiner saw "consumer does not exist" or a failed store. The joiner now tries
   again until the deletion is over and creates the consumer afresh.
+- **Changed (documentation and tests).** `conformance/mqtt5-statements.tsv` is rewritten for the
+  state of main: 252 statements, 199 TESTED, 13 NOT-APPLICABLE, 40 CLIENT-ONLY, none VIOLATED or
+  UNSURE. A row says TESTED only for tests that exist and cite its id, and the counts in
+  `CONFORMANCE.md` are generated from the table; both are checked by tests
+  (`conformance_table_test.go`). `CONFORMANCE.md` now lists what is not implemented and why that is
+  allowed, and gives the findings as history by release. `ROADMAP.md` was audited against the code:
+  it states that no known MUST violation is open, and adds entries for a client over its Receive
+  Maximum (no 0x93), a Close after a cancelled Serve that can skip the 0x8B DISCONNECT, and topics
+  with whitespace.
+- **Tests.** The reserved bits of the CONNACK flags are zero [MQTT-3.2.2-1], and a CONNACK carries
+  no User Properties [MQTT-3.2.2-20], are now driven over a socket.
 
 ## [0.11.1] - 2026-10-09
 
