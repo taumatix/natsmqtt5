@@ -153,6 +153,21 @@ cuts the broker's NATS connection once the JetStream publish-ack has passed.
 A Will published by `publishWillFor` goes through the queue's keep but is not flushed, and a Will
 has no client to refuse to. Whether a published Will should wait for the flush is undecided.
 
+## A reconnect leaves the previous Will lease behind
+
+**Today:** `setWill` (`handshake.go` around 262, `session.go` around 860) overwrites the session's
+live Will lease without dropping it, so the record it replaced stays in the `_wills` bucket, owned by
+this broker. After this broker restarts, another broker finds the owner dead and publishes that
+orphan. **Shape:** `setWill` returns the previous lease and the caller drops it. Test: connect with a
+Will, replace it on the same session, kill and restart the broker, assert one Will at most.
+
+## An old connection's finish can take the new connection's Will
+
+**Today:** if the old connection's `finish` runs after the new connection's `setWill`, `takeWill`
+takes the new connection's Will and publishes or cancels it. This predates v0.10.0 and is more
+visible with `DurableWills` leases. **Shape:** key the Will to the connection that set it, so
+`takeWill` only returns its own. Test: a takeover whose old connection finishes late.
+
 # Tier 3: SHOULD statements
 
 ## A held shared message: the killed-broker window and the missing cap
@@ -372,6 +387,22 @@ reach a shared subscription only through its NATS queue group, as QoS 0
 messages do, and NATS still picks members whose client is away, whose share is
 dropped. Leaving the queue group while the session has no connection would stop
 that, as long as the last member leaving does not leave the group with nobody.
+
+## A delivery goroutine stuck in a user callback blocks finish and the catch-up floor
+
+**Today:** `finish` (`conn.go` around 365) and `awayFloor` (`catchup.go` around 185) wait on
+`<-c.loopDone` with no timeout, so a delivery goroutine stuck in a user callback (an Authorizer, a
+hook) blocks the connection's cleanup, and a resume on the same client, forever. **Shape:** wait
+with a bound, log, and carry on as the resume path already does for the old connection's delivery
+goroutine. Test: a callback that blocks, then a takeover.
+
+## DurablePublish and the Will bucket: what each guarantees
+
+**Today:** `DurablePublish`'s flush confirms that the NATS server received the live publish, not that
+JetStream stored anything; the stored copy is the queue's. The README says so since v0.11.0. The
+`_wills` bucket has no TTL, so an orphaned record is never aged out. **Shape:** decide a TTL or a
+sweep for the bucket (it must outlast the longest Will Delay Interval), and add a test that proves
+the README's statement about what the flush covers.
 
 ## A default queue that failed at startup stays off
 

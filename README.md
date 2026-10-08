@@ -63,11 +63,11 @@ As a container, against a NATS server you already run:
 ```sh
 docker run --rm -p 1883:1883 \
   -e NATSMQTT5_NATS=nats://your-nats-server:4222 \
-  ghcr.io/taumatix/natsmqtt5:v0.10.0
+  ghcr.io/taumatix/natsmqtt5:v0.11.0
 ```
 
 Images are published for `linux/amd64` and `linux/arm64` on every release, as
-`:v0.10.0`, `:0.10.0`, `:0.10` and `:latest`. They are built from
+`:v0.11.0`, `:0.11.0`, `:0.11` and `:latest`. They are built from
 [distroless/static][distroless], so there is no shell and no package manager in
 them, and the broker runs as a non-root user.
 
@@ -75,7 +75,7 @@ If you have no NATS server yet, [compose.yaml](compose.yaml) starts one with
 JetStream enabled and the broker in front of it:
 
 ```sh
-curl -O https://raw.githubusercontent.com/taumatix/natsmqtt5/v0.10.0/compose.yaml
+curl -O https://raw.githubusercontent.com/taumatix/natsmqtt5/v0.11.0/compose.yaml
 docker compose up -d
 mosquitto_pub -V 5 -h localhost -p 1883 -t sensors/7/temp -m 21.5
 ```
@@ -83,21 +83,21 @@ mosquitto_pub -V 5 -h localhost -p 1883 -t sensors/7/temp -m 21.5
 Every flag has an environment variable twin — upper-case, `-` becomes `_`,
 behind a `NATSMQTT5_` prefix — so `-subject-prefix` is
 `NATSMQTT5_SUBJECT_PREFIX`. An explicit flag beats the environment. Run
-`docker run --rm ghcr.io/taumatix/natsmqtt5:v0.10.0 -h` for the full list.
+`docker run --rm ghcr.io/taumatix/natsmqtt5:v0.11.0 -h` for the full list.
 
 [distroless]: https://github.com/GoogleContainerTools/distroless
 
 As a binary:
 
 ```sh
-go install github.com/taumatix/natsmqtt5/cmd/natsmqtt5@v0.10.0
+go install github.com/taumatix/natsmqtt5/cmd/natsmqtt5@v0.11.0
 natsmqtt5 -nats nats://localhost:4222 -listen :1883
 ```
 
 As a library:
 
 ```sh
-go get github.com/taumatix/natsmqtt5@v0.10.0
+go get github.com/taumatix/natsmqtt5@v0.11.0
 ```
 
 Requires Go 1.26 or newer (v0.8.0 and earlier build on Go 1.25), and a NATS server with JetStream
@@ -304,8 +304,10 @@ By default the broker waits for JetStream to store the queue's copy, then hands 
 NATS connection and acknowledges at once. nats.go writes that from another goroutine, so a broker
 killed in that window loses a live copy it told the client it had. `Options.DurablePublish`
 (`-durable-publish`, `NATSMQTT5_DURABLE_PUBLISH=true`) closes it: for QoS 1 and 2 the PUBACK or
-PUBREC is sent only after (1) the queue stream stored the message and (2) a flush of the broker's
-NATS connection came back, which means the NATS server has processed the live publish. If either
+PUBREC is sent only after (1) the queue stream stored the message (JetStream's publish
+acknowledgement) and (2) a flush of the broker's NATS connection came back, which means the NATS
+server has received the live publish. The flush says nothing about JetStream: the live copy is core
+NATS and is not stored by it, and the only stored copy is the queue's, from (1). If either
 fails or takes over 5 seconds the client gets 0x83 Implementation specific error and may send the
 message again. It implies the offline queue (the broker will not start without it) and is an error
 with `DisableOfflineQueue`. The default is off.
@@ -454,7 +456,9 @@ so a reconnect never overwrites its predecessor's record.
   broker looks; the delay is counted from when a survivor notices, up to that
   long after the connection was lost.
 
-It is off by default because the Will's payload sits in clear text in that
+The bucket has no time-to-live: a record is removed only by a broker that
+publishes, cancels or drops it, so one left behind (see ROADMAP.md) stays
+until a broker adopts it. It is off by default because the Will's payload sits in clear text in that
 bucket, which therefore needs the access control of the session bucket, and
 because it needs JetStream. It works with or without `PersistentSessions`.
 A broker cut off from NATS but still serving clients looks dead to the others
