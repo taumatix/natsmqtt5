@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/stretchr/testify/assert"
@@ -55,13 +54,15 @@ func TestReauthorizeStopsALiveSubscriptionWithoutCostingTheConnection(t *testing
 	r.subscribe("open/#", packet.QoS1)
 
 	pub, _ := connectClient(t, addr, connectOpts("pub-reauth-live"))
+	seen := natsmqtt5.LiveCopies(b)
 	for _, n := range []string{"1", "2", "3"} {
 		pub.publish(&paho.Publish{Topic: "secret/" + n, QoS: 1, Payload: []byte(n)})
 	}
 	first := r.expectPublish()
 	require.Equal(t, "secret/1", first.Topic)
-	// secret/2 and secret/3 wait behind the quota.
-	time.Sleep(200 * time.Millisecond)
+	// secret/2 and secret/3 wait behind the quota: all three copies have
+	// reached the session before the filter is revoked.
+	awaitLiveCopies(t, b, seen, 3)
 
 	revoked.Store(true)
 	require.NoError(t, b.Reauthorize(context.Background(), "reauth-live"))

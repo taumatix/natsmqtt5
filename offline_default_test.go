@@ -45,7 +45,7 @@ func startNATSWithoutJetStream(t *testing.T) string {
 // it starts, and a session that was away gets nothing, as before.
 func TestABrokerWithoutJetStreamStillStartsWithNoQueue(t *testing.T) {
 	var logs syncBuffer
-	addr := startBroker(t, startNATSWithoutJetStream(t), func(o *natsmqtt5.Options) {
+	b, addr, _ := startBrokerHandle(t, startNATSWithoutJetStream(t), func(o *natsmqtt5.Options) {
 		o.DisableRetained = true
 		o.Logger = slog.New(slog.NewTextHandler(&logs, nil))
 	})
@@ -57,10 +57,11 @@ func TestABrokerWithoutJetStreamStillStartsWithNoQueue(t *testing.T) {
 	waitDetached(t, &logs, "no-js")
 
 	pub, _ := connectClient(t, addr, connectOpts("pub-no-js"))
+	seen := natsmqtt5.LiveCopies(b)
 	pub.publish(&paho.Publish{Topic: "q/1", QoS: 1, Payload: []byte("1")})
 	// As in TestWithoutTheOfflineQueueNothingPublishedWhileAwayArrives: let
 	// the live copy reach the detached session before it resumes.
-	time.Sleep(200 * time.Millisecond)
+	awaitLiveCopies(t, b, seen, 1)
 
 	back := dialRaw(t, addr)
 	require.True(t, back.connect(rawConnect("no-js", 300)).SessionPresent)

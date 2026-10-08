@@ -253,6 +253,7 @@ func (c *conn) bindNATS(sub *subscription) error {
 	cell.Store(sub)
 	sub.cell = cell
 	handler := func(msg *nats.Msg) {
+		defer c.broker.liveSeen.Add(1)
 		// The newest subscription for the filter delivers: a client that
 		// subscribed again has replaced this one, and the message must reach it
 		// anyway [MQTT-3.8.4-4].

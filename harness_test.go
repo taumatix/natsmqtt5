@@ -77,6 +77,16 @@ func startStoppableBroker(t *testing.T, natsURL string, customise ...func(*natsm
 	return addr, stop
 }
 
+// awaitLiveCopies waits until the broker's subscription handlers have finished
+// with n more live copies than when before was taken. A message that must not
+// arrive gives no event to wait on; the copy reaching a detached session and
+// being dropped is that event.
+func awaitLiveCopies(t *testing.T, b *natsmqtt5.Broker, before int64, n int64) {
+	t.Helper()
+	require.Eventually(t, func() bool { return natsmqtt5.LiveCopies(b) >= before+n }, 10*time.Second, time.Millisecond,
+		"the live copy never reached the session's subscription")
+}
+
 // startBrokerHandle is startStoppableBroker with the *Broker itself, for a test
 // that calls its methods.
 func startBrokerHandle(t *testing.T, natsURL string, customise ...func(*natsmqtt5.Options)) (*natsmqtt5.Broker, string, func()) {

@@ -39,6 +39,11 @@ type Broker struct {
 	// entry and writing it. It is a seam for tests; see export_test.go.
 	resendGate atomic.Pointer[func(id uint16)]
 
+	// liveSeen counts the live NATS copies the subscription handlers have
+	// finished with, delivered or dropped. Tests wait on it for a copy to have
+	// reached a session instead of sleeping; see export_test.go.
+	liveSeen atomic.Int64
+
 	// onSessionExpired, when set, is called after the sweep has expired a
 	// detached session, with the subscriptions it held (already torn down). It
 	// is a seam for tests. Handing a shared member's unacknowledged messages

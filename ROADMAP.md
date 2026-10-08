@@ -21,17 +21,15 @@ the session completes the message. [MQTT-4.4.0-1].
 cannot be larger), and delete a payload when its in-flight entry completes (the key
 covers the Packet Identifier, so it is usually one session's alone). Test with a retained payload just under `max_payload` and a SIGKILL.
 
-## Negative assertions that wait a fixed 200 ms for a live copy
+## Two tests still wait a fixed 200 ms for a drop to be recorded
 
-**Today:** `TestWithoutTheOfflineQueueNothingPublishedWhileAwayArrives` and its siblings in
-`offline_default_test.go`, `reauthorise_test.go`, `reauthorize_live_test.go` and `restore_inflight_test.go`
-sleep 200 ms so a live copy reaches a detached session before it resumes. They assert that
-something does not arrive, so no event says the wait is over; on a very slow runner the copy could
-land after the resume and the test would pass for the wrong reason (a false pass, never a false
-failure). None has failed.
+**Today:** `TestARecordTooLargeForAValueKeepsTheOldestInflightMessages` (`restore_inflight_test.go`) and
+`TestExpiryReplayOnARestoredSessionHonoursTheQueueTimestamp` (`expiry_test.go`) sleep 200 ms after a drop or
+a publish before stopping the first broker, so the detach and the queue write have happened. The live-copy
+sleeps are gone (`awaitLiveCopies`, backed by a test-only counter). A slow runner here fails the test, not
+passes it wrongly, so this is flake risk and not a hidden gap.
 
-**Shape:** a test hook (an unexported counter of live copies the session has seen) the tests wait
-on instead of the clock.
+**Shape:** wait on `waitDetached` and on the publisher's PUBACK instead of the clock.
 
 ## A restored session's replay can skip a live copy that arrived late
 
