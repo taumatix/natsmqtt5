@@ -11,6 +11,14 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed, unreleased.** With `PersistentSessions`, a session restored after a broker restart forgot the
+  identifiers of messages withdrawn on resume (a filter denied): the client's acknowledgement of one was
+  answered with `0x82 Protocol Error` and the identifier could be handed to a new message first. The
+  withdrawn set now travels in the session record, with its age, so the two-resumptions rule counts the
+  connections made before the restart. It is written with the withdrawal itself, so a broker killed
+  outright leaves it too. The record version stays 1; a broker that predates the field ignores it.
+  [MQTT-4.4.0-1], [MQTT-2.2.1-4].
+
 - **Fixed, unreleased.** A resent PUBLISH took a send-quota slot, and an acknowledgement of the original
   that landed before the copy was written returned it, so for the length of that exchange the client had
   one message more in flight than its Receive Maximum allows. The slot now stays with the copy until the

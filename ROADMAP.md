@@ -59,18 +59,6 @@ client that small is rare.
 bytes losslessly, and decide whether a client under the remainder should be refused with a CONNACK
 that fits, or served on assumed defaults. Size S, and a decision.
 
-## A withdrawn identifier does not survive a broker restart
-
-**Today:** found by reading while closing the withdrawn-set entries, not by a test. The withdrawn
-identifiers are in memory only; the session record carries the in-flight set and nothing about
-what was taken back. A session restored after the broker restarted therefore forgets that it owes
-the client's acknowledgement of a message withdrawn on resume, and that acknowledgement is answered
-with `0x82 Protocol Error`, and its identifier can be handed to a new message first.
-
-**Shape:** store the owed identifiers and their acknowledgement type in the record, with the
-attach count they were withdrawn under, so the two-resumptions rule applies across a restart. Size
-S; it changes the record, so it needs a `sessionRecordVersion` decision.
-
 ## Self-fencing is proven for a silent link, not for an isolated NATS server
 
 **Today:** a broker that cannot reach NATS for twice `WillCheckInterval` closes
