@@ -87,45 +87,17 @@ follows, and take the slot back from the quota then, or have the gate-and-write 
 entry after taking the quota. Size S; it needs a test that holds the write as `late_ack_test.go` does
 and reads the quota.
 
-## The withdrawn-identifier set only empties when the client acknowledges
+## A withdrawn identifier does not survive a broker restart
 
-**Today:** `session.withdrawn` holds the Packet Identifier of every in-flight
-message taken back on resume, so that a late PUBACK or PUBCOMP for one is
-ignored rather than answered with `0x82 Protocol Error`, and so that `nextID`
-does not hand the identifier to a new message. Nothing else removes an entry. A
-client that never flushes the acknowledgement it owed leaves the identifier
-spent for the life of the session — bounded by the 65535 that exist, but
-monotonic, so a long-lived session narrowed repeatedly slowly runs out.
+**Today:** found by reading while closing the withdrawn-set entries, not by a test. The withdrawn
+identifiers are in memory only; the session record carries the in-flight set and nothing about
+what was taken back. A session restored after the broker restarted therefore forgets that it owes
+the client's acknowledgement of a message withdrawn on resume, and that acknowledgement is answered
+with `0x82 Protocol Error`, and its identifier can be handed to a new message first.
 
-Since v0.4.3 the set also takes an identifier when a displaced connection's
-acknowledgement completes an exchange its successor resent. If the successor
-drops before acknowledging its copy, that identifier is owed for good as well,
-and so is the send-quota slot it names (only until that connection ends,
-since quota is per connection).
-
-**Why it is not simply fixed:** a timer is the wrong instrument — the
-acknowledgement is owed by a client that may be offline, and MQTT puts no
-deadline on it. What is needed is evidence the client will never send it.
-
-Exhaustion is not merely a slow leak: `nextID` returning false makes `deliver`
-error, and `deliverLoop` answers that by closing the connection — on every
-reconnect, for as long as the session lives.
-
-**Shape:** forget a withdrawn identifier on the second resumption after its
-withdrawal. A client that has completed two CONNECTs without flushing the
-acknowledgement is not going to, and the count is already there in the session.
-
-## `forgetWithdrawn` does not check which acknowledgement was owed
-
-**Today:** the withdrawn set stores Packet Identifiers and nothing else, so a
-withdrawn QoS 1 identifier can be closed by a PUBCOMP and a withdrawn QoS 2 one
-by a PUBACK. A client that sends the wrong one consumes its own withdrawal
-record and then gets itself disconnected with 0x82 when it sends the right one.
-Self-inflicted, and confined to that client's session.
-
-**Shape:** store the packet type still owed alongside the identifier and match
-on both. It falls out of any change to the set's contents, which is why it sits
-next to the entry above rather than on its own.
+**Shape:** store the owed identifiers and their acknowledgement type in the record, with the
+attach count they were withdrawn under, so the two-resumptions rule applies across a restart. Size
+S; it changes the record, so it needs a `sessionRecordVersion` decision.
 
 ## The Will Message of a broker that was killed
 

@@ -126,6 +126,9 @@ func owedAck(o *outbound) packet.Type {
 type withdrawal struct {
 	// madeAt is the session's attach count when the identifier was withdrawn.
 	madeAt uint64
+	// owed is the acknowledgement that settles the identifier, from owedAck. An
+	// acknowledgement of another type does not.
+	owed packet.Type
 	// quotaHolder is the connection whose send-quota slot the owed
 	// acknowledgement returns, or nil when it returns none.
 	quotaHolder *conn
@@ -526,7 +529,7 @@ func (s *session) completeInflight(c *conn, id uint16) (outbound, bool) {
 		// the identifier is not handed to a new message first; and leave the
 		// send-quota slot for that acknowledgement to return, on the connection
 		// that spent it.
-		w := withdrawal{madeAt: s.attaches}
+		w := withdrawal{madeAt: s.attaches, owed: owedAck(o)}
 		if o.quotaHeld {
 			w.quotaHolder = o.resentOn
 		}
@@ -584,7 +587,7 @@ func (s *session) withdrawInflight(denied, surviving []string) []uint16 {
 			continue
 		}
 		delete(s.inflight, id)
-		w := withdrawal{madeAt: s.attaches}
+		w := withdrawal{madeAt: s.attaches, owed: owedAck(o)}
 		if o.quotaHeld {
 			// Only on a live connection: attach clears every claim at the
 			// handshake. The client's acknowledgement returns this slot.
@@ -596,14 +599,19 @@ func (s *session) withdrawInflight(denied, surviving []string) []uint16 {
 	return taken
 }
 
-// forgetWithdrawn reports whether id names a message the broker took back, and
-// forgets it if so. The acknowledgement that asks is the last one owed for it.
-func (s *session) forgetWithdrawn(id uint16) (withdrawal, bool) {
+// forgetWithdrawn reports whether id names a message the broker took back that
+// is owed an acknowledgement of type t, and forgets it if so. That
+// acknowledgement is the last one owed for it; one of another type leaves the
+// record for the right one.
+func (s *session) forgetWithdrawn(id uint16, t packet.Type) (withdrawal, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	w, ok := s.withdrawn[id]
+	if !ok || w.owed != t {
+		return withdrawal{}, false
+	}
 	delete(s.withdrawn, id)
-	return w, ok
+	return w, true
 }
 
 // markQoS2Received records a QoS 2 Packet Identifier and reports whether it

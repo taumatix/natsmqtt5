@@ -13,6 +13,14 @@ honestly be reconstructed now.
 
 ### Fixed
 
+- **A session narrowed repeatedly no longer runs out of Packet Identifiers.** The identifier of a
+  message taken back on resume (its filter was denied) stayed spent until the client acknowledged
+  it, and a client that never does left it spent for the life of the session. It is now forgotten
+  on the second resumption after the withdrawal, when the client has had two connections to send
+  the acknowledgement [MQTT-2.2.1-4].
+- **A withdrawn identifier only accepts the acknowledgement it is owed.** A PUBCOMP for a withdrawn
+  QoS 1 message, or a PUBACK for a QoS 2 one, used up the record and was ignored; it is now a
+  Protocol Error, and the record stays for the right acknowledgement.
 - **A late acknowledgement no longer disconnects the client.** An acknowledgement that landed
   between a resend reading the in-flight entry and writing it left the broker resending a finished
   exchange, and the client's acknowledgement of that copy was answered with 0x82 Protocol Error. The
