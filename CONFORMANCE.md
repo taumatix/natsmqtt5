@@ -102,6 +102,12 @@ conforming client hits in ordinary use:
   session cancels the displaced connection's Will, the displaced connection's end cannot take the new
   one's, and a replaced Will leaves no stored record (`will_ownership_test.go`). A clean-start takeover
   publishes the old Will, as the session ends. [MQTT-3.1.2-8], [MQTT-3.1.2-10], [MQTT-3.1.3-9].
+- **Fixed, unreleased.** A resend's send-quota slot was returned by the acknowledgement of the original
+  when that overtook the copy, so a client could briefly be sent more than its Receive Maximum
+  (`resend_quota_test.go`). Inherent, and left as is: an acknowledgement that reaches the broker after
+  the copy has been written carries the same Packet Identifier as the copy's own, so the broker cannot tell
+  whether the client had seen the copy; it is counted as the copy's, as the exchange ends with it either
+  way. [MQTT-3.3.4-9].
 - **Fixed, unreleased.** With `DurableWills`, a broker cut off from NATS closes its clients' sockets
   after twice `WillCheckInterval`, and a survivor publishes a silent broker's Wills only after that has
   had time to happen, so a Will is not published while its client is connected

@@ -154,6 +154,15 @@ func (s *session) forgetStaleWithdrawals() {
 type ackOwed struct {
 	conn *conn
 	typ  packet.Type
+	// written is set once the resent PUBLISH is about to be written. An
+	// acknowledgement that completes the entry before then can only be for the
+	// original, since the client has not been sent the copy; after it, the same
+	// acknowledgement could be either the original's or the copy's.
+	written bool
+	// quota is set when the original's acknowledgement overtook the resend: the
+	// send-quota slot the resend took then belongs to the copy, and the client's
+	// acknowledgement of the copy returns it [MQTT-3.3.4-9].
+	quota bool
 }
 
 // owedAck is the acknowledgement that closes o's exchange from the client's
@@ -671,16 +680,37 @@ func (s *session) markResent(c *conn, id uint16) bool {
 }
 
 // forgetResent reports whether c resent id and the acknowledgement of type t
-// is the one owed for it, and forgets the record if so.
-func (s *session) forgetResent(c *conn, id uint16, t packet.Type) bool {
+// is the one owed for it, and forgets the record if so. quota reports that the
+// copy holds a send-quota slot that this acknowledgement returns.
+func (s *session) forgetResent(c *conn, id uint16, t packet.Type) (ok, quota bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, ok := s.resent[id]
-	if !ok || r.conn != c || r.typ != t {
-		return false
+	r, found := s.resent[id]
+	if !found || r.conn != c || r.typ != t {
+		return false, false
 	}
 	delete(s.resent, id)
-	return true
+	return true, r.quota
+}
+
+// markResentWritten records that c is about to write the copy of id, after which
+// an acknowledgement for it is ambiguous; see ackOwed.written.
+func (s *session) markResentWritten(c *conn, id uint16) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if r, ok := s.resent[id]; ok && r.conn == c {
+		r.written = true
+		s.resent[id] = r
+	}
+}
+
+// abandonResend forgets the record of a resend that did not go out after all.
+func (s *session) abandonResend(c *conn, id uint16) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if r, ok := s.resent[id]; ok && r.conn == c {
+		delete(s.resent, id)
+	}
 }
 
 // awaitPubcomp records that PUBREL has gone out for id, so the broker now
@@ -718,6 +748,16 @@ func (s *session) completeInflightLocked(c *conn, id uint16) (outbound, bool) {
 	}
 	delete(s.inflight, id)
 	done := *o
+	if r, resent := s.resent[id]; resent && r.conn == c && !r.written && !r.quota && o.quotaHeld && o.resentOn == c {
+		// The original's acknowledgement overtook a resend that has taken a
+		// slot and not yet written the copy. The copy will go out, so the slot
+		// is its, and the acknowledgement of the copy returns it; returning it
+		// now would let the client hold one message more than its Receive
+		// Maximum [MQTT-3.3.4-9].
+		r.quota = true
+		s.resent[id] = r
+		done.quotaHeld = false
+	}
 	if o.resentOn != nil && o.resentOn != c {
 		// The acknowledgement came from a connection displaced by a takeover,
 		// for a message its successor has since resent. It stands: the client

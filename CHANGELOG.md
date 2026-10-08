@@ -11,6 +11,12 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed, unreleased.** A resent PUBLISH took a send-quota slot, and an acknowledgement of the original
+  that landed before the copy was written returned it, so for the length of that exchange the client had
+  one message more in flight than its Receive Maximum allows. The slot now stays with the copy until the
+  client's acknowledgement of it. An acknowledgement that arrives after the copy is written cannot be told
+  from the copy's own and is treated as it always was. [MQTT-3.3.4-9].
+
 - **Fixed, unreleased.** With `DurableWills`, a broker that was alive but cut off from NATS had its
   clients' Wills published by a survivor while they were still connected. The broker now checks every
   half `WillCheckInterval` that it can reach NATS, and closes its client sockets after twice that interval

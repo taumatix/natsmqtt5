@@ -59,20 +59,6 @@ client that small is rare.
 bytes losslessly, and decide whether a client under the remainder should be refused with a CONNACK
 that fits, or served on assumed defaults. Size S, and a decision.
 
-## A resend that an acknowledgement overtook spends a send-quota slot it does not hold
-
-**Today:** found by reading while closing the late-acknowledgement entry, not by a test. A resend
-claims a slot, and `takeQuotaSlot` marks the entry as holding it. If the acknowledgement of the
-original lands before the copy is written, `completeInflight` returns that slot, the copy goes out
-anyway, and the client's acknowledgement of it is now ignored (`forgetResent`) and returns nothing.
-For the length of that exchange the connection has one more message in flight than its Receive
-Maximum allows [MQTT-3.3.4-9].
-
-**Shape:** have `forgetResent` say whether the resend was claimed before the acknowledgement it
-follows, and take the slot back from the quota then, or have the gate-and-write path re-check the
-entry after taking the quota. Size S; it needs a test that holds the write as `late_ack_test.go` does
-and reads the quota.
-
 ## A withdrawn identifier does not survive a broker restart
 
 **Today:** found by reading while closing the withdrawn-set entries, not by a test. The withdrawn
