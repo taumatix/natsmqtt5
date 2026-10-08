@@ -268,11 +268,13 @@ func TestAMemberJoiningAsTheLastOneLeavesKeepsAWorkingGroup_MQTT_5_0_4_8_2(t *te
 	const rounds = 8
 	joiner := dialRaw(t, b)
 	joiner.connect(rawConnect("joiner", 300))
+	var leavers []*rawClient
 	for i := 0; i < rounds; i++ {
 		filter := fmt.Sprintf("$share/join%d/jobs/#", i)
 		leaver := dialRaw(t, a)
 		leaver.connect(rawConnect(fmt.Sprintf("leaver%d", i), 300))
 		leaver.subscribe(filter, packet.QoS1)
+		leavers = append(leavers, leaver)
 
 		start := make(chan struct{})
 		var wg sync.WaitGroup
@@ -291,11 +293,20 @@ func TestAMemberJoiningAsTheLastOneLeavesKeepsAWorkingGroup_MQTT_5_0_4_8_2(t *te
 		close(start)
 		wg.Wait()
 	}
+	// A leaver's UNSUBACK is sent after it has deleted the group's consumer (or
+	// left it to the joiner), so once every one is in, no deletion is still to
+	// come and a consumer that exists is there to stay.
+	for _, l := range leavers {
+		_, ok := l.read().(*packet.Unsuback)
+		require.True(t, ok)
+	}
 	// Drain the SUBACKs of the joiner and wait for every group to have a
 	// consumer: one made again by the puller if the leaver deleted it last.
 	for i := 0; i < rounds; i++ {
-		_, ok := joiner.read().(*packet.Suback)
+		ack, ok := joiner.read().(*packet.Suback)
 		require.True(t, ok)
+		require.Equal(t, []packet.ReasonCode{packet.GrantedQoS1}, ack.ReasonCodes,
+			"a SUBSCRIBE racing the last member's leaving is granted, not failed")
 	}
 	requireConsumers(t, natsURL, rounds, "every group has the joiner, so every group has a backlog")
 
