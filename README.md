@@ -279,6 +279,45 @@ What it costs and what it does not cover yet:
 - A resume reads everything queued since the client left and matches it in the
   broker, so a long absence on a busy broker takes longer to catch up.
 
+### What the queue and a durable PUBACK cost
+
+One client publishing QoS 1 (128-byte payload) and waiting for each PUBACK, over loopback TCP to
+an embedded NATS server with file-backed JetStream, on an Apple M2 Pro (`go test -run '^$' -bench
+QoS1Publish -benchtime 3s`, three runs each, see `bench_publish_test.go`):
+
+| | time per publish | publishes per second (one client) |
+|---|---|---|
+| no queue (`DisableOfflineQueue`) | about 34 µs | about 29,000 |
+| queue, the default | about 88 µs | about 11,000 |
+| queue and `DurablePublish` | about 111 µs | about 9,000 |
+
+So the queue costs about 54 µs per QoS 1 publish here and `DurablePublish` about 23 µs more. Those
+are loopback numbers with a local disk: against a NATS server across a network the cost is the
+round trips, which is why the figures are not a forecast. The queue adds one JetStream round trip,
+`DurablePublish` one more, so add twice or three times your round trip to NATS, plus the server's
+fsync policy for file storage. A busy broker serves many clients at once, so total throughput is
+higher than one client's.
+
+### A PUBACK that means the message is safe
+
+By default the broker waits for JetStream to store the queue's copy, then hands the live copy to its
+NATS connection and acknowledges at once. nats.go writes that from another goroutine, so a broker
+killed in that window loses a live copy it told the client it had. `Options.DurablePublish`
+(`-durable-publish`, `NATSMQTT5_DURABLE_PUBLISH=true`) closes it: for QoS 1 and 2 the PUBACK or
+PUBREC is sent only after (1) the queue stream stored the message and (2) a flush of the broker's
+NATS connection came back, which means the NATS server has processed the live publish. If either
+fails or takes over 5 seconds the client gets 0x83 Implementation specific error and may send the
+message again. It implies the offline queue (the broker will not start without it) and is an error
+with `DisableOfflineQueue`. The default is off.
+
+What the guarantee is: an acknowledged message is in the queue stream (for `OfflineQueueMaxAge`, to
+the stream's replication) and the NATS server has routed the live copy. A session that was away gets
+it from the queue; a connected subscriber gets it once, as without the option.
+
+What it is not: live delivery stays core NATS, at most once per hop, so a connected subscriber whose
+own NATS path fails at the wrong moment can still miss it ([ROADMAP.md](ROADMAP.md)). A retry after
+a refusal can leave a second queue copy. Wills and QoS 0 are not covered.
+
 ## How MQTT maps onto NATS
 
 | MQTT | NATS |

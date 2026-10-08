@@ -13,6 +13,12 @@ honestly be reconstructed now.
 
 ### Added
 
+- **A PUBACK or PUBREC that means the message is safe, opt in.** `Options.DurablePublish`
+  (`-durable-publish`, `NATSMQTT5_DURABLE_PUBLISH`) makes the broker acknowledge a QoS 1 or 2
+  PUBLISH only once JetStream has stored the queue's copy and the NATS server has confirmed the live
+  publish (a flush), and refuse it with 0x83 otherwise. It requires the offline queue and costs one
+  more NATS round trip per publish; the README has the measured cost of the queue and of this.
+
 - **The Will Message of a broker that was killed is now published.** `Options.DurableWills`
   (`-durable-wills`, `NATSMQTT5_DURABLE_WILLS`) keeps the Will of every open connection in a
   JetStream key-value bucket, `<StreamPrefix>_wills`. A surviving broker that finds the owner no

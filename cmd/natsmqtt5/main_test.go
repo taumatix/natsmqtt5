@@ -169,3 +169,17 @@ func TestDurableWillsFlags(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, cfg.broker.DurableWills)
 }
+
+func TestDurablePublishFlag(t *testing.T) {
+	cfg, err := parseConfig([]string{"-durable-publish"}, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.DurablePublish)
+
+	cfg, err = parseConfig(nil, env(map[string]string{"NATSMQTT5_DURABLE_PUBLISH": "true"}), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.DurablePublish)
+
+	cfg, err = parseConfig(nil, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.False(t, cfg.broker.DurablePublish, "off unless asked for")
+}

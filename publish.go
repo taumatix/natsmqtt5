@@ -109,6 +109,18 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 		c.logger.Warn("publishing to NATS failed", "subject", full, "error", err)
 		return c.rejectPublish(p, packet.ImplementationSpecificError, "the NATS server rejected the message")
 	}
+	if c.broker.opts.DurablePublish && p.QoS > packet.QoS0 {
+		// The queue copy is stored; now wait until the NATS server has
+		// processed the live publish too (Options.DurablePublish). A refusal
+		// lets the client send it again.
+		fctx, cancel := context.WithTimeout(ctx, offlineKeepTimeout)
+		err := c.broker.nc.FlushWithContext(fctx)
+		cancel()
+		if err != nil {
+			c.logger.Warn("NATS did not confirm a durable publish", "subject", full, "error", err)
+			return c.rejectPublish(p, packet.ImplementationSpecificError, "the NATS server did not confirm the message")
+		}
+	}
 
 	switch p.QoS {
 	case packet.QoS0:
