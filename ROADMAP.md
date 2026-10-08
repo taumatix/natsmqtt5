@@ -73,15 +73,6 @@ client that small is rare.
 bytes losslessly, and decide whether a client under the remainder should be refused with a CONNACK
 that fits, or served on assumed defaults. Size S, and a decision.
 
-## Packets may still go out after a server DISCONNECT
-
-**Today (unsure):** after the broker sends a DISCONNECT, the socket stays open while `finish()`
-runs, so a queued PUBLISH may still be written. The spec says the sender of a DISCONNECT MUST NOT
-send more packets and MUST close the connection. [MQTT-3.14.4-1].
-
-**Shape:** a test that queues deliveries and triggers a server DISCONNECT, then the order fixed
-if it fails. Size S.
-
 ## An Authenticator's Reason Code is not checked
 
 **Today:** a Reason Code returned by an `Authenticator` is sent in the CONNACK as given
