@@ -14,6 +14,16 @@ import (
 // hand the message to NATS, and acknowledge as the QoS requires
 // (MQTT-5.0 §3.3.4, Table 3-3).
 func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
+	// "A PUBLISH packet sent from a Client to a Server MUST NOT contain a
+	// Subscription Identifier" [MQTT-3.3.4-6]. The decoder accepts the property
+	// because the server sends it; from a client it is a Protocol Error, answered
+	// with DISCONNECT 0x82 and the connection closed [MQTT-4.13.1-1] before
+	// anything is acknowledged or forwarded.
+	if p.Properties != nil && len(p.Properties.SubscriptionIdentifiers) > 0 {
+		c.sendDisconnect(packet.ProtocolError, "a PUBLISH from a client must not carry a Subscription Identifier")
+		return errors.New("PUBLISH carrying a Subscription Identifier")
+	}
+
 	if p.QoS > c.broker.opts.maxQoS {
 		// [MQTT-3.2.2-11] makes this a protocol error the server reports with
 		// 0x9B.

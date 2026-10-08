@@ -71,13 +71,6 @@ exchange unfinished. [MQTT-3.2.2-19], [MQTT-3.2.2-20], [MQTT-3.4.2-2], [MQTT-3.5
 
 **Shape:** on an oversize ack, retry without the optional properties before giving up. Size S.
 
-## A Subscription Identifier in a client PUBLISH is accepted
-
-**Today:** a PUBLISH from a client carrying a Subscription Identifier is accepted and
-acknowledged. It is a Protocol Error. [MQTT-3.3.4-6], [MQTT-4.13.1-1].
-
-**Shape:** disconnect with 0x82 in the packet validation. Size S.
-
 ## Packets may still go out after a server DISCONNECT
 
 **Today (unsure):** after the broker sends a DISCONNECT, the socket stays open while `finish()`
