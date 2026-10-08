@@ -99,22 +99,36 @@ with `0x82 Protocol Error`, and its identifier can be handed to a new message fi
 attach count they were withdrawn under, so the two-resumptions rule applies across a restart. Size
 S; it changes the record, so it needs a `sessionRecordVersion` decision.
 
-## The Will Message of a broker that was killed
+## A broker that is alive but cut off from NATS announces its clients as dead
 
-**Today:** a Will is published by the broker holding the connection. A broker
-that shuts down cleanly publishes its clients' Wills; one killed outright does
-not, whether or not sessions are persisted.
+**Today:** with `DurableWills`, a broker that stops answering its liveness
+subject is presumed dead and a survivor publishes its clients' Wills. A broker
+that is only partitioned from the NATS cluster still holds those connections,
+so the Will of a connected client is published. The two-ping confirmation makes
+this rare, not impossible.
 
-**Why it is not simply fixed:** the Will is not in the session record on
-purpose. It belongs to the network connection (MQTT-5.0 §3.1.2.5), and a broker
-reading a record cannot distinguish a connection that has ended from an owner
-that is merely busy — so a broker acting on someone else's stored Will would
-announce live clients as dead, which is worse than the silence it replaces.
+**Shape:** a broker that loses its NATS connection closes its client sockets
+(the connection is the lease), or a lease with a deadline the owner must renew
+and a survivor waits out in full. Needs a decision on which, then a test that
+partitions a real broker (a proxy in front of NATS) and asserts no Will for a
+client that is still connected.
 
-**Shape:** a lease the owning broker renews while a connection is open, so that
-a lease which stops being renewed is evidence the connection ended rather than
-a guess. The Will then becomes safe to store, and its Delay Interval becomes
-enforceable across a broker's death.
+## The Will check reads every record on every tick
+
+**Today:** with `DurableWills`, each broker lists the whole Will bucket every
+`WillCheckInterval` and reads each record that is not its own, to learn the
+owner. That is a Get per open connection with a Will per tick per broker.
+**Shape:** key the records by owner (or keep a per-owner index key) so a tick
+lists owners, pings each once, and reads records only for a dead one; measure
+with a few thousand connections before and after.
+
+## Durable Wills on by default
+
+**Today:** `DurableWills` is off, because it stores Will payloads in clear text
+in a bucket and needs JetStream. **Shape:** make it default whenever JetStream
+is in use, once the partition entry above is done and a Will payload's
+visibility has an answer (an Authorizer check on the bucket, or a documented
+requirement). A default change needs a CHANGELOG entry that says so.
 
 ## A PUBACK that means the message is safe
 

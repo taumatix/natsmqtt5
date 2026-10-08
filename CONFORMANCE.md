@@ -88,6 +88,13 @@ conforming client hits in ordinary use:
   packet sent. [MQTT-3.2.2-19], [MQTT-3.2.2-20], [MQTT-3.4.2-2], [MQTT-3.5.2-2], [MQTT-3.14.2-3].
 - **Fixed, unreleased.** A PUBLISH could be written after the broker's DISCONNECT, a race between
   the delivery goroutine and the read loop. [MQTT-3.14.4-1].
+- **Added, unreleased.** The Will Message of a broker killed outright was never published. With
+  `DurableWills` the Will is stored in JetStream and a surviving broker publishes it, once, after
+  the Will Delay Interval. The repository had the ids of [MQTT-3.1.2-7] to [MQTT-3.1.2-10] one
+  sentence out of place (the id follows the sentence it numbers); the data file now has -7 as
+  "stored", -8 as "published after the connection closes, unless deleted or a new connection
+  opens", -9 as the client's and -10 as "removed once published or on DISCONNECT 0x00".
+  [MQTT-3.1.2-7], [MQTT-3.1.2-8], [MQTT-3.1.2-10], [MQTT-3.1.3-9].
 - **Fixed, unreleased.** A Reason Code returned by an `Authenticator` was sent in the CONNACK
   whatever it was, so a success or a DISCONNECT-only code could reach the wire. A code Table 3-1
   does not list for a CONNACK is now logged and sent as 0x80. [MQTT-3.2.2-8].

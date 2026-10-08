@@ -154,3 +154,18 @@ func TestBinaryVersion(t *testing.T) {
 		assert.NotEmpty(t, binaryVersion())
 	})
 }
+
+func TestDurableWillsFlags(t *testing.T) {
+	cfg, err := parseConfig([]string{"-durable-wills", "-will-check-interval", "2s"}, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.DurableWills)
+	assert.Equal(t, 2*time.Second, cfg.broker.WillCheckInterval)
+
+	cfg, err = parseConfig(nil, env(map[string]string{"NATSMQTT5_DURABLE_WILLS": "true"}), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.DurableWills)
+
+	cfg, err = parseConfig(nil, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.False(t, cfg.broker.DurableWills)
+}

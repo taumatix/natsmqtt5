@@ -205,6 +205,9 @@ type session struct {
 
 	will      *packet.Will
 	willDelay time.Duration
+	// willLease is the stored record of the Will held in will or pendingWill,
+	// or nil when Options.DurableWills is off; see willstore.go.
+	willLease *willLease
 	// awayAt is when the session's last connection ended, for the offline
 	// queue's replay; zero when there is nothing to replay.
 	awayAt time.Time
@@ -711,20 +714,34 @@ func (s *session) removeSubscription(filter string) (*subscription, bool) {
 	return sub, ok
 }
 
-func (s *session) setWill(w *packet.Will, delay time.Duration) {
+func (s *session) setWill(w *packet.Will, delay time.Duration, lease *willLease) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.will, s.willDelay = w, delay
+	s.will, s.willDelay, s.willLease = w, delay, lease
 }
 
 // takeWill removes and returns the Will Message, so it can only ever be
-// published once.
-func (s *session) takeWill() (*packet.Will, time.Duration) {
+// published once, with the stored record that goes with it.
+func (s *session) takeWill() (*packet.Will, time.Duration, *willLease) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	w, d := s.will, s.willDelay
-	s.will, s.willDelay = nil, 0
-	return w, d
+	w, d, l := s.will, s.willDelay, s.willLease
+	s.will, s.willDelay, s.willLease = nil, 0, nil
+	return w, d, l
+}
+
+// takePendingLease returns the stored record of a Will waiting out its delay
+// and forgets it, for a resumption that is about to cancel that Will
+// [MQTT-3.1.3-9].
+func (s *session) takePendingLease() *willLease {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pendingWill == nil {
+		return nil
+	}
+	l := s.willLease
+	s.willLease = nil
+	return l
 }
 
 // markAwayLocked records that the last connection ended. A replay no connection has
@@ -858,10 +875,10 @@ func (s *session) deliveredIDs() map[string]bool {
 	return out
 }
 
-func (s *session) setPendingWill(w *packet.Will) {
+func (s *session) setPendingWill(w *packet.Will, lease *willLease) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.pendingWill = w
+	s.pendingWill, s.willLease = w, lease
 }
 
 // takePendingWill reports whether w is still the pending Will, and clears it
@@ -887,16 +904,21 @@ func (s *session) currentWill() *packet.Will {
 	return s.pendingWill
 }
 
-// discardWill drops w, wherever it is held, so it is never published.
-func (s *session) discardWill(w *packet.Will) {
+// discardWill drops w, wherever it is held, so it is never published. It
+// returns the stored record of w, which the caller removes.
+func (s *session) discardWill(w *packet.Will) *willLease {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var l *willLease
 	if s.will == w {
 		s.will, s.willDelay = nil, 0
+		l, s.willLease = s.willLease, nil
 	}
 	if s.pendingWill == w {
 		s.pendingWill = nil
+		l, s.willLease = s.willLease, nil
 	}
+	return l
 }
 
 // currentConn returns the connection serving the session, or nil while it is

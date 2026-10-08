@@ -665,10 +665,7 @@ func (s *sessionStore) reclaimable(ctx context.Context, rec *sessionRecord, entr
 
 // ownerAlive reports whether the named broker instance answers.
 func (s *sessionStore) ownerAlive(ctx context.Context, owner string) bool {
-	ctx, cancel := context.WithTimeout(ctx, ownerPingTimeout)
-	defer cancel()
-	_, err := s.nc.RequestWithContext(ctx, brokerPingSubject(s.subjectPrefix, owner), nil)
-	return err == nil
+	return brokerAnswers(ctx, s.nc, s.subjectPrefix, owner)
 }
 
 func (s *sessionStore) close() {

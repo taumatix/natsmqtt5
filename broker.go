@@ -28,7 +28,9 @@ type Broker struct {
 	js     jetstream.JetStream
 	retain *retainedStore
 	// store is nil unless Options.PersistentSessions is set.
-	store  *sessionStore
+	store *sessionStore
+	// wills is nil unless Options.DurableWills is set; see willstore.go.
+	wills  *willStore
 	logger *slog.Logger
 
 	listener net.Listener
@@ -92,7 +94,7 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 		b.ownsNC = true
 	}
 
-	if !r.DisableRetained || r.PersistentSessions || r.OfflineQueue {
+	if !r.DisableRetained || r.PersistentSessions || r.OfflineQueue || r.DurableWills {
 		js, err := jetstream.New(b.nc)
 		if err != nil {
 			b.closeNATS()
@@ -133,7 +135,17 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 			return nil, fmt.Errorf("natsmqtt5: setting up the offline queue: %w", err)
 		}
 	}
+	if r.DurableWills {
+		var err error
+		if b.wills, err = newWillStore(ctx, b.js, b.nc, r, b.logger, b.publishAdoptedWill, b.shutdown); err != nil {
+			b.closeSessionStore()
+			b.closeRetain()
+			b.closeNATS()
+			return nil, fmt.Errorf("natsmqtt5: setting up the Will store: %w", err)
+		}
+	}
 	if err := b.listenForReauthorize(); err != nil {
+		b.closeWills()
 		b.closeSessionStore()
 		b.closeRetain()
 		b.closeNATS()
@@ -141,6 +153,7 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 	}
 	if err := b.listen(); err != nil {
 		b.stopReauthorize()
+		b.closeWills()
 		b.closeSessionStore()
 		b.closeRetain()
 		b.closeNATS()
@@ -245,6 +258,7 @@ func (b *Broker) Close() error {
 	b.wg.Wait()
 	// Explicitly, since a NATS connection the caller passed in is not drained.
 	b.stopReauthorize()
+	b.closeWills()
 	b.closeSessionStore()
 	b.closeRetain()
 	b.closeNATS()
@@ -293,6 +307,14 @@ func (b *Broker) closeSessionStore() {
 	if b.store != nil {
 		b.store.close()
 		b.store = nil
+	}
+}
+
+func (b *Broker) closeWills() {
+	// b.wills is not cleared: a delayed Will fires on shutdown and reads it
+	// without a lock, and a closed store answers with an error.
+	if b.wills != nil {
+		b.wills.close()
 	}
 }
 

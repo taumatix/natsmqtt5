@@ -11,6 +11,18 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+### Added
+
+- **The Will Message of a broker that was killed is now published.** `Options.DurableWills`
+  (`-durable-wills`, `NATSMQTT5_DURABLE_WILLS`) keeps the Will of every open connection in a
+  JetStream key-value bucket, `<StreamPrefix>_wills`. A surviving broker that finds the owner no
+  longer answering its liveness subject adopts the Will, waits out what is left of the Will Delay
+  Interval and publishes it; a client reconnecting inside the delay cancels it; exactly one broker
+  publishes, by a compare-and-swap on the record. `Options.WillCheckInterval` (`-will-check-interval`,
+  default 5s) bounds how long a dead broker's Wills go unnoticed. **It is off by default**: it
+  stores the Will's payload in clear text in that bucket, and it needs JetStream. Behaviour
+  without the option is unchanged. [MQTT-3.1.2-7], [MQTT-3.1.2-8], [MQTT-3.1.2-10], [MQTT-3.1.3-9].
+
 ### Fixed
 
 - **A session narrowed repeatedly no longer runs out of Packet Identifiers.** The identifier of a
