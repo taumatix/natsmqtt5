@@ -162,8 +162,10 @@ JetStream as soon as the PUBLISH is in flight, so from then on the message is th
 the client never comes back and the session ends, the message ends with it. For QoS 1 the spec
 says the Server SHOULD then send it to another member of the group (MQTT-5.0 §4.8.2). Doing it
 means keeping the JetStream message unacknowledged until the PUBACK (with `InProgress` to hold
-off redelivery), and handing it back to the group when the session expires. That needs the
-session expiry sweep from "Expiring a detached session that is never resumed".
+off redelivery), and handing it back to the group when the session expires. The
+session expiry sweep it needed now exists (`sessionsweep.go`); it calls the unexported
+`Broker.onSessionExpired` hook with the session and the subscriptions it held, which is where the
+hand-back goes.
 
 ## A shared subscription with no members keeps its backlog
 
@@ -317,27 +319,6 @@ narrowed permission into an outage and loses the filters that are still allowed.
 
 **Shape:** a User Property per dropped filter, and a line in the README saying
 it is this broker's own and not part of MQTT v5.
-
-## Expiring a detached session that is never resumed
-
-**Today:** a session whose client disconnects with a non-zero Session Expiry
-Interval keeps its NATS subscriptions on the broker that held it until either
-the client comes back or the broker stops. `session.expired` is only consulted
-on reconnect, so a workload that churns through Client Identifiers grows the
-broker's subscription set without bound. This predates persistent sessions and
-is not caused by them; the durable records now have a sweep and the in-memory
-sessions still do not.
-
-**Shape:** the same sweep the session store already runs, extended to walk
-`Broker.sessions` and discard the expired ones. It is a few lines; the work is
-in the test, which has to prove the NATS subscriptions actually go away.
-
-## A takeover in the middle of a stored-record resume is untested
-
-The restore path in `resumeSubscriptions` has the same ownership guard as SUBSCRIBE, but no test
-drives a takeover while a session is being restored from its stored record. It is covered by
-reasoning only. The technique in `displaced_ack_test.go` (Keep Alive 0, a held QoS 0 PUBLISH) can
-reach it.
 
 ## Tombstone accumulation in the retained stream
 

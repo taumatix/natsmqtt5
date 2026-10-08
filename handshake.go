@@ -209,6 +209,11 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 		if !restoredAway.IsZero() {
 			sess.markAwayRestored(restoredAway, rec.awayFromSeqWas, rec.deliveredWas)
 		}
+		sess.setUnrestored(stored)
+	} else if len(stored) == 0 {
+		// A session in memory that an earlier connection was still restoring when
+		// this one took it over: finish the job.
+		stored = sess.unrestoredSubscriptions()
 	}
 	if rec != nil {
 		c.claimGen = sess.bindRecord(rec, rev)
@@ -347,6 +352,7 @@ func (c *conn) resumeSubscriptions(ctx context.Context, stored []storedSubscript
 		c.refuse(packet.ImplementationSpecificError, "the stored subscriptions could not be confirmed with NATS")
 		return fmt.Errorf("confirming the restored subscriptions for %q: %w", c.sess.clientID, err)
 	}
+	c.sess.setUnrestored(nil)
 	if len(denied) > 0 {
 		// The messages a denied filter earned are in the in-flight set the
 		// record restored, and the retransmission after the CONNACK would hand

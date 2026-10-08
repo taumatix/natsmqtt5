@@ -350,6 +350,12 @@ By default a session lives in the broker process: a client reconnecting to the
 one reconnecting to a different broker, or after a restart, has to subscribe
 again.
 
+A session whose client never comes back is dropped once its Session Expiry Interval (capped by
+`MaxSessionExpiry`) has passed: a sweep, every `SessionSweepInterval` (default one minute),
+unsubscribes it from NATS and forgets it. A session can therefore outlive its interval by up to one
+sweep interval, never fall short of it, and a client that returns after the interval gets Session
+Present 0 whether or not the sweep has run.
+
 Turn that off with one setting:
 
 ```go

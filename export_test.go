@@ -14,6 +14,26 @@ func SetResendGate(b *Broker, f func(id uint16)) {
 	b.resendGate.Store(&f)
 }
 
+// SetSessionExpiredHook makes the session sweep call f with the Client
+// Identifier and the number of subscriptions of every session it expires. nil
+// removes it.
+func SetSessionExpiredHook(b *Broker, f func(clientID string, subscriptions int)) {
+	if f == nil {
+		b.onSessionExpired.Store(nil)
+		return
+	}
+	hook := func(s *session, subs []*subscription) { f(s.clientID, len(subs)) }
+	b.onSessionExpired.Store(&hook)
+}
+
+// SessionCount is the number of sessions the broker holds in memory, connected
+// or not.
+func SessionCount(b *Broker) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.sessions)
+}
+
 // InflightCount is the number of unacknowledged messages the broker holds for
 // clientID, for a test that must know an acknowledgement has been applied.
 func InflightCount(b *Broker, clientID string) int {

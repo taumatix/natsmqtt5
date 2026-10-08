@@ -163,6 +163,9 @@ type session struct {
 	conn *conn
 
 	subs map[string]*subscription
+	// unrestored is what a connection restoring the session from its stored
+	// record has yet to rebuild; see setUnrestored.
+	unrestored []storedSubscription
 
 	// nextPacketID cycles 1..65535 for broker-to-client packets
 	// (MQTT-5.0 §2.2.1).
@@ -370,6 +373,10 @@ func (s *session) takeOver() {
 func (s *session) expired() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.expiredLocked()
+}
+
+func (s *session) expiredLocked() bool {
 	switch {
 	case s.discarded:
 		return true
@@ -382,6 +389,46 @@ func (s *session) expired() bool {
 		return false
 	}
 	return time.Since(s.disconnectedAt) > time.Duration(s.expirySeconds)*time.Second
+}
+
+// claimForResume is the negation of expired for a CONNECT that is about to
+// resume the session: it decides and restarts the expiry clock in one step, so
+// the sweep cannot expire the session between the CONNECT deciding to resume it
+// and attaching to it. Restarting the clock lengthens the session by the time
+// the handshake takes, which [MQTT-3.1.2-23] allows: the session must live at
+// least as long as the interval, not at most.
+func (s *session) claimForResume() (resumable bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.expiredLocked() {
+		return false
+	}
+	if s.conn == nil {
+		s.disconnectedAt = time.Now()
+	}
+	return true
+}
+
+// expireIfDue discards a detached session whose Session Expiry Interval has
+// passed and returns the subscriptions it held, or ok false when it is not due.
+// Only a session that is disconnected, has a non-zero interval (an interval of 0
+// ends with the connection, in conn.finish) and has been disconnected for longer
+// than that interval is due [MQTT-3.1.2-23]. The NATS subscriptions are left
+// for the caller to tear down, outside the session's lock.
+func (s *session) expireIfDue() (subs []*subscription, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.discarded || s.conn != nil || s.disconnectedAt.IsZero() ||
+		s.expirySeconds == 0 || !s.expiredLocked() {
+		return nil, false
+	}
+	for _, sub := range s.subs {
+		sub.live.Store(false)
+		subs = append(subs, sub)
+	}
+	s.subs = make(map[string]*subscription)
+	s.discarded = true
+	return subs, true
 }
 
 // discard marks the session unusable and tears down its NATS subscriptions.
@@ -933,6 +980,27 @@ func (s *session) hasConn() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.conn != nil
+}
+
+// setUnrestored records the stored subscriptions a connection is about to
+// rebuild into this session, and nil once it has. A second CONNECT can take the
+// session over while the first is still restoring (the Authorizer call on a
+// resume has no bound), find a session in memory with only some of its filters
+// installed, and answer Session Present 1 for it; the filters not yet installed
+// are then lost, and the empty set is written back to the record. Keeping the
+// list here lets that connection finish the restore.
+func (s *session) setUnrestored(stored []storedSubscription) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.unrestored = stored
+}
+
+// unrestoredSubscriptions is the stored subscriptions a displaced connection did
+// not finish rebuilding; see setUnrestored.
+func (s *session) unrestoredSubscriptions() []storedSubscription {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.unrestored
 }
 
 // setPrincipal records who the connection now serving this session

@@ -253,6 +253,13 @@ type Options struct {
 	// MaxSessionExpiry caps a requested Session Expiry Interval. Defaults to
 	// DefaultMaxSessionExpiry.
 	MaxSessionExpiry time.Duration
+	// SessionSweepInterval is how often the broker discards detached sessions
+	// whose Session Expiry Interval has passed, tearing down their NATS
+	// subscriptions. A session therefore outlives its interval by up to this
+	// long, never less [MQTT-3.1.2-23]; a client that returns after the interval
+	// but before the sweep still gets Session Present 0. Defaults to
+	// DefaultSessionSweepInterval.
+	SessionSweepInterval time.Duration
 
 	// Logger receives broker events. Defaults to slog.Default().
 	Logger *slog.Logger
@@ -323,6 +330,9 @@ func (o Options) resolve() (*resolved, error) {
 	r.connectTimeout = o.ConnectTimeout
 	if r.connectTimeout == 0 {
 		r.connectTimeout = DefaultConnectTimeout
+	}
+	if r.SessionSweepInterval <= 0 {
+		r.SessionSweepInterval = DefaultSessionSweepInterval
 	}
 	r.maxSessionExpiry = o.MaxSessionExpiry
 	if r.maxSessionExpiry == 0 {
