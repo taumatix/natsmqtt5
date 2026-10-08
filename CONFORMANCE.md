@@ -50,6 +50,11 @@ conforming client hits in ordinary use:
 - **Fixed, unreleased.** A disconnected shared-subscription member kept receiving, and dropping,
   its share. QoS 1 and 2 work now goes only to connected members, through a backlog in the
   offline queue. [MQTT-4.5.0-1], [MQTT-4.1.0-2].
+- **Fixed, unreleased.** A shared member's unacknowledged QoS 1 message died with its session.
+  It now stays unacknowledged in the backlog until the PUBACK and goes to another member when the
+  session ends (the §4.8.2 SHOULD, which has no statement id). [MQTT-4.8.2-6] is held by the
+  same tests: a PUBACK with a Reason Code of 0x80 or more settles the message and nothing is
+  handed on.
 - **Fixed, unreleased.** A client that fell behind lost QoS 1 and 2 messages. With the queue
   on, it now catches up from the stream. [MQTT-4.1.0-1].
 - **Fixed, unreleased.** A connection that dropped while behind lost what was waiting for it, and

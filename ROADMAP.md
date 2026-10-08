@@ -155,17 +155,20 @@ has no client to refuse to. Whether a published Will should wait for the flush i
 
 # Tier 3: SHOULD statements
 
-## A shared member's unacknowledged QoS 1 message dies with its session
+## A held shared message: the killed-broker window and the missing cap
 
-A shared subscription's backlog (`shared.go`) hands a message to a member and acknowledges it to
-JetStream as soon as the PUBLISH is in flight, so from then on the message is that session's. If
-the client never comes back and the session ends, the message ends with it. For QoS 1 the spec
-says the Server SHOULD then send it to another member of the group (MQTT-5.0 §4.8.2). Doing it
-means keeping the JetStream message unacknowledged until the PUBACK (with `InProgress` to hold
-off redelivery), and handing it back to the group when the session expires. The
-session expiry sweep it needed now exists (`sessionsweep.go`); it calls the unexported
-`Broker.onSessionExpired` hook with the session and the subscriptions it held, which is where the
-hand-back goes.
+A shared member's QoS 1 message now stays unacknowledged in JetStream until its PUBACK
+(`held.go`), kept alive by an `InProgress` every third of `sharedAckWait`, and goes back to the
+group when the session ends. Two edges remain, neither covered by a test:
+
+- A broker that is killed stops sending the keepalive, so after `sharedAckWait` (30 s) the
+  message returns to the group even though the session record may be restored elsewhere with the
+  message in flight. The restored session then settles an acknowledgement JetStream no longer
+  expects, and the client can see the message twice (the restored copy with Dup=1, a fresh one
+  from the other member). That is at-least-once, which QoS 1 allows, but nothing pins it.
+- A connected member that never PUBACKs holds the message for as long as the connection lives,
+  because the keepalive does not look at progress. A hold cap (a deadline after which the message
+  is handed back and the packet identifier withdrawn) would bound it.
 
 ## A shared subscription with no members keeps its backlog
 

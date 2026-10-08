@@ -41,8 +41,8 @@ type Broker struct {
 
 	// onSessionExpired, when set, is called after the sweep has expired a
 	// detached session, with the subscriptions it held (already torn down). It
-	// is the seam for handing a shared member's unacknowledged messages back to
-	// its group, which is a later change; see ROADMAP.md.
+	// is a seam for tests. Handing a shared member's unacknowledged messages
+	// back to its group is done by the sweep itself; see held.go.
 	onSessionExpired atomic.Pointer[func(s *session, subs []*subscription)]
 
 	mu       sync.Mutex
@@ -167,6 +167,10 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 	}
 	b.wg.Add(1)
 	go b.sweepSessionsLoop(r.SessionSweepInterval)
+	if b.queue != nil {
+		b.wg.Add(1)
+		go b.holdLoop()
+	}
 	return b, nil
 }
 

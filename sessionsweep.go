@@ -51,6 +51,7 @@ func (b *Broker) sweepSessions() int {
 			continue
 		}
 		expired++
+		s.handBackHeld()
 		b.mu.Lock()
 		if cur, held := b.sessions[s.clientID]; held && cur == s {
 			delete(b.sessions, s.clientID)

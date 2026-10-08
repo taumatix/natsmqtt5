@@ -85,6 +85,11 @@ type outbound struct {
 	// socket) leaves resentOn's client owing an acknowledgement for the copy
 	// it was sent; see completeInflight.
 	resentOn *conn
+	// ackSubject is the JetStream acknowledgement subject of the message a
+	// shared subscription's member was given, still unacknowledged to the group's
+	// backlog: acknowledged when this entry completes, handed back to the group
+	// when the session ends with the entry in flight. Empty for any other.
+	ackSubject string
 }
 
 // forgetStaleWithdrawals drops the withdrawn identifiers whose acknowledgement
@@ -149,6 +154,11 @@ type withdrawal struct {
 // that mirror.
 type session struct {
 	clientID string
+	// holds acknowledges, or hands back to its group, the shared-subscription
+	// backlog messages the in-flight entries carry; see outbound.ackSubject. Set
+	// when the session is made, before anything else can reach it; nil in a
+	// session that has no backlog, which is every one in a unit test.
+	holds    holdSink
 	identity string
 	username string
 
@@ -431,7 +441,8 @@ func (s *session) expireIfDue() (subs []*subscription, ok bool) {
 	return subs, true
 }
 
-// discard marks the session unusable and tears down its NATS subscriptions.
+// discard marks the session unusable and tears down its NATS subscriptions. The
+// shared-subscription messages it still held go back to their groups.
 func (s *session) discard() {
 	s.mu.Lock()
 	subs := s.subs
@@ -442,6 +453,49 @@ func (s *session) discard() {
 	for _, sub := range subs {
 		unsubscribeAll(sub)
 	}
+	s.handBackHeld()
+}
+
+// handBackHeld gives the shared subscriptions' backlogs back the messages the
+// in-flight set holds for them, because the session that was given them has
+// ended or no longer wants them. The group's other members can have them now:
+// "If the Client's Session terminates before the Client reconnects, the Server
+// SHOULD send the Application Message to another Client that is subscribed to
+// the same Shared Subscription" (MQTT-5.0 §4.8.2).
+func (s *session) handBackHeld() {
+	s.mu.Lock()
+	var held []string
+	for _, o := range s.inflight {
+		if o.ackSubject != "" {
+			held = append(held, o.ackSubject)
+			o.ackSubject = ""
+		}
+	}
+	s.mu.Unlock()
+	if len(held) > 0 && s.holds != nil {
+		s.holds.handBack(held)
+	}
+}
+
+// heldSubjects lists the acknowledgement subjects of the backlog messages the
+// session is holding, for holdLoop.
+func (s *session) heldSubjects() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var held []string
+	for _, o := range s.inflight {
+		if o.ackSubject != "" {
+			held = append(held, o.ackSubject)
+		}
+	}
+	return held
+}
+
+// holdSink is where a session's backlog messages go: acknowledged when the
+// client has acknowledged them, handed back to the group when it will not.
+type holdSink interface {
+	ack(subject string)
+	handBack(subjects []string)
 }
 
 func unsubscribeAll(sub *subscription) {
@@ -560,7 +614,19 @@ func (s *session) awaitPubcomp(id uint16) {
 }
 
 // completeInflight removes the entry for id and reports whether one existed.
+// The entry's backlog message, if it has one, is acknowledged to its group: the
+// exchange is over, however it ended. That includes a PUBACK carrying a Reason
+// Code of 0x80 or greater, after which the message must not be sent to any
+// other subscriber [MQTT-4.8.2-6].
 func (s *session) completeInflight(c *conn, id uint16) (outbound, bool) {
+	done, ok := s.completeInflightLocked(c, id)
+	if ok && done.ackSubject != "" && s.holds != nil {
+		s.holds.ack(done.ackSubject)
+	}
+	return done, ok
+}
+
+func (s *session) completeInflightLocked(c *conn, id uint16) (outbound, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	o, ok := s.inflight[id]
@@ -624,6 +690,17 @@ func (s *session) inflightEntry(id uint16) (outbound, bool) {
 // quota. From Broker.Reauthorize, on a live connection, an entry may hold one,
 // and the withdrawal records it so the acknowledgement still returns it.
 func (s *session) withdrawInflight(denied, surviving []string) []uint16 {
+	var handBack []string
+	taken := s.withdrawInflightLocked(denied, surviving, &handBack)
+	if len(handBack) > 0 && s.holds != nil {
+		// What was withdrawn is no longer this session's: the group's other
+		// members can have it (MQTT-5.0 §4.8.2).
+		s.holds.handBack(handBack)
+	}
+	return taken
+}
+
+func (s *session) withdrawInflightLocked(denied, surviving []string, handBack *[]string) []uint16 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -637,6 +714,9 @@ func (s *session) withdrawInflight(denied, surviving []string) []uint16 {
 			continue
 		}
 		delete(s.inflight, id)
+		if o.ackSubject != "" {
+			*handBack = append(*handBack, o.ackSubject)
+		}
 		w := withdrawal{madeAt: s.attaches, owed: owedAck(o)}
 		if o.quotaHeld {
 			// Only on a live connection: attach clears every claim at the
@@ -1108,6 +1188,7 @@ func (s *session) inflightState() (inflight []storedInflight, received []uint16,
 			st.Rel = true
 		case o.queueSeq != 0:
 			st.Seq = o.queueSeq
+			st.Ack = o.ackSubject
 			st.Retain = o.publish.Retain
 			if p := o.publish.Properties; p != nil && len(p.SubscriptionIdentifiers) > 0 {
 				st.SubID = p.SubscriptionIdentifiers[0]

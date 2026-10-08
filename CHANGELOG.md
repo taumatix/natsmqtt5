@@ -13,6 +13,13 @@ honestly be reconstructed now.
 
 ### Added
 
+- **A shared member's unacknowledged QoS 1 message goes to another member.** The broker keeps the
+  message unacknowledged in JetStream until the member's PUBACK, holding off redelivery while the
+  member is connected, and hands it back to the group when the member's session ends: expiry,
+  a Session Expiry Interval 0 disconnect, a Clean Start takeover, or a restored session that may
+  not resume the subscription. A member that PUBACKs is never redelivered to. [MQTT-4.8.2-6]
+  stays as it was; this is the MQTT 5.0 §4.8.2 SHOULD.
+
 - **A PUBACK or PUBREC that means the message is safe, opt in.** `Options.DurablePublish`
   (`-durable-publish`, `NATSMQTT5_DURABLE_PUBLISH`) makes the broker acknowledge a QoS 1 or 2
   PUBLISH only once JetStream has stored the queue's copy and the NATS server has confirmed the live

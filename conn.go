@@ -47,6 +47,18 @@ type delivery struct {
 	// quotaHeld is set when the send-quota slot for this delivery was taken
 	// before it was queued, as a shared-subscription puller does.
 	quotaHeld bool
+	// ackSubject is the JetStream acknowledgement subject of the backlog message
+	// a shared subscription's member pulled, which the in-flight entry carries
+	// until the PUBACK; empty for anything else. held reports, once deliver has
+	// returned, that the entry now carries it.
+	ackSubject string
+	held       bool
+	// recordSeq is the queue sequence of a shared subscription's message, which
+	// the session record keeps so that a restored session can send it again. It
+	// is not seq, because a delivery with a seq is one the replay of the offline
+	// queue has to account for (see session.noteDelivered), and the backlog
+	// delivers its messages without it.
+	recordSeq uint64
 }
 
 // conn is one MQTT network connection and the state that belongs to it rather

@@ -488,7 +488,8 @@ func (c *conn) deliver(d *delivery) error {
 	}
 	pub.PacketID = id
 	c.sess.trackInflight(&outbound{packetID: id, qos: d.qos, publish: pub, quotaHeld: true,
-		arrived: d.arrived, expiry: d.expiry, queueSeq: d.seq})
+		arrived: d.arrived, expiry: d.expiry, queueSeq: max(d.seq, d.recordSeq), ackSubject: d.ackSubject})
+	d.held = d.ackSubject != ""
 	if d.id != "" && c.broker.queue != nil {
 		// Delivered, or discarded as too large, which counts as delivered
 		// [MQTT-3.1.2-25]: either way a replay must not send it again. Noted
@@ -507,6 +508,7 @@ func (c *conn) deliver(d *delivery) error {
 		// exchange ends here, rather than holding a Packet Identifier and a
 		// send-quota slot until the session does.
 		c.sess.completeInflight(c, id)
+		d.held = false
 		c.releaseQuota()
 	}
 	return nil

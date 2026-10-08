@@ -167,6 +167,11 @@ type storedInflight struct {
 	// and the Subscription Identifier of the filter that earned the message.
 	Retain bool `json:",omitempty"`
 	SubID  int  `json:",omitempty"`
+	// Ack is the acknowledgement subject of the shared-subscription backlog
+	// message this entry stands for, so that the broker that restores the session
+	// acknowledges, holds or hands back the very message the previous one was
+	// holding.
+	Ack string `json:",omitempty"`
 }
 
 // storedDelivered is a delivered message's id and the queue sequence of its
