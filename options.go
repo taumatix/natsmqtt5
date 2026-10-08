@@ -170,6 +170,12 @@ type Options struct {
 	// WillCheckInterval is how often a broker looks for Wills whose owner has
 	// gone, with DurableWills. It bounds how long after a broker's death its
 	// clients' Wills wait to be noticed. Defaults to 5 seconds.
+	//
+	// It also sets the patience of a broker that loses NATS: one that cannot
+	// reach it for twice this interval closes its client connections, and a
+	// survivor waits about 4.5 intervals (plus the liveness ping timeout) before
+	// adopting a silent broker's Wills, so a Will is never published while its
+	// client's connection is open.
 	WillCheckInterval time.Duration
 
 	// OfflineQueue requires the offline queue, so a broker that cannot set it

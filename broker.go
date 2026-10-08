@@ -148,7 +148,7 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 	}
 	if r.DurableWills {
 		var err error
-		if b.wills, err = newWillStore(ctx, b.js, b.nc, r, b.logger, b.publishAdoptedWill, b.shutdown); err != nil {
+		if b.wills, err = newWillStore(ctx, b.js, b.nc, r, b.logger, b.publishAdoptedWill, b.fenceConns, b.shutdown); err != nil {
 			b.closeSessionStore()
 			b.closeRetain()
 			b.closeNATS()
@@ -317,6 +317,21 @@ func (b *Broker) drainConns() {
 
 	for _, c := range conns {
 		c.shutdown(packet.ServerShuttingDown, "broker shutting down")
+	}
+}
+
+// fenceConns closes every client connection without a DISCONNECT, for a broker
+// that has lost the cluster. Closing the socket is the one thing that does not
+// depend on NATS.
+func (b *Broker) fenceConns() {
+	b.mu.Lock()
+	conns := make([]*conn, 0, len(b.conns))
+	for c := range b.conns {
+		conns = append(conns, c)
+	}
+	b.mu.Unlock()
+	for _, c := range conns {
+		_ = c.nc.Close()
 	}
 }
 

@@ -102,6 +102,10 @@ conforming client hits in ordinary use:
   session cancels the displaced connection's Will, the displaced connection's end cannot take the new
   one's, and a replaced Will leaves no stored record (`will_ownership_test.go`). A clean-start takeover
   publishes the old Will, as the session ends. [MQTT-3.1.2-8], [MQTT-3.1.2-10], [MQTT-3.1.3-9].
+- **Fixed, unreleased.** With `DurableWills`, a broker cut off from NATS closes its clients' sockets
+  after twice `WillCheckInterval`, and a survivor publishes a silent broker's Wills only after that has
+  had time to happen, so a Will is not published while its client is connected
+  (`nats_partition_test.go`, a real broker behind a TCP proxy that stops forwarding). [MQTT-3.1.2-8].
 - **Fixed, unreleased.** A message whose live copy reaches the broker after the subscriber's connection
   ended is still sent on resume, however long the copy was delayed, on the same broker and on a broker
   that restores the session from its record (`late_live_copy_delay_test.go`). Not covered: a copy that
