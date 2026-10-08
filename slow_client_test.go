@@ -159,17 +159,23 @@ func TestCatchingUpWithSeveralPublishersDeliversEachOnce(t *testing.T) {
 	assert.Len(t, seen, publishers*each)
 }
 
-// readInOrderAfterResume is readInOrder for the first read after a resume, when
-// the broker may legitimately resend the last message the client acknowledged
-// before the network failed, because the PUBACK did not reach it
-// [MQTT-4.4.0-1]. The copy is accepted only as such: DUP set. Anything else
-// out of order fails, saying what was sent.
-func (c *rawClient) readInOrderAfterResume(maybeResent string, want []string) {
+// readInOrderAfterResume is readInOrder for the first reads after a resume,
+// when the broker may legitimately resend messages the client acknowledged just
+// before the network failed, because those PUBACKs did not reach it
+// [MQTT-4.4.0-1]: a client that closes a socket with data still unread can lose
+// what it sent last. Such a copy is accepted only as a copy: payload among
+// `acked`, DUP set [MQTT-3.3.1-1]. Anything else out of order fails, saying
+// what was sent.
+func (c *rawClient) readInOrderAfterResume(acked, want []string) {
 	c.t.Helper()
+	known := map[string]bool{}
+	for _, a := range acked {
+		known[a] = true
+	}
 	for i, w := range want {
 		p := c.expectPublish()
-		if i == 0 && string(p.Payload) == maybeResent {
-			require.True(c.t, p.Dup, "%s came again without DUP (Packet Identifier %d)", maybeResent, p.PacketID)
+		for i == 0 && known[string(p.Payload)] {
+			require.True(c.t, p.Dup, "%s was acknowledged and came again without DUP (Packet Identifier %d)", p.Payload, p.PacketID)
 			c.send(&packet.Puback{Ack: packet.Ack{PacketID: p.PacketID}})
 			p = c.expectPublish()
 		}

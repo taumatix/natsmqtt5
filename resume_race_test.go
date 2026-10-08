@@ -11,18 +11,17 @@ import (
 // A client acknowledges what it has read and its network fails at once; the
 // broker has been sending more, up to the client's Receive Maximum. On the
 // resume "both the Client and Server MUST resend any unacknowledged PUBLISH
-// packets" [MQTT-4.4.0-1], so the first thing it sends is the oldest message
-// the client has not acknowledged: not one it did acknowledge, and not a later
-// one with that message skipped.
+// packets" [MQTT-4.4.0-1], so what comes first is the oldest message the broker
+// holds unacknowledged, resent with DUP [MQTT-3.3.1-1]. That can be a message
+// the client did acknowledge (its PUBACK may not have been read before the old
+// connection was closed; on Linux CI messages 6 to 9 came again that way), but
+// never a message skipped.
 //
-// The broker used to take its snapshot of the unacknowledged messages while the
-// dropped connection was still ending. With one scheduler thread that is common:
-// the new CONNECT is handled before the old connection's reader has decoded the
-// last PUBACK (so an acknowledged message came again, which is the failure the
-// resume-replay test showed once on CI), or before its delivery goroutine has
-// tracked the message it was sending (so that one was skipped until the next
-// resume). Pinned to one thread here, each of these fails about one run in
-// twenty before the fix.
+// The skip was a broker bug: it took its snapshot of the unacknowledged
+// messages while the dropped connection's delivery goroutine could still send
+// and track one more, so that message was in neither the resend nor the replay
+// until the next resume. Pinned to one scheduler thread, about one round in
+// twenty failed with the first message missing before the fix.
 func TestAResumeAfterADropNeitherRepeatsNorSkipsWhatTheLastConnectionHandled(t *testing.T) {
 	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
 	addr := startBroker(t, startNATS(t))
@@ -40,7 +39,7 @@ func TestAResumeAfterADropNeitherRepeatsNorSkipsWhatTheLastConnectionHandled(t *
 		slow.drop()
 
 		back := resume(t, addr, id, 5)
-		back.readInOrder(sequence(read, window))
+		back.readInOrderAfterResume(sequence(0, read), sequence(read, window))
 		back.drop()
 	}
 }
