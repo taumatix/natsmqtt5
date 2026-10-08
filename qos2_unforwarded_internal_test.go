@@ -14,15 +14,15 @@ import (
 func TestAReceivedQoS2IdentifierIsStoredOnlyOnceItsMessageIsForwarded(t *testing.T) {
 	s := newSession("fwd")
 	assert.False(t, s.markQoS2Received(7))
-	_, received, _ := s.inflightState()
+	_, received, _, _ := s.inflightState(nil)
 	assert.Empty(t, received, "not forwarded yet")
 
 	s.qos2Forwarded(7)
-	_, received, _ = s.inflightState()
+	_, received, _, _ = s.inflightState(nil)
 	assert.Equal(t, []uint16{7}, received)
 
 	assert.True(t, s.markQoS2Received(7), "a repeat")
 	assert.True(t, s.releaseQoS2(7))
-	_, received, _ = s.inflightState()
+	_, received, _, _ = s.inflightState(nil)
 	assert.Empty(t, received)
 }

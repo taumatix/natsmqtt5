@@ -413,8 +413,11 @@ What it costs and what it does not cover:
   forwarding it twice. A message that expired in the meantime is dropped. Limits:
   a message with a copy in the offline queue is read back from it; one with none
   (retained, or with the queue off) travels in the record as its encoded PUBLISH
-  when that is 16 KiB or less, and a larger one, or one whose queue copy has aged
-  out, is logged and not resent; a broker killed outright leaves what its connections last checkpointed
+  when that is 16 KiB or less, and a larger one is written to the `<StreamPrefix>_inflight`
+  bucket (named by the SHA-256 of the PUBLISH, created on first use, aged out after twice the
+  maximum Session Expiry Interval) and read back by the broker that restores the session. One whose
+  queue copy has aged out, or whose PUBLISH exceeds seven eighths of the server's `max_payload`,
+  is logged and not resent; a broker killed outright leaves what its connections last checkpointed
   (`-session-checkpoint-interval`, one second): a QoS 1 message sent or
   acknowledged in that last interval is not (or no longer) in the record and is sent
   again, while a QoS 2 message is recorded before each packet that moves its exchange on;

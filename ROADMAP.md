@@ -9,15 +9,17 @@ today and cites the statements it violates.
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
-## In-flight messages with no queue copy and a payload over 16 KiB are not restored
+## An in-flight PUBLISH over seven eighths of max_payload is not restored
 
-**Today:** an unacknowledged message with no offline-queue sequence (a retained message sent on
-subscribing, or any with the queue off) is kept in the session record as its encoded PUBLISH, up to
-16 KiB. A larger one is logged and not resent by a restored session. [MQTT-4.4.0-1].
+**Today:** an unacknowledged message with no queue copy whose encoded PUBLISH is over 16 KiB is kept in
+the `<StreamPrefix>_inflight` bucket. One over seven eighths of the server's `max_payload` (the
+`valueLimit` that bounds a record) is still logged and not resent. Payloads age out after twice the
+maximum Session Expiry Interval and are rewritten while a session holds them; nothing deletes one when
+the session completes the message. [MQTT-4.4.0-1].
 
-**Shape:** keep the payload in a stream of its own (or the retained stream, by sequence) and the
-sequence in the record, so the record stays within `max_payload`. Needs a test with a 100 KiB
-retained payload and a SIGKILL.
+**Shape:** raise the payload bucket's limit to `max_payload` less the headers (a retained message
+cannot be larger), and delete a payload when its in-flight entry completes (the key
+covers the Packet Identifier, so it is usually one session's alone). Test with a retained payload just under `max_payload` and a SIGKILL.
 
 ## Negative assertions that wait a fixed 200 ms for a live copy
 

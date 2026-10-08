@@ -2,11 +2,14 @@ package natsmqtt5
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -178,15 +181,20 @@ type storedInflight struct {
 	// kept here when it is small (maxStoredPublish). At is when the broker took
 	// the message in and Exp the Message Expiry Interval it arrived with, which
 	// a resend counts down from.
-	Pub []byte    `json:",omitempty"`
-	At  time.Time `json:",omitempty"`
-	Exp *uint32   `json:",omitempty"`
+	Pub []byte `json:",omitempty"`
+	// Blob names the PUBLISH in the payload bucket (sessionStore.putBlob) when it
+	// is too large for Pub: the record keeps the key and the payload stays out of
+	// it, so the record remains within a value. At and Exp are as for Pub.
+	Blob string    `json:",omitempty"`
+	At   time.Time `json:",omitempty"`
+	Exp  *uint32   `json:",omitempty"`
 }
 
-// maxStoredPublish is the largest PUBLISH kept in a session record for a
+// maxStoredPublish is the largest PUBLISH kept inside a session record for a
 // message with no queue copy. The record is rewritten while the session moves,
-// and a value holds about a megabyte, so a big payload is left out (and logged)
-// rather than squeezing the rest of the record out.
+// and a value holds about a megabyte, so a bigger one is kept in the payload
+// bucket instead (storedInflight.Blob) rather than squeezing the rest of the
+// record out.
 const maxStoredPublish = 16 << 10
 
 // storedDelivered is a delivered message's id and the queue sequence of its
@@ -222,9 +230,19 @@ func (r *sessionRecord) resumable(now time.Time) bool {
 // Client Identifier exactly one wins; the loser's client is disconnected with
 // 0x8E instead of being served in parallel.
 type sessionStore struct {
-	kv     jetstream.KeyValue
-	nc     *nats.Conn
-	logger *slog.Logger
+	kv jetstream.KeyValue
+	// blobs holds the PUBLISH of an in-flight message that has no queue copy and
+	// is too large for the record, under the digest of its encoding. Values are
+	// immutable and shared by every session that holds the same message; they
+	// age out on their own (blobTTL) and are refreshed while a session needs them.
+	js           jetstream.JetStream
+	blobMu       sync.Mutex
+	blobs        jetstream.KeyValue
+	blobStorage  jetstream.StorageType
+	blobReplicas int
+	blobName     string
+	nc           *nats.Conn
+	logger       *slog.Logger
 	// maxSessionExpiry is how long a record owned by an unreachable broker is
 	// kept before the sweep may reclaim it.
 	maxSessionExpiry time.Duration
@@ -266,6 +284,10 @@ func newSessionStore(ctx context.Context, js jetstream.JetStream, nc *nats.Conn,
 	owner := nuid.Next()
 	s := &sessionStore{
 		kv:               kv,
+		js:               js,
+		blobName:         opts.StreamPrefix + "_inflight",
+		blobStorage:      opts.SessionStorage,
+		blobReplicas:     opts.SessionReplicas,
 		nc:               nc,
 		logger:           logger.With("session_bucket", bucket, "broker_instance", owner),
 		maxSessionExpiry: opts.maxSessionExpiry,
@@ -489,6 +511,81 @@ func (s *sessionStore) release(ctx context.Context, rec *sessionRecord, rev uint
 		return rev, fmt.Errorf("%w: %v", errLostSession, err)
 	}
 	return newRev, nil
+}
+
+// blobTTL is how long a stored payload outlives its last write. A session is
+// resumable for at most maxSessionExpiry after it is released, and the payload
+// is rewritten once it is older than a quarter of the TTL (blobStale), so one
+// that a session still needs has at least maxSessionExpiry left when the
+// session is released.
+func blobTTL(maxSessionExpiry time.Duration) time.Duration { return 2 * maxSessionExpiry }
+
+// blobStale reports whether a payload written at t is due to be written again.
+func (s *sessionStore) blobStale(t time.Time) bool {
+	return t.IsZero() || time.Since(t) > blobTTL(s.maxSessionExpiry)/4
+}
+
+// blobBucket is the payload bucket, created on the first payload that needs it
+// so that a broker which never sees one needs no more of JetStream than it ever
+// did. Reading it never creates it.
+func (s *sessionStore) blobBucket(ctx context.Context, create bool) (jetstream.KeyValue, error) {
+	s.blobMu.Lock()
+	defer s.blobMu.Unlock()
+	if s.blobs != nil {
+		return s.blobs, nil
+	}
+	var kv jetstream.KeyValue
+	var err error
+	if create {
+		kv, err = s.js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
+			Bucket:      s.blobName,
+			Description: "Payloads of unacknowledged MQTT v5 messages too large for a session record, held by natsmqtt5",
+			Storage:     s.blobStorage,
+			Replicas:    s.blobReplicas,
+			History:     1,
+			TTL:         blobTTL(s.maxSessionExpiry),
+		})
+	} else {
+		kv, err = s.js.KeyValue(ctx, s.blobName)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("opening key-value bucket %s: %w", s.blobName, err)
+	}
+	s.blobs = kv
+	return kv, nil
+}
+
+// putBlob keeps raw in the payload bucket and returns its key, the digest of
+// raw. Writing the same bytes again refreshes their age.
+func (s *sessionStore) putBlob(ctx context.Context, raw []byte) (string, error) {
+	kv, err := s.blobBucket(ctx, true)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	key := hex.EncodeToString(sum[:])
+	if _, err := kv.Put(ctx, key, raw); err != nil {
+		return "", err
+	}
+	return key, nil
+}
+
+// getBlob reads a payload back, verified against its key so that a truncated
+// or foreign value is never resent as the message.
+func (s *sessionStore) getBlob(ctx context.Context, key string) ([]byte, error) {
+	kv, err := s.blobBucket(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	e, err := kv.Get(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	raw := e.Value()
+	if sum := sha256.Sum256(raw); hex.EncodeToString(sum[:]) != key {
+		return nil, fmt.Errorf("stored payload does not match its key %s", key)
+	}
+	return raw, nil
 }
 
 // valueLimit is the largest session record a release writes. A key-value value

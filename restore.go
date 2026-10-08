@@ -81,6 +81,15 @@ func (b *Broker) restoreEntry(ctx context.Context, clientID string, st storedInf
 		// that is owed [MQTT-4.3.3-8]. There is no payload to fetch.
 		return &outbound{packetID: st.ID, qos: packet.QoS2, awaitingPubcomp: true, publish: &packet.Publish{}}
 	}
+	if st.Blob != "" && b.store != nil {
+		raw, err := b.store.getBlob(ctx, st.Blob)
+		if err != nil {
+			b.logger.Warn("the stored payload of an unacknowledged message could not be read",
+				"client_id", clientID, "packet_id", st.ID, "error", err)
+			return nil
+		}
+		st.Pub = raw
+	}
 	if len(st.Pub) > 0 {
 		return restoreStoredPublish(st)
 	}

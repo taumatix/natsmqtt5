@@ -126,9 +126,11 @@ func TestWithoutTheOfflineQueueARestoredSessionResendsFromTheRecord(t *testing.T
 	}
 }
 
-// A payload too large to keep in a session record is the boundary the record
-// states: it is logged and not resent, and the rest of the record is intact.
-func TestWithoutTheOfflineQueueAPayloadTooLargeForTheRecordIsNotResent(t *testing.T) {
+// [MQTT-4.4.0-1]: a payload too large to keep in a session record is kept beside
+// it, so with the offline queue off the broker that restores the session still
+// resends the message, with the small one after it in the order they were sent
+// [MQTT-4.6.0-5].
+func TestWithoutTheOfflineQueueAPayloadTooLargeForTheRecordIsStillResent(t *testing.T) {
 	natsURL := startNATS(t)
 	noQueue := func(o *natsmqtt5.Options) { o.PersistentSessions, o.DisableOfflineQueue = true, true }
 	addrA, stopA := startStoppableBroker(t, natsURL, noQueue)
@@ -138,9 +140,11 @@ func TestWithoutTheOfflineQueueAPayloadTooLargeForTheRecordIsNotResent(t *testin
 	c.connect(rawConnect("restore-big", 300))
 	c.subscribe("rs/big/#", packet.QoS1)
 	pub, _ := connectClient(t, addrA, connectOpts("pub-restore-big"))
-	pub.publish(&paho.Publish{Topic: "rs/big/large", QoS: 1, Payload: bytes.Repeat([]byte("x"), 32<<10)})
+	large := bytes.Repeat([]byte("x"), 32<<10)
+	pub.publish(&paho.Publish{Topic: "rs/big/large", QoS: 1, Payload: large})
 	pub.publish(&paho.Publish{Topic: "rs/big/small", QoS: 1, Payload: []byte("small")})
-	require.Equal(t, "rs/big/large", c.expectPublish().Topic)
+	first := c.expectPublish()
+	require.Equal(t, "rs/big/large", first.Topic)
 	small := c.expectPublish()
 	c.drop()
 	time.Sleep(100 * time.Millisecond)
@@ -149,6 +153,10 @@ func TestWithoutTheOfflineQueueAPayloadTooLargeForTheRecordIsNotResent(t *testin
 	back := dialRaw(t, addrB)
 	require.True(t, back.connect(rawConnect("restore-big", 300)).SessionPresent)
 	got := back.expectPublish()
+	assert.Equal(t, first.PacketID, got.PacketID)
+	assert.Equal(t, large, got.Payload)
+	assert.True(t, got.Dup)
+	got = back.expectPublish()
 	assert.Equal(t, small.PacketID, got.PacketID)
 	assert.Equal(t, "small", string(got.Payload))
 	back.expectNothing()

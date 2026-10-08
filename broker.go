@@ -470,11 +470,18 @@ func (b *Broker) releaseStoredSession(c *conn) {
 	// What the client has not acknowledged, and what it sent that is not yet
 	// released, so a broker that restores the session can resend and dedupe
 	// [MQTT-4.4.0-1], [MQTT-4.3.3-10].
+	var pending []pendingBlob
 	var unrecorded int
-	rec.Inflight, rec.ReceivedQoS2, unrecorded = s.inflightState()
+	rec.Inflight, rec.ReceivedQoS2, unrecorded, pending = s.inflightState(b.store)
+	stashed, err := s.stashBlobs(b.store, rec, pending)
+	if err != nil {
+		b.logger.Warn("could not store the payload of an unacknowledged message beside the session record",
+			"client_id", s.clientID, "error", err)
+	}
+	unrecorded += stashed
 	if unrecorded > 0 {
 		b.logger.Warn("unacknowledged messages with no copy in the offline queue and a PUBLISH too large "+
-			"for the session record are not kept in it, so a restored session will not resend them",
+			"for the payload bucket are not kept, so a restored session will not resend them",
 			"client_id", s.clientID, "count", unrecorded)
 	}
 	if cutInflight, cutQoS2 := fitRecord(rec, b.store.valueLimit()); cutInflight+cutQoS2 > 0 {

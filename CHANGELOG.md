@@ -11,6 +11,13 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed, unreleased.** With `PersistentSessions`, an unacknowledged message with no copy in the offline
+  queue (a retained message, or any with the queue off) and a PUBLISH over 16 KiB was not resent by the
+  broker that restored the session. The PUBLISH is now written to a bucket of its own
+  (`<StreamPrefix>_inflight`, created on first use) and the session record names it, so the record stays within `max_payload`
+  and the message is resent with its original Packet Identifier and DUP 1 [MQTT-4.4.0-1]. Proved with a
+  real SIGKILL and a 100 KiB retained message at QoS 1 and QoS 2 (`oversize_inflight_test.go`). The new
+  bucket is created on first use; a broker that predates it ignores the record's new field.
 - **Fixed, unreleased.** A QoS 2 message delivered to a client in the last second before its broker
   was killed outright was delivered again as a new message by the broker that took the session over.
   The session record is now written before the PUBLISH goes out and before the PUBREL does, so a kill

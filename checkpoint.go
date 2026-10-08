@@ -216,7 +216,7 @@ func (b *Broker) checkpointSession(c *conn) error {
 	mark := &c.cpMark
 	activity := c.activity.Load()
 	pos := c.livePosition()
-	if mark.written && activity == mark.activity && pos.fromSeq == mark.fromSeq {
+	if mark.written && activity == mark.activity && pos.fromSeq == mark.fromSeq && !s.blobsStale(b.store) {
 		return nil
 	}
 
@@ -239,7 +239,13 @@ func (b *Broker) checkpointSession(c *conn) error {
 	// released, for a successor that finds this broker dead [MQTT-4.4.0-1],
 	// [MQTT-4.3.3-10]. The release logs what it cannot keep; a checkpoint every
 	// interval would repeat it, so it does not.
-	rec.Inflight, rec.ReceivedQoS2, _ = s.inflightState()
+	var pending []pendingBlob
+	rec.Inflight, rec.ReceivedQoS2, _, pending = s.inflightState(b.store)
+	notStored, err := s.stashBlobs(b.store, rec, pending)
+	if err != nil {
+		b.logger.Warn("could not store the payload of an unacknowledged message beside the session record",
+			"client_id", s.clientID, "error", err)
+	}
 	fitRecord(rec, b.store.valueLimit())
 
 	ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
@@ -254,6 +260,12 @@ func (b *Broker) checkpointSession(c *conn) error {
 		return err
 	}
 	s.commitRecord(c.claimGen, rec, newRev)
+	if notStored > 0 {
+		// The record is written without them; the next tick tries again rather
+		// than treating the state as recorded.
+		*mark = checkpointMark{}
+		return nil
+	}
 	*mark = checkpointMark{activity: activity, fromSeq: pos.fromSeq, written: true}
 	return nil
 }
