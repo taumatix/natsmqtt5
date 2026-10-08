@@ -11,7 +11,13 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
-- **Fixed, unreleased.** A client whose Maximum Packet Size was under 24 bytes (the success CONNACK
+## [0.11.1] - 2026-10-09
+
+A patch release: every entry is a fix, there is no API change, and the Go floor is unchanged. One
+behaviour to know before upgrading: with `DurableWills`, the Will of a broker that really died is
+published up to about 4.5 `WillCheckInterval` later than before (see the fourth entry).
+
+- **Fixed.** A client whose Maximum Packet Size was under 24 bytes (the success CONNACK
   stating the broker's limits) got no CONNACK at all and waited for one. The CONNACK now leaves out what
   is optional until it fits, in order: the availability flags that state their default, Topic Alias
   Maximum (then 0 for that connection), Maximum Packet Size, Receive Maximum. A client that sends no
@@ -19,7 +25,7 @@ honestly be reconstructed now.
   does fit. Under 5 bytes nothing fits, and the CONNACK is discarded as before. CONNACKs that already
   fit are unchanged. [MQTT-3.1.2-24], [MQTT-3.2.2-16], [MQTT-3.3.2-12].
 
-- **Fixed, unreleased.** With `PersistentSessions`, a session restored after a broker restart forgot the
+- **Fixed.** With `PersistentSessions`, a session restored after a broker restart forgot the
   identifiers of messages withdrawn on resume (a filter denied): the client's acknowledgement of one was
   answered with `0x82 Protocol Error` and the identifier could be handed to a new message first. The
   withdrawn set now travels in the session record, with its age, so the two-resumptions rule counts the
@@ -27,13 +33,13 @@ honestly be reconstructed now.
   outright leaves it too. The record version stays 1; a broker that predates the field ignores it.
   [MQTT-4.4.0-1], [MQTT-2.2.1-4].
 
-- **Fixed, unreleased.** A resent PUBLISH took a send-quota slot, and an acknowledgement of the original
+- **Fixed.** A resent PUBLISH took a send-quota slot, and an acknowledgement of the original
   that landed before the copy was written returned it, so for the length of that exchange the client had
   one message more in flight than its Receive Maximum allows. The slot now stays with the copy until the
   client's acknowledgement of it. An acknowledgement that arrives after the copy is written cannot be told
   from the copy's own and is treated as it always was. [MQTT-3.3.4-9].
 
-- **Fixed, unreleased.** With `DurableWills`, a broker that was alive but cut off from NATS had its
+- **Fixed.** With `DurableWills`, a broker that was alive but cut off from NATS had its
   clients' Wills published by a survivor while they were still connected. The broker now checks every
   half `WillCheckInterval` that it can reach NATS, and closes its client sockets after twice that interval
   without; a survivor adopts a silent broker's Wills only once the silence has lasted long enough for
@@ -42,7 +48,7 @@ honestly be reconstructed now.
   the old Will now cancels the adopted record too, rather than losing the race and leaving it to be
   published. [MQTT-3.1.2-8], [MQTT-3.1.3-9].
 
-- **Fixed, unreleased.** A client that reconnected with its session while its old connection was still
+- **Fixed.** A client that reconnected with its session while its old connection was still
   ending could have the new connection's Will published or cancelled by the old one, and the old
   connection's Will went out although the client was live again. The Will now belongs to the connection
   that set it, a takeover with the session kept cancels the displaced connection's Will (and its stored
@@ -50,21 +56,21 @@ honestly be reconstructed now.
   surviving broker to publish. A clean-start takeover still publishes the old Will, because the session
   ends. [MQTT-3.1.2-8], [MQTT-3.1.2-10], [MQTT-3.1.3-9].
 
-- **Fixed, unreleased.** A subscriber that dropped and resumed could lose a message when its live copy
+- **Fixed.** A subscriber that dropped and resumed could lose a message when its live copy
   reached the broker after the connection had ended and a later message had already raised the replay
   position. The resume now replays by time when the message at that position was stored after the rewind
   point, so the earlier message is found. A live copy delayed past that point, or one that arrives after
   the connection has gone and the session waits for the next, is now noted on the session and in its stored
   record (`AwayLateSeq`, additive), so the next replay on this broker or another starts at or below it
   [MQTT-4.4.0-1]. A copy arriving after another broker claimed the session is still lost (ROADMAP).
-- **Fixed, unreleased.** With `PersistentSessions`, an unacknowledged message with no copy in the offline
+- **Fixed.** With `PersistentSessions`, an unacknowledged message with no copy in the offline
   queue (a retained message, or any with the queue off) and a PUBLISH over 16 KiB was not resent by the
   broker that restored the session. The PUBLISH is now written to a bucket of its own
   (`<StreamPrefix>_inflight`, created on first use) and the session record names it, so the record stays within `max_payload`
   and the message is resent with its original Packet Identifier and DUP 1 [MQTT-4.4.0-1]. Proved with a
   real SIGKILL and a 100 KiB retained message at QoS 1 and QoS 2 (`oversize_inflight_test.go`). The new
   bucket is created on first use; a broker that predates it ignores the record's new field.
-- **Fixed, unreleased.** A QoS 2 message delivered to a client in the last second before its broker
+- **Fixed.** A QoS 2 message delivered to a client in the last second before its broker
   was killed outright was delivered again as a new message by the broker that took the session over.
   The session record is now written before the PUBLISH goes out and before the PUBREL does, so a kill
   at any step of the exchange resends the PUBLISH (DUP 1) or the PUBREL with the original Packet
@@ -76,18 +82,21 @@ honestly be reconstructed now.
 
 ### Fixed
 
-- **Fixed, unreleased.** Two ways a client could lose what it was owed. A QoS 1 or 2 live copy that
+- **Fixed.** Two ways a client could lose what it was owed. A QoS 1 or 2 live copy that
   reached a connection as it was ending was dropped half the time, and a later message then moved the
   resume replay's start past it, so the client never got it. It is now noted as owed and replayed
   [MQTT-4.4.0-1]. And with `PersistentSessions`, a late-delivered old write of the session record was
   read as another broker taking the session, disconnecting the client that had just arrived there
   and dropping its subscriptions [MQTT-3.1.4-3]; only a write newer than this broker's own claim
   counts now. Several timing-sensitive tests no longer depend on a fixed wait.
-- **Tests, unreleased.** The restore of a session record is now driven over the wire for a queue copy
+- **Fixed.** `Broker.Close` cleared its session store field while a late NATS callback could still
+  read it to persist a copy, a data race under `-race`. Close now leaves the field set; a write that
+  arrives after the store is closed fails and is logged.
+- **Tests.** The restore of a session record is now driven over the wire for a queue copy
   that aged out between the release and the resume (dropped, the session carries on) and for a message
   still unacknowledged when its filter was unsubscribed (still resent). [MQTT-4.4.0-1].
 
-- **Fixed, unreleased.** With `PersistentSessions`, an unacknowledged message with no offline-queue
+- **Fixed.** With `PersistentSessions`, an unacknowledged message with no offline-queue
   copy (a retained message sent on subscribing, or any with `DisableOfflineQueue`) was left out of the
   session record and not resent by a restored session. The record now carries its encoded PUBLISH
   (up to 16 KiB), and the session is checkpointed with the queue off too. [MQTT-4.4.0-1].
@@ -711,7 +720,8 @@ mapping `nats-server` uses for its own MQTT support.
 [#13]: https://github.com/taumatix/natsmqtt5/pull/13
 [#19]: https://github.com/taumatix/natsmqtt5/pull/19
 [#24]: https://github.com/taumatix/natsmqtt5/pull/24
-[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/taumatix/natsmqtt5/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/taumatix/natsmqtt5/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/taumatix/natsmqtt5/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/taumatix/natsmqtt5/compare/v0.9.0...v0.9.1
