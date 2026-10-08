@@ -36,7 +36,7 @@ MQTT-3.1.2-20	3.1.2.10 Keep Alive	C	CLIENT-ONLY (UNCITED)
 MQTT-3.1.2-21	3.1.2.10 Keep Alive	C	CLIENT-ONLY (CITED-TESTED)			broker_test.go:487 options.go:180
 MQTT-3.1.2-22	3.1.2.10 Keep Alive	S	CITED-TESTED			broker_test.go:466 conn.go:137 handshake.go:17
 MQTT-3.1.2-23	3.1.2.11.2 Session Expiry Interval	CS	CITED-TESTED	b	Offline message queue: what it still loses	Pending QoS 1/2 messages are kept by the offline queue, on by default with JetStream since Unreleased (TestTheOfflineQueueIsOnByDefault). Still violated at the boundary of a restored replay; deliberately so with DisableOfflineQueue or without JetStream. A detached session is kept for its interval and dropped by a sweep after it (TestAnExpiredDetachedSessionLosesItsNATSSubscriptions_MQTT_3_1_2_23, TestAResumedSessionSurvivesTheSweepAndItsClockRestarts_MQTT_3_1_2_23). A session of a broker killed with SIGKILL is resumed from the last checkpoint (TestAKilledBrokersBehindClientGetsWhatItHadNotAcknowledged).
-MQTT-3.1.2-24	3.1.2.11.4 Maximum Packet Size	S	CITED-CODE			conn.go:387
+MQTT-3.1.2-24	3.1.2.11.4 Maximum Packet Size	S	CITED-TESTED			conn.go:387 small_connack_test.go:TestMQTT_3_1_2_24_ASuccessConnackFitsASmallMaximumPacketSize small_connack_test.go:TestMQTT_3_1_2_25_ANoConnackFitsBelowFiveBytes
 MQTT-3.1.2-25	3.1.2.11.4 Maximum Packet Size	S	CITED-TESTED			retransmit_test.go:368 conn.go:360 conn.go:372
 MQTT-3.1.2-26	3.1.2.11.5 Topic Alias Maximum	S	CITED-TESTED	fixed unreleased		retain.go retained_alias_test.go:TestARetainedMessageServedToASubscriberCarriesNoTopicAlias
 MQTT-3.1.2-27	3.1.2.11.5 Topic Alias Maximum	S	CITED-TESTED	fixed unreleased		retain.go retained_alias_test.go:TestARetainedMessageServedToASubscriberCarriesNoTopicAlias
@@ -78,7 +78,7 @@ MQTT-3.2.2-12	3.2.2.3.4 Maximum QoS	S	CITED-TESTED			will_authz_test.go:27 hands
 MQTT-3.2.2-13	3.2.2.3.5 Retain Available	S	CITED-TESTED			broker_test.go:850 will_authz_test.go:27 handshake.go:485 handshake.go:502
 MQTT-3.2.2-14	3.2.2.3.5 Retain Available	C	CLIENT-ONLY (CITED-CODE)			publish.go:25
 MQTT-3.2.2-15	3.2.2.3.6 Maximum Packet Size	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.2.2-16	3.2.2.3.7 Assigned Client Identifier	S	UNCITED	a		auto-+nuid (handshake.go:113-120).
+MQTT-3.2.2-16	3.2.2.3.7 Assigned Client Identifier	S	CITED-TESTED			auto-+nuid (handshake.go). Never dropped to fit a small Maximum Packet Size; refused with 0x85 when it cannot fit: small_connack_test.go:TestMQTT_3_2_2_16_AnAssignedClientIdentifierIsNeverDroppedToFit
 MQTT-3.2.2-17	3.2.2.3.8 Topic Alias Maximum	C	CLIENT-ONLY (UNCITED)			
 MQTT-3.2.2-18	3.2.2.3.8 Topic Alias Maximum	C	CLIENT-ONLY (UNCITED)			
 MQTT-3.2.2-19	3.2.2.3.9 Reason String	S	CITED-TESTED	fixed unreleased		conn.go oversize_ack_test.go:TestAnOversizeConnackLosesItsReasonStringAndIsStillSent
@@ -109,7 +109,7 @@ MQTT-3.3.2-8	3.3.2.3.4 Topic Alias	CS	CITED-CODE			packet/properties.go:329
 MQTT-3.3.2-9	3.3.2.3.4 Topic Alias	C	CLIENT-ONLY (UNCITED)			
 MQTT-3.3.2-10	3.3.2.3.4 Topic Alias	C	CLIENT-ONLY (UNCITED)			
 MQTT-3.3.2-11	3.3.2.3.4 Topic Alias	S	CITED-TESTED	fixed unreleased		retain.go retained_alias_test.go:TestARetainedMessageServedToASubscriberCarriesNoTopicAlias
-MQTT-3.3.2-12	3.3.2.3.4 Topic Alias	S	CITED-CODE			publish.go:113
+MQTT-3.3.2-12	3.3.2.3.4 Topic Alias	S	CITED-TESTED			publish.go:113 small_connack_test.go:TestMQTT_3_3_2_12_ATopicAliasMaximumLeftOutOfTheConnackIsZero
 MQTT-3.3.2-13	3.3.2.3.5 Response Topic	CS	UNCITED	a		Decoder validates Response Topic as UTF-8.
 MQTT-3.3.2-14	3.3.2.3.5 Response Topic	CS	CITED-TESTED	fixed unreleased		publish.go handshake.go response_topic_test.go:TestAResponseTopicWithWildcardsIsAProtocolError response_topic_test.go:TestAWillWithAResponseTopicWithWildcardsIsRefusedAtConnect
 MQTT-3.3.2-15	3.3.2.3.5 Response Topic	S	CITED-CODE			message.go:113

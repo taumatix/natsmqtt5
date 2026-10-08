@@ -160,9 +160,9 @@ func (c *conn) resolveAlias(p *packet.Publish) (string, error) {
 	// "A Server MUST accept all Topic Alias values greater than 0 and less
 	// than or equal to the Topic Alias Maximum value that it returned in the
 	// CONNACK" [MQTT-3.3.2-12]; anything above it is 0x94.
-	if alias > c.broker.opts.topicAliasMax {
+	if alias > c.topicAliasMax {
 		c.sendDisconnect(packet.TopicAliasInvalid,
-			fmt.Sprintf("Topic Alias %d exceeds the advertised maximum of %d", alias, c.broker.opts.topicAliasMax))
+			fmt.Sprintf("Topic Alias %d exceeds the advertised maximum of %d", alias, c.topicAliasMax))
 		return "", fmt.Errorf("topic alias %d above maximum", alias)
 	}
 

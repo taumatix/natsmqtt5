@@ -120,6 +120,17 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 		// [MQTT-3.1.3-7].
 		clientID = "auto-" + nuid.Next()
 		assigned = clientID
+		if c.clientMaxPacketSize > 0 && !c.connackFits(&packet.Connack{
+			ReasonCode: packet.Success, Properties: &packet.Properties{AssignedClientID: assigned},
+		}) {
+			// The Assigned Client Identifier cannot be left out [MQTT-3.2.2-16], and
+			// a CONNACK carrying it would exceed the client's Maximum Packet Size
+			// [MQTT-3.1.2-24]. Both cannot hold, so say so in a CONNACK that fits
+			// and let the client choose a shorter identifier of its own.
+			c.refuse(packet.ClientIdentifierNotValid,
+				"the Client Identifier this broker would assign does not fit the Maximum Packet Size; send one")
+			return fmt.Errorf("assigned client identifier does not fit the client's Maximum Packet Size of %d", c.clientMaxPacketSize)
+		}
 	}
 
 	identity, username := "", cp.Username
@@ -271,6 +282,7 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 		ReasonCode:     packet.Success,
 		Properties:     c.connackProperties(assigned, sess.expiry(), props),
 	}
+	c.fitConnack(ack)
 	if err := c.write(ack); err != nil {
 		return err
 	}
@@ -631,6 +643,61 @@ func (c *conn) connackProperties(assignedClientID string, expiry uint32, req *pa
 		p.SessionExpiryInterval = packet.Uint32(expiry)
 	}
 	return p
+}
+
+// connackFits reports whether ack, encoded, is within the client's Maximum
+// Packet Size.
+func (c *conn) connackFits(ack *packet.Connack) bool {
+	if c.clientMaxPacketSize == 0 {
+		return true
+	}
+	raw, err := packet.Encode(ack)
+	return err == nil && uint32(len(raw)) <= c.clientMaxPacketSize
+}
+
+// fitConnack leaves out of a success CONNACK what a client with a small Maximum
+// Packet Size cannot be sent, so that it hears that it is connected instead of
+// nothing at all [MQTT-3.1.2-24], [MQTT-3.1.2-25]. Only what is optional goes,
+// and in the order in which leaving it out costs the client least:
+//
+//  1. the availability flags that state their default (all three are 1 when set
+//     here; MQTT-5.0 §3.2.2.3.11 to .13 read an absent one as 1), and Retain
+//     Available when it too states the default;
+//  2. Topic Alias Maximum: absent means 0, the client sends no alias, and the
+//     broker holds it to that (conn.topicAliasMax);
+//  3. Maximum Packet Size and then Receive Maximum: absent means no limit
+//     stated and 65535. The broker does not enforce its Receive Maximum on what
+//     the client sends, and its Maximum Packet Size is 64 MiB by default, so a
+//     client small enough to need this is not asking for what it was not told.
+//
+// What is never left out is a property the specification requires: the
+// Assigned Client Identifier [MQTT-3.2.2-16], Maximum QoS below 2
+// [MQTT-3.2.2-9], Retain Available 0 [MQTT-3.2.2-13], Server Keep Alive and
+// Session Expiry Interval. A CONNACK still too large with those is discarded
+// by writePacket, as any packet is.
+func (c *conn) fitConnack(ack *packet.Connack) {
+	c.topicAliasMax = c.broker.opts.topicAliasMax
+	if c.clientMaxPacketSize == 0 || ack.Properties == nil || c.connackFits(ack) {
+		return
+	}
+	p := ack.Properties
+	steps := []func(){
+		func() {
+			p.WildcardSubAvailable, p.SubIDAvailable, p.SharedSubAvailable = nil, nil, nil
+			if p.RetainAvailable != nil && *p.RetainAvailable == 1 {
+				p.RetainAvailable = nil
+			}
+		},
+		func() { p.TopicAliasMaximum, c.topicAliasMax = nil, 0 },
+		func() { p.MaximumPacketSize = nil },
+		func() { p.ReceiveMaximum = nil },
+	}
+	for _, step := range steps {
+		step()
+		if c.connackFits(ack) {
+			return
+		}
+	}
 }
 
 func boolByte(b bool) byte {

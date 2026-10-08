@@ -108,6 +108,16 @@ conforming client hits in ordinary use:
   the copy has been written carries the same Packet Identifier as the copy's own, so the broker cannot tell
   whether the client had seen the copy; it is counted as the copy's, as the exchange ends with it either
   way. [MQTT-3.3.4-9].
+- **Fixed, unreleased.** A client with a small Maximum Packet Size is told it is connected: the success
+  CONNACK leaves out what is optional until it fits, cheapest first (the availability flags that state
+  their default, Topic Alias Maximum, Maximum Packet Size, Receive Maximum), and a Topic Alias Maximum left
+  out is 0 for that connection (`small_connack_test.go`). Inherent, and left as is: the Assigned Client
+  Identifier cannot be left out [MQTT-3.2.2-16], so a client that sends no identifier and whose limit
+  cannot hold the one the broker makes is refused with 0x85 in a CONNACK that does fit, and asked to send
+  its own; and under 5 bytes no CONNACK fits at all, so it is discarded and the connection goes on as if
+  it had been sent [MQTT-3.1.2-25]. A client that gets the short CONNACK assumes the specification's
+  defaults for what was left out (a Receive Maximum of 65535, no stated Maximum Packet Size), and the broker
+  enforces neither on what it receives, apart from its 64 MiB packet cap. [MQTT-3.1.2-24], [MQTT-3.3.2-12].
 - **Fixed, unreleased.** With `DurableWills`, a broker cut off from NATS closes its clients' sockets
   after twice `WillCheckInterval`, and a survivor publishes a silent broker's Wills only after that has
   had time to happen, so a Will is not published while its client is connected
