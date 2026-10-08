@@ -13,6 +13,11 @@ honestly be reconstructed now.
 
 ### Fixed
 
+- **No Local on a shared subscription is a Protocol Error.** A SUBSCRIBE that set No Local on a
+  `$share/` filter used to get 0x82 inside the SUBACK, which is not a valid SUBACK Reason Code.
+  The broker now sends a DISCONNECT with 0x82 and closes the connection, and subscribes none of
+  the packet's filters [MQTT-3.8.3-4], [MQTT-3.9.3-2], [MQTT-4.13.1-1].
+
 - **A retained message no longer carries its publisher's Topic Alias.** A subscriber on the same
   broker could be sent the alias the publisher used, which means nothing on its connection and is
   not allowed when the subscriber advertised no Topic Alias Maximum [MQTT-3.1.2-26],

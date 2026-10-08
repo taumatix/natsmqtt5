@@ -2,6 +2,7 @@ package natsmqtt5
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -14,6 +15,19 @@ import (
 // handleSubscribe creates or replaces the session's subscriptions and answers
 // with one Reason Code per filter [MQTT-3.8.4-6].
 func (c *conn) handleSubscribe(ctx context.Context, p *packet.Subscribe) error {
+	// "It is a Protocol Error to set the No Local bit to 1 on a Shared
+	// Subscription" [MQTT-3.8.3-4]. 0x82 is not a Subscribe Reason Code, so it
+	// cannot go in the SUBACK [MQTT-3.9.3-2]; the server disconnects with it and
+	// closes the connection [MQTT-4.13.1-1]. The packet as a whole is the error,
+	// so no filter in it is subscribed.
+	for _, want := range p.Subscriptions {
+		if want.NoLocal && topic.IsShared(want.Filter) {
+			c.sendDisconnect(packet.ProtocolError,
+				fmt.Sprintf("No Local is set on the shared subscription %q", want.Filter))
+			return errors.New("SUBSCRIBE with No Local on a shared subscription")
+		}
+	}
+
 	subID := 0
 	if p.Properties != nil && len(p.Properties.SubscriptionIdentifiers) > 0 {
 		// SUBSCRIBE carries at most one Subscription Identifier; the decoder
@@ -86,12 +100,6 @@ func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID
 	if err != nil {
 		return nil, false, packet.TopicFilterInvalid
 	}
-	// "It is a Protocol Error to set the No Local bit to 1 on a Shared
-	// Subscription" [MQTT-3.8.3-4].
-	if share != "" && want.NoLocal {
-		return nil, false, packet.ProtocolError
-	}
-
 	if a := c.broker.opts.Authorizer; a != nil {
 		identity, username := c.sess.principal()
 		req := &AuthzRequest{

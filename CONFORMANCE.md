@@ -72,6 +72,10 @@ conforming client hits in ordinary use:
 - **Fixed, unreleased.** A retained message could carry its publisher's Topic Alias to a subscriber
   on the same broker, an alias that means nothing on its connection. [MQTT-3.1.2-26],
   [MQTT-3.1.2-27], [MQTT-3.3.2-11].
+- **Fixed, unreleased.** A SUBSCRIBE with No Local on a `$share/` filter was answered with 0x82
+  inside the SUBACK, which is not a Subscribe Reason Code. It is now the Protocol Error the
+  specification calls it: a DISCONNECT with 0x82 and the connection closed. [MQTT-3.8.3-4],
+  [MQTT-3.9.3-2], [MQTT-4.13.1-1].
 
 Features the specification defines and the broker does not offer (enhanced AUTH, server-to-client
 topic aliases, WebSocket, QoS 2 on shared subscriptions) are refused or left unadvertised the way
