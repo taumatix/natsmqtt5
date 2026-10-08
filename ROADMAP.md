@@ -40,7 +40,9 @@ and passing on rerun: `TestExpiryReplayOnARestoredSessionHonoursTheQueueTimestam
 interval, 1.5 s wait and a broker restart: a 3 s stall expires the message),
 `TestDurablePublishAddsOneNATSRoundTripToThePUBACK` (72 ms measured against a 75 ms floor),
 `TestReauthorizeDiscardsAWillWaitingOutItsDelay` and
-`TestWithoutTheOfflineQueueNothingPublishedWhileAwayArrives`. Each needs the same treatment as
+`TestWithoutTheOfflineQueueNothingPublishedWhileAwayArrives`, and
+`TestPersistentSessionMovesToAnotherLiveBroker` (2026-10-08, macOS: the session bucket's watcher
+logged "consumer not found" and the 5 s wait for the displaced connection ran out). Each needs the same treatment as
 `TestAnUnacknowledgedSharedMessageGoesToAnotherMemberWhenTheSessionExpires`: reproduce by delaying
 the step the margin depends on, then widen the margin or assert on a fake clock, not retry.
 
