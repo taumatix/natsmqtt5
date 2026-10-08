@@ -33,21 +33,28 @@ subscribing, or any with the queue off) is kept in the session record as its enc
 sequence in the record, so the record stays within `max_payload`. Needs a test with a 100 KiB
 retained payload and a SIGKILL.
 
-## Timing-sensitive tests that fail on a loaded CI runner
+## Negative assertions that wait a fixed 200 ms for a live copy
 
-**Today:** the CI history since 2026-10-07 shows tests with tight wall-clock margins failing once
-and passing on rerun: `TestExpiryReplayOnARestoredSessionHonoursTheQueueTimestamp` (a 3 s message
-interval, 1.5 s wait and a broker restart: a 3 s stall expires the message),
-`TestDurablePublishAddsOneNATSRoundTripToThePUBACK` (72 ms measured against a 75 ms floor),
-`TestReauthorizeDiscardsAWillWaitingOutItsDelay` and
-`TestWithoutTheOfflineQueueNothingPublishedWhileAwayArrives`, and
-`TestPersistentSessionMovesToAnotherLiveBroker` (2026-10-08, macOS: the session bucket's watcher
-logged "consumer not found" and the 5 s wait for the displaced connection ran out), and
-`TestNoMessageIsLostOrDeliveredTwiceAcrossADropAndResume` (2026-10-08, macOS: 299 of 300 messages seen,
-0 retransmissions; 90 runs on a laptop never lost one, so find out whether the runner is slow or a
-message published as the connection goes down is lost). Each needs the same treatment as
-`TestAnUnacknowledgedSharedMessageGoesToAnotherMemberWhenTheSessionExpires`: reproduce by delaying
-the step the margin depends on, then widen the margin or assert on a fake clock, not retry.
+**Today:** `TestWithoutTheOfflineQueueNothingPublishedWhileAwayArrives` and its siblings in
+`offline_default_test.go`, `reauthorise_test.go`, `reauthorize_live_test.go` and `restore_inflight_test.go`
+sleep 200 ms so a live copy reaches a detached session before it resumes. They assert that
+something does not arrive, so no event says the wait is over; on a very slow runner the copy could
+land after the resume and the test would pass for the wrong reason (a false pass, never a false
+failure). None has failed.
+
+**Shape:** a test hook (an unexported counter of live copies the session has seen) the tests wait
+on instead of the clock.
+
+## A live copy that arrives after the replay floor is read
+
+**Today:** `awayFloor` closes the connection and reads its owed sequences once. A live copy on a
+NATS dispatcher goroutine that is still between `isClosed` and the session's `detach` is noted by
+`noteOwedLocked` only if it runs before the floor is read; with several publishers a copy that lands
+after it is covered only by the time-based replay when no later message sets the floor higher.
+Unproven either way: no run has lost a message this way. [MQTT-4.4.0-1].
+
+**Shape:** a test that publishes from several connections while the subscriber drops and resumes,
+with the sequence-based replay forced, to show whether the window exists before closing it.
 
 # Tier 2: MUST statements on rare or optional paths
 

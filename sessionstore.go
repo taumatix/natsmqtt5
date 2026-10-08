@@ -240,7 +240,7 @@ type sessionStore struct {
 	ping *nats.Subscription
 
 	// onLost is called when a record this broker owns is claimed elsewhere.
-	onLost func(clientID string)
+	onLost func(clientID string, revision uint64)
 
 	stop context.CancelFunc
 }
@@ -248,7 +248,7 @@ type sessionStore struct {
 // newSessionStore provisions the bucket and starts the watcher and the sweep.
 // onLost is called, off the caller's goroutine, for every Client Identifier
 // this broker stops owning.
-func newSessionStore(ctx context.Context, js jetstream.JetStream, nc *nats.Conn, opts *resolved, logger *slog.Logger, onLost func(string)) (*sessionStore, error) {
+func newSessionStore(ctx context.Context, js jetstream.JetStream, nc *nats.Conn, opts *resolved, logger *slog.Logger, onLost func(string, uint64)) (*sessionStore, error) {
 	bucket := opts.StreamPrefix + "_sessions"
 	kv, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
 		Bucket:      bucket,
@@ -608,7 +608,7 @@ func (s *sessionStore) onUpdate(entry jetstream.KeyValueEntry) {
 		// version we do not know: neither says we have lost anything.
 		return
 	}
-	s.onLost(rec.ClientID)
+	s.onLost(rec.ClientID, entry.Revision())
 }
 
 // sweepLoop deletes records no client will come back for. Without it a bucket

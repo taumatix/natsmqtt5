@@ -203,9 +203,25 @@ func TestNoMessageIsLostOrDeliveredTwiceAcrossADropAndResume(t *testing.T) {
 	require.True(t, back.connect(rawConnect("offline-stress", 300)).SessionPresent)
 	<-published
 
+	// A retransmission is a delivery too: a message the broker wrote to the
+	// dropped connection and the client never read arrives again with DUP
+	// [MQTT-4.4.0-1], and is the only copy this client ever sees. Only a repeat
+	// without DUP is a second first delivery.
 	firstTime := map[string]int{}
-	dups := 0
-	for len(firstTime)+len(firstDeliveries) < total+len(firstDeliveries) {
+	retransmitted := map[string]int{}
+	arrived := func(k string) bool {
+		return firstDeliveries[k]+firstTime[k]+retransmitted[k] > 0
+	}
+	for {
+		missing := 0
+		for i := 0; i < total; i++ {
+			if !arrived(fmt.Sprintf("%04d", i)) {
+				missing++
+			}
+		}
+		if missing == 0 {
+			break
+		}
 		require.NoError(t, back.nc.SetReadDeadline(time.Now().Add(5*time.Second)))
 		p, err := packet.Read(back.r, 0)
 		if err != nil {
@@ -217,32 +233,20 @@ func TestNoMessageIsLostOrDeliveredTwiceAcrossADropAndResume(t *testing.T) {
 		}
 		back.send(&packet.Puback{Ack: packet.Ack{PacketID: pp.PacketID}})
 		if pp.Dup {
-			dups++
-			continue
-		}
-		firstTime[string(pp.Payload)]++
-		if len(firstTime) == total {
-			break
-		}
-		missing := 0
-		for i := 0; i < total; i++ {
-			k := fmt.Sprintf("%04d", i)
-			if firstDeliveries[k] == 0 && firstTime[k] == 0 {
-				missing++
-			}
-		}
-		if missing == 0 {
-			break
+			retransmitted[string(pp.Payload)]++
+		} else {
+			firstTime[string(pp.Payload)]++
 		}
 	}
 
 	for i := 0; i < total; i++ {
 		k := fmt.Sprintf("%04d", i)
-		seen := firstDeliveries[k] + firstTime[k]
-		assert.GreaterOrEqual(t, seen, 1, "message %s was lost", k)
-		assert.LessOrEqual(t, seen, 1, "message %s was delivered %d times without DUP", k, seen)
+		assert.True(t, arrived(k), "message %s was lost", k)
+		first := firstDeliveries[k] + firstTime[k]
+		assert.LessOrEqual(t, first, 1, "message %s was delivered %d times without DUP", k, first)
 	}
-	t.Logf("before drop %d, after resume %d first deliveries and %d retransmissions", len(firstDeliveries), len(firstTime), dups)
+	t.Logf("before drop %d, after resume %d first deliveries and %d retransmissions",
+		len(firstDeliveries), len(firstTime), len(retransmitted))
 }
 
 // Messages queued for the connection but never written when it died: with a

@@ -142,7 +142,10 @@ func TestReauthorizeDiscardsAWillWaitingOutItsDelay(t *testing.T) {
 		cp := rawConnect(c.id, 300)
 		cp.Will = &packet.Will{
 			Topic: c.topic, Payload: []byte(c.id),
-			Properties: &packet.Properties{WillDelayInterval: packet.Uint32(1)},
+			// Long enough that a stalled runner cannot fire the revoked Will
+			// before Reauthorize runs; the kept one is waited for, within the
+			// 5 s of expectMessage.
+			Properties: &packet.Properties{WillDelayInterval: packet.Uint32(3)},
 		}
 		w.connect(cp)
 		w.drop()

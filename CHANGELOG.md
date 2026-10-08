@@ -13,6 +13,13 @@ honestly be reconstructed now.
 
 ### Fixed
 
+- **Fixed, unreleased.** Two ways a client could lose what it was owed. A QoS 1 or 2 live copy that
+  reached a connection as it was ending was dropped half the time, and a later message then moved the
+  resume replay's start past it, so the client never got it. It is now noted as owed and replayed
+  [MQTT-4.4.0-1]. And with `PersistentSessions`, a late-delivered old write of the session record was
+  read as another broker taking the session, disconnecting the client that had just arrived there
+  and dropping its subscriptions [MQTT-3.1.4-3]; only a write newer than this broker's own claim
+  counts now. Several timing-sensitive tests no longer depend on a fixed wait.
 - **Tests, unreleased.** The restore of a session record is now driven over the wire for a queue copy
   that aged out between the release and the resume (dropped, the session carries on) and for a message
   still unacknowledged when its filter was unsubscribed (still resent). [MQTT-4.4.0-1].
