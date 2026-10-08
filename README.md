@@ -397,8 +397,14 @@ one with fewer features:
   Authentication Method is refused with `0x8C Bad authentication method`, which
   is the conforming answer from a server that does not support it.
 - **The broker never sends topic aliases**, though it accepts them from clients.
-- **`Message Expiry Interval` is forwarded but not enforced** on stored
-  retained messages.
+- **`Message Expiry Interval` counts whole seconds.** A message is deleted once it
+  has waited its whole interval, and one still live goes out with the interval less
+  the whole seconds it waited (2 s with 1.3 s waited leaves 1), on every delivery
+  path including retained messages, which wait from the moment they were stored.
+  The time is the broker's own clock and the JetStream timestamp, so brokers that
+  share a NATS server agree to within clock skew between them. A retained message
+  found expired is removed from the stream by the first subscription that looks;
+  one nobody subscribes to stays until replaced.
 - **A PUBACK does not mean the message reached NATS.** The broker hands the
   message to its NATS connection and acknowledges; the write is flushed
   microseconds later. A broker killed in that window loses a QoS 1 message it

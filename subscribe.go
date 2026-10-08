@@ -330,6 +330,7 @@ func (c *conn) deliveryFor(sub *subscription, name string, msg *nats.Msg) *deliv
 		retain:  retain,
 		payload: msg.Data,
 		props:   props,
+		arrived: arrivedAt(msg, time.Now()),
 	}
 }
 
@@ -435,6 +436,9 @@ func (c *conn) deliver(d *delivery) error {
 		Properties: d.props,
 	}
 	if d.qos == packet.QoS0 {
+		if d.applyExpiry(time.Now()) {
+			return nil
+		}
 		return c.write(pub)
 	}
 
@@ -455,13 +459,23 @@ func (c *conn) deliver(d *delivery) error {
 		return nil
 	}
 
+	// Checked last, after the waits above, which count towards the interval: a
+	// message that waited for room past its interval is deleted rather than
+	// sent [MQTT-3.3.2-5]. It has no Packet Identifier yet, so there is nothing
+	// for the client to acknowledge and nothing to wedge.
+	if d.applyExpiry(time.Now()) {
+		c.releaseQuota()
+		return nil
+	}
+
 	id, ok := c.sess.nextID()
 	if !ok {
 		c.releaseQuota()
 		return fmt.Errorf("no free Packet Identifier for %q", d.topic)
 	}
 	pub.PacketID = id
-	c.sess.trackInflight(&outbound{packetID: id, qos: d.qos, publish: pub, quotaHeld: true})
+	c.sess.trackInflight(&outbound{packetID: id, qos: d.qos, publish: pub, quotaHeld: true,
+		arrived: d.arrived, expiry: d.expiry})
 	if d.id != "" && c.broker.queue != nil {
 		// Delivered, or discarded as too large, which counts as delivered
 		// [MQTT-3.1.2-25]: either way a replay must not send it again. Noted
@@ -518,6 +532,8 @@ func (c *conn) sendRetained(sub *subscription, handling packet.RetainHandling, r
 			// "These messages are sent with the RETAIN flag set to 1"
 			// (MQTT-5.0 §3.3.1.3).
 			retain: true,
+			// A retained message waits from the moment it was stored.
+			arrived: r.stored,
 		})
 	}
 }

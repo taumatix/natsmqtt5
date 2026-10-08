@@ -102,8 +102,8 @@ MQTT-3.3.2-1	3.3.2.1 Topic Name	CS	UNCITED	a		Decoder reads the Topic Name first
 MQTT-3.3.2-2	3.3.2.1 Topic Name	CS	CITED-CODE			topic/subject.go:24 topic/topic.go:42
 MQTT-3.3.2-3	3.3.2.1 Topic Name	S	UNCITED	a		Every delivery re-matched against the MQTT filter (subscribe.go:278).
 MQTT-3.3.2-4	3.3.2.3.2 Payload Format Indicator	S	CITED-TESTED			broker_test.go:123 message.go:113
-MQTT-3.3.2-5	3.3.2.3.3 Message Expiry Interval`	S	ROADMAP	b	Message Expiry Interval enforcement	Not enforced; an expired retained message is still delivered (probe; retain.go has no expiry).
-MQTT-3.3.2-6	3.3.2.3.3 Message Expiry Interval`	S	ROADMAP	b	Message Expiry Interval enforcement	Message Expiry forwarded unaltered, never decremented (message.go:134-136, 177-181).
+MQTT-3.3.2-5	3.3.2.3.3 Message Expiry Interval`	S	CITED-TESTED	fixed unreleased		expiry.go expiry_test.go (TestExpiry*: live, offline replay, restored session, catch-up, shared backlog, retained, resend)
+MQTT-3.3.2-6	3.3.2.3.3 Message Expiry Interval`	S	CITED-TESTED	fixed unreleased		expiry.go expiry_test.go (TestExpiry*: live, offline replay, restored session, catch-up, shared backlog, retained, resend)
 MQTT-3.3.2-7	3.3.2.3.4 Topic Alias	CS	CITED-CODE			conn.go:72
 MQTT-3.3.2-8	3.3.2.3.4 Topic Alias	CS	CITED-CODE			packet/properties.go:329
 MQTT-3.3.2-9	3.3.2.3.4 Topic Alias	C	CLIENT-ONLY (UNCITED)			
@@ -202,7 +202,7 @@ MQTT-4.3.3-3	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		In flight until PU
 MQTT-4.3.3-4	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		PUBREL with the same id on PUBREC < 0x80 (publish.go:210-211).
 MQTT-4.3.3-5	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		awaitPubcomp keeps it in flight (publish.go:210, session.go:350).
 MQTT-4.3.3-6	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		Resume resends PUBREL, not PUBLISH, once past PUBREC (retransmit.go:80-99).
-MQTT-4.3.3-7	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	c		Message expiry is not applied at all (see 3.3.2-5).
+MQTT-4.3.3-7	4.3.3 QoS 2: Exactly once delivery	CS	CITED-TESTED	fixed unreleased		retransmit.go expiry_test.go TestExpiryDoesNotDropAQoS2PublishThatWasAlreadySent
 MQTT-4.3.3-8	4.3.3 QoS 2: Exactly once delivery	CS	CITED-TESTED			reauthorise_test.go:212 retransmit_test.go:180 retransmit.go:82 session.go:414
 MQTT-4.3.3-9	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		releaseQoS2 on an error PUBREC (publish.go:155).
 MQTT-4.3.3-10	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	b		Holds within one broker (publish.go:41-43, session.go:461-478); receivedQoS2 is not in the session record (sessionstore.go:60-127), so with PersistentSessions a client resending an unreleased QoS 2 PUBLISH to another broker or after a restart has it delivered twice.

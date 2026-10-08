@@ -40,6 +40,10 @@ type delivery struct {
 	qos     packet.QoS
 	retain  bool
 	props   *packet.Properties
+	// arrived is when the broker took the message in, and expiry the Message
+	// Expiry Interval it arrived with (nil for none); see expiry.go.
+	arrived time.Time
+	expiry  *uint32
 	// quotaHeld is set when the send-quota slot for this delivery was taken
 	// before it was queued, as a shared-subscription puller does.
 	quotaHeld bool
