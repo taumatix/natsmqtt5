@@ -158,7 +158,7 @@ MQTT-3.8.4-8	3.8.4 SUBSCRIBE Actions	S	CITED-TESTED			broker_test.go:43 subscrib
 MQTT-3.9.2-1	3.9.2.1.2 Reason String	S	UNCITED	a		SUBACK carries no Reason String.
 MQTT-3.9.2-2	3.9.2.1.3 User Property	S	UNCITED	a		SUBACK carries no User Properties.
 MQTT-3.9.3-1	3.9.3 SUBACK Payload	S	UNCITED	a		codes[i] follows the filter order (subscribe.go:24-32).
-MQTT-3.9.3-2	3.9.3 SUBACK Payload	S	UNCITED	b		No Local on a shared subscription is answered with 0x82 inside the SUBACK (subscribe.go:88-92); 0x82 is not a Subscribe Reason Code, and a Protocol Error should close the connection (4.13.1-1).
+MQTT-3.9.3-2	3.9.3 SUBACK Payload	S	CITED-TESTED	fixed unreleased		subscribe.go nolocal_shared_test.go:TestNoLocalOnASharedSubscriptionIsAProtocolErrorThatClosesTheConnection
 MQTT-3.10.1-1	3.10.1 UNSUBSCRIBE Fixed Header	S	UNCITED	a		reservedFlags UNSUBSCRIBE=0x02 (packet/types.go:48).
 MQTT-3.10.3-1	3.10.3 UNSUBSCRIBE Payload	C	CLIENT-ONLY (UNCITED)			
 MQTT-3.10.3-2	3.10.3 UNSUBSCRIBE Payload	C	CLIENT-ONLY (CITED-CODE)			packet/subscribe.go:152 packet/subscribe.go:154
@@ -245,7 +245,7 @@ MQTT-4.12.0-6	4.12 Enhanced authentication	S	ROADMAP	a	Enhanced authentication	T
 MQTT-4.12.0-7	4.12 Enhanced authentication	C	CLIENT-ONLY (UNCITED)			
 MQTT-4.12.1-1	4.12.1 Re-authentication	C	CLIENT-ONLY (UNCITED)			
 MQTT-4.12.1-2	4.12.1 Re-authentication	CS	ROADMAP	c	Enhanced authentication	Re-authentication not offered.
-MQTT-4.13.1-1	4.13.1 Malformed Packet and Protocol Errors	S	UNCITED	b		Read-level faults close the connection (conn.go:176-197), but the No Local on a shared subscription Protocol Error leaves it open (subscribe.go:88-92), and a client PUBLISH with a Subscription Identifier is accepted (probe).
+MQTT-4.13.1-1	4.13.1 Malformed Packet and Protocol Errors	S	UNCITED	b		subscribe.go nolocal_shared_test.go:TestNoLocalOnASharedSubscriptionIsAProtocolErrorThatClosesTheConnection (fixed unreleased: a SUBSCRIBE with No Local on a shared filter). Still open: a client PUBLISH with a Subscription Identifier is accepted (publish.go).
 MQTT-4.13.2-1	4.13.2 Other errors	CS	UNCITED	a		refuse() and every sendDisconnect caller close (handshake.go:73-80, conn.go:102-133).
 MQTT-6.0.0-1	6 Using WebSocket as a network transport	CS	ROADMAP	c	WebSocket transport	No WebSocket transport.
 MQTT-6.0.0-2	6 Using WebSocket as a network transport	CS	ROADMAP	c	WebSocket transport	No WebSocket transport.

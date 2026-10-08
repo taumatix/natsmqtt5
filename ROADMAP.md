@@ -71,14 +71,6 @@ exchange unfinished. [MQTT-3.2.2-19], [MQTT-3.2.2-20], [MQTT-3.4.2-2], [MQTT-3.5
 
 **Shape:** on an oversize ack, retry without the optional properties before giving up. Size S.
 
-## No Local on a shared filter is answered with an invalid SUBACK code
-
-**Today:** a SUBSCRIBE with No Local on a `$share/` filter gets 0x82 inside the SUBACK
-(`subscribe.go`). 0x82 is not a valid SUBACK Reason Code; the spec requires a Protocol Error, a
-DISCONNECT with 0x82 and the connection closed. [MQTT-3.9.3-2], [MQTT-4.13.1-1].
-
-**Shape:** disconnect with 0x82. Size S.
-
 ## A Subscription Identifier in a client PUBLISH is accepted
 
 **Today:** a PUBLISH from a client carrying a Subscription Identifier is accepted and
