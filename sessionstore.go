@@ -129,6 +129,13 @@ type sessionRecord struct {
 	AwayFromSeq uint64            `json:",omitempty"`
 	Delivered   []storedDelivered `json:",omitempty"`
 
+	// AwayLateSeq is the lowest sequence of a message whose live copy reached
+	// the released session after it was released: the copy was stored before the
+	// connection ended and its delivery was delayed past that. A claim replays
+	// from it as well [MQTT-4.4.0-1]. Cleared by the claim, and additive like
+	// AwayFromSeq.
+	AwayLateSeq uint64 `json:",omitempty"`
+
 	// Inflight is the QoS 1 and QoS 2 messages sent to the client and not yet
 	// acknowledged when the session was released, in the order they were sent,
 	// and ReceivedQoS2 the Packet Identifiers of the client's QoS 2 PUBLISH
@@ -150,6 +157,7 @@ type sessionRecord struct {
 	// from. They are never written.
 	awayWas         time.Time
 	awayFromSeqWas  uint64
+	awayLateSeqWas  uint64
 	deliveredWas    []storedDelivered
 	inflightWas     []storedInflight
 	receivedQoS2Was []uint16
@@ -406,7 +414,7 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 		attachedElsewhere := rec.Attached && previousOwner != s.owner
 		ownerDead := attachedElsewhere && !s.ownerAlive(ctx, previousOwner)
 		if attachedElsewhere && !ownerDead {
-			rec.AwayAt, rec.AwayFromSeq, rec.Delivered = time.Time{}, 0, nil
+			rec.AwayAt, rec.AwayFromSeq, rec.AwayLateSeq, rec.Delivered = time.Time{}, 0, 0, nil
 		}
 		legacy := ownerDead && rec.AwayAt.IsZero() && s.queueMaxAge > 0
 		rec.Owner = s.owner
@@ -419,6 +427,7 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 		// killed outright leaves this one for the claim after it.
 		rec.awayWas = rec.AwayAt
 		rec.awayFromSeqWas = rec.AwayFromSeq
+		rec.awayLateSeqWas = rec.AwayLateSeq
 		rec.deliveredWas = rec.Delivered
 		if legacy {
 			// Attached with no position at all: written by a broker that predates

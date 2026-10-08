@@ -41,17 +41,20 @@ import (
 // runs on a NATS dispatcher goroutine and does not block.
 func (c *conn) enqueueQueued(d *delivery) {
 	c.catchMu.Lock()
-	defer c.catchMu.Unlock()
 	if c.isClosed() {
 		// The connection has ended but the session has not yet let go of it, so
 		// the live copy still comes here. Nothing will send it, and it must not
 		// be left to a select between a queue with room and a closed done, which
 		// drops it half the time: a later message that does reach the queue sets
 		// the replay's start above it. Noting it as owed makes awayFloor start
-		// the replay at or before it.
+		// the replay at or before it, if that has not run yet; if it has, the
+		// session notes it for the absence it is recording.
 		c.noteOwedLocked(d.seq)
+		c.catchMu.Unlock()
+		c.lateOnEndedConn(d)
 		return
 	}
+	defer c.catchMu.Unlock()
 	if !c.behind {
 		// Counted before it is queued, so a checkpoint never sees it in neither.
 		c.pending.add(d.seq)
@@ -63,6 +66,7 @@ func (c *conn) enqueueQueued(d *delivery) {
 			// Ended since the check above.
 			c.pending.remove(d.seq)
 			c.noteOwedLocked(d.seq)
+			go c.lateOnEndedConn(d)
 			return
 		default:
 			c.pending.remove(d.seq)
@@ -75,6 +79,21 @@ func (c *conn) enqueueQueued(d *delivery) {
 	select {
 	case c.catchup <- struct{}{}:
 	default:
+	}
+}
+
+// lateOnEndedConn hands the session a live copy that reached this ended
+// connection, or the connection that has since replaced it.
+func (c *conn) lateOnEndedConn(d *delivery) {
+	if c.sess == nil {
+		return
+	}
+	successor, persist := c.sess.lateCopy(c, d.seq)
+	if persist {
+		go c.broker.persistLateCopy(c.sess)
+	}
+	if successor != nil {
+		successor.enqueue(d)
 	}
 }
 

@@ -267,7 +267,23 @@ func (c *conn) bindNATS(sub *subscription) error {
 			// The backlog delivers this one, to whichever member pulls it.
 			return
 		}
-		if conn := sess.currentConn(); conn != nil {
+		conn := sess.currentConn()
+		if conn == nil {
+			// Between connections. The message is dropped unless the offline
+			// queue holds its copy, which the next replay finds if it starts at
+			// or below it: noted, so that it does, however late this copy is
+			// [MQTT-4.4.0-1].
+			seq := queueSeq(msg)
+			if seq == 0 {
+				return
+			}
+			var persist bool
+			conn, persist = sess.lateCopy(nil, seq)
+			if persist {
+				go c.broker.persistLateCopy(sess)
+			}
+		}
+		if conn != nil {
 			conn.onNATSMessage(cur, msg)
 		}
 	}

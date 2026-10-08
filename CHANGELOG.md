@@ -14,7 +14,10 @@ honestly be reconstructed now.
 - **Fixed, unreleased.** A subscriber that dropped and resumed could lose a message when its live copy
   reached the broker after the connection had ended and a later message had already raised the replay
   position. The resume now replays by time when the message at that position was stored after the rewind
-  point, so the earlier message is found. A session restored from its record is not covered yet (ROADMAP).
+  point, so the earlier message is found. A live copy delayed past that point, or one that arrives after
+  the connection has gone and the session waits for the next, is now noted on the session and in its stored
+  record (`AwayLateSeq`, additive), so the next replay on this broker or another starts at or below it
+  [MQTT-4.4.0-1]. A copy arriving after another broker claimed the session is still lost (ROADMAP).
 - **Fixed, unreleased.** With `PersistentSessions`, an unacknowledged message with no copy in the offline
   queue (a retained message, or any with the queue off) and a PUBLISH over 16 KiB was not resent by the
   broker that restored the session. The PUBLISH is now written to a bucket of its own

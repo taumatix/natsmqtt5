@@ -31,18 +31,18 @@ passes it wrongly, so this is flake risk and not a hidden gap.
 
 **Shape:** wait on `waitDetached` and on the publisher's PUBACK instead of the clock.
 
-## A restored session's replay can skip a live copy that arrived late
+## A live copy that outlives the session's time on its broker is still lost
 
-**Today:** the in-memory resume now replays by time when the stored message at the replay floor is newer
-than the rewind point, so a live copy that lands after the floor is read is found (`late_live_copy_test.go`).
-A session restored from its record (another broker, or after a restart) still starts from the recorded
-position: `Delivered` is recorded for ids below a floor a late copy may sit under, and the restored replay
-does not start from its exact time. Unproven by a run; the same window as before, on the restore path.
-The in-memory fix is also bounded: the time replay starts at the rewind point (2 s), so a live copy
-delayed by more than that behind a later one is still not found. [MQTT-4.4.0-1].
+**Today:** a live copy of a queued message that reaches the session after its connection ended is noted
+(`session.lateCopy`), written into the stored record (`AwayLateSeq`), and the next replay, on this broker or
+another, starts at or below it however long the copy took (`late_live_copy_delay_test.go`). Two windows
+remain. A copy that reaches a broker only after another broker has claimed the record finds the record
+already read, and the claimed session no longer subscribes here, so the copy is not heard at all. And a
+copy for a session that has delivered more than `deliveredSeqWindow` (8192) queue sequences since is not
+noted, because a replay that low could send a QoS 2 message twice. [MQTT-4.4.0-1], [MQTT-4.3.3-2].
 
-**Shape:** record `Delivered` only for ids at or above the floor, start the restored replay at its exact
-time, and test it with the late-copy hold of `late_live_copy_test.go` across a SIGKILL.
+**Shape:** a replay that reads the stream from the session's last acknowledged position, not from the live
+copies it happened to hear, closes both; that needs a per-session cursor in the record. Size L.
 
 # Tier 2: MUST statements on rare or optional paths
 

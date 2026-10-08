@@ -227,9 +227,9 @@ func (b *Broker) checkpointSession(c *conn) error {
 	if b.queue != nil {
 		// With the queue off there is no replay, and nothing to say where it
 		// starts.
-		rec.AwayAt, rec.AwayFromSeq = pos.at, pos.fromSeq
+		rec.AwayAt, rec.AwayFromSeq, rec.AwayLateSeq = pos.at, pos.fromSeq, 0
 		var dropped int
-		rec.Delivered, dropped = s.deliveredSince(pos.fromSeq, pos.at)
+		rec.Delivered, dropped = s.deliveredSince(pos.fromSeq, 0, pos.at)
 		if dropped > 0 {
 			b.logger.Warn("the session record keeps only some of the delivered message ids; "+
 				"a restored replay may repeat the rest", "client_id", s.clientID, "dropped", dropped)
