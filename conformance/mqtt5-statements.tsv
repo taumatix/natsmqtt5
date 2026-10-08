@@ -123,7 +123,7 @@ MQTT-3.3.4-2	3.3.4 PUBLISH Actions	S	UNCITED	a		One NATS subscription per filter
 MQTT-3.3.4-3	3.3.4 PUBLISH Actions	S	CITED-TESTED			broker_test.go:172
 MQTT-3.3.4-4	3.3.4 PUBLISH Actions	S	UNCITED	c		The broker always sends one copy per subscription, never a merged copy.
 MQTT-3.3.4-5	3.3.4 PUBLISH Actions	S	UNCITED	a		Each copy carries its own subscription id (subscribe.go:303-305).
-MQTT-3.3.4-6	3.3.4 PUBLISH Actions	CS	UNCITED	a		Server-sent ids come only from SUBSCRIBE; client-sent ids are not forwarded (message.go:114-152). A client PUBLISH carrying one is accepted rather than treated as a Protocol Error (probe).
+MQTT-3.3.4-6	3.3.4 PUBLISH Actions	CS	CITED-TESTED	fixed unreleased		publish.go publish_subid_test.go:TestAClientPublishWithASubscriptionIdentifierIsAProtocolError
 MQTT-3.3.4-7	3.3.4 PUBLISH Actions	C	CLIENT-ONLY (UNCITED)			
 MQTT-3.3.4-8	3.3.4 PUBLISH Actions	C	CLIENT-ONLY (UNCITED)			
 MQTT-3.3.4-9	3.3.4 PUBLISH Actions	S	UNCITED	a		Send quota channel sized to the client Receive Maximum (handshake.go:101-105, subscribe.go:399-403).
@@ -245,7 +245,7 @@ MQTT-4.12.0-6	4.12 Enhanced authentication	S	ROADMAP	a	Enhanced authentication	T
 MQTT-4.12.0-7	4.12 Enhanced authentication	C	CLIENT-ONLY (UNCITED)			
 MQTT-4.12.1-1	4.12.1 Re-authentication	C	CLIENT-ONLY (UNCITED)			
 MQTT-4.12.1-2	4.12.1 Re-authentication	CS	ROADMAP	c	Enhanced authentication	Re-authentication not offered.
-MQTT-4.13.1-1	4.13.1 Malformed Packet and Protocol Errors	S	UNCITED	b		subscribe.go nolocal_shared_test.go:TestNoLocalOnASharedSubscriptionIsAProtocolErrorThatClosesTheConnection (fixed unreleased: a SUBSCRIBE with No Local on a shared filter). Still open: a client PUBLISH with a Subscription Identifier is accepted (publish.go).
+MQTT-4.13.1-1	4.13.1 Malformed Packet and Protocol Errors	S	CITED-TESTED	fixed unreleased		conn.go:readError subscribe.go nolocal_shared_test.go:TestNoLocalOnASharedSubscriptionIsAProtocolErrorThatClosesTheConnection publish.go publish_subid_test.go:TestAClientPublishWithASubscriptionIdentifierIsAProtocolError Protocol Errors found after parsing now disconnect with 0x82 and close; a Response Topic with wildcards (MQTT-3.3.2-14) is still forwarded.
 MQTT-4.13.2-1	4.13.2 Other errors	CS	UNCITED	a		refuse() and every sendDisconnect caller close (handshake.go:73-80, conn.go:102-133).
 MQTT-6.0.0-1	6 Using WebSocket as a network transport	CS	ROADMAP	c	WebSocket transport	No WebSocket transport.
 MQTT-6.0.0-2	6 Using WebSocket as a network transport	CS	ROADMAP	c	WebSocket transport	No WebSocket transport.

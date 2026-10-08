@@ -76,6 +76,9 @@ conforming client hits in ordinary use:
   inside the SUBACK, which is not a Subscribe Reason Code. It is now the Protocol Error the
   specification calls it: a DISCONNECT with 0x82 and the connection closed. [MQTT-3.8.3-4],
   [MQTT-3.9.3-2], [MQTT-4.13.1-1].
+- **Fixed, unreleased.** A PUBLISH from a client carrying a Subscription Identifier was accepted,
+  acknowledged and forwarded. It is a Protocol Error: DISCONNECT 0x82 and the connection closed,
+  nothing acknowledged or forwarded. [MQTT-3.3.4-6], [MQTT-4.13.1-1].
 
 Features the specification defines and the broker does not offer (enhanced AUTH, server-to-client
 topic aliases, WebSocket, QoS 2 on shared subscriptions) are refused or left unadvertised the way

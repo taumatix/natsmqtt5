@@ -13,6 +13,10 @@ honestly be reconstructed now.
 
 ### Fixed
 
+- **A client PUBLISH with a Subscription Identifier is a Protocol Error.** The broker used to
+  accept, acknowledge and forward it. It now sends a DISCONNECT with 0x82 and closes the
+  connection, acknowledging and forwarding nothing [MQTT-3.3.4-6], [MQTT-4.13.1-1].
+
 - **No Local on a shared subscription is a Protocol Error.** A SUBSCRIBE that set No Local on a
   `$share/` filter used to get 0x82 inside the SUBACK, which is not a valid SUBACK Reason Code.
   The broker now sends a DISCONNECT with 0x82 and closes the connection, and subscribes none of
