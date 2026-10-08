@@ -58,6 +58,17 @@ identifier, expiry, a denied filter, no queue, and a record cut for size. Not dr
 that has aged out (`OfflineQueueMaxAge`) between the release and the resume, which is logged and
 the message dropped, and a filter unsubscribed before the release whose message is still owed.
 
+## Timing-sensitive tests that fail on a loaded CI runner
+
+**Today:** the CI history since 2026-10-07 shows tests with tight wall-clock margins failing once
+and passing on rerun: `TestExpiryReplayOnARestoredSessionHonoursTheQueueTimestamp` (a 3 s message
+interval, 1.5 s wait and a broker restart: a 3 s stall expires the message),
+`TestDurablePublishAddsOneNATSRoundTripToThePUBACK` (72 ms measured against a 75 ms floor),
+`TestReauthorizeDiscardsAWillWaitingOutItsDelay` and
+`TestWithoutTheOfflineQueueNothingPublishedWhileAwayArrives`. Each needs the same treatment as
+`TestAnUnacknowledgedSharedMessageGoesToAnotherMemberWhenTheSessionExpires`: reproduce by delaying
+the step the margin depends on, then widen the margin or assert on a fake clock, not retry.
+
 # Tier 2: MUST statements on rare or optional paths
 
 ## A success CONNACK is larger than a very small Maximum Packet Size
