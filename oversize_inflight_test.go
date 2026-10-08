@@ -165,13 +165,17 @@ func TestAnOversizePayloadOfAMessageLeftUnacknowledgedIsKeptAlive(t *testing.T) 
 	require.NoError(t, err)
 	ctx := context.Background()
 	var kv jetstream.KeyValue
+	// The bucket is created before the payload is put in it, so a bucket that
+	// exists is not yet a payload that is stored.
+	var keys []string
 	require.Eventually(t, func() bool {
 		kv, err = js.KeyValue(ctx, natsmqtt5.DefaultStreamPrefix+"_inflight")
-		return err == nil
-	}, 3*time.Second, 50*time.Millisecond, "the payload is stored while the client is connected")
-	keys, err := kv.Keys(ctx)
-	require.NoError(t, err)
-	require.Len(t, keys, 1)
+		if err != nil {
+			return false
+		}
+		keys, err = kv.Keys(ctx)
+		return err == nil && len(keys) == 1
+	}, 5*time.Second, 50*time.Millisecond, "the payload is stored while the client is connected")
 
 	time.Sleep(11 * time.Second) // more than the bucket's 8 s
 	keys, err = kv.Keys(ctx)

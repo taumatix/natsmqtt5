@@ -121,7 +121,7 @@ func TestTheOfflineQueueIsOnByDefault(t *testing.T) {
 func TestWithoutTheOfflineQueueNothingPublishedWhileAwayArrives(t *testing.T) {
 	natsURL := startNATS(t)
 	var logs syncBuffer
-	addr := startBroker(t, natsURL, func(o *natsmqtt5.Options) {
+	b, addr, _ := startBrokerHandle(t, natsURL, func(o *natsmqtt5.Options) {
 		o.DisableOfflineQueue = true
 		o.Logger = slog.New(slog.NewTextHandler(&logs, nil))
 	})
@@ -144,13 +144,14 @@ func TestWithoutTheOfflineQueueNothingPublishedWhileAwayArrives(t *testing.T) {
 	waitDetached(t, &logs, "offline-off")
 
 	pub, _ := connectClient(t, addr, connectOpts("pub-offline-3"))
+	seen := natsmqtt5.LiveCopies(b)
 	pub.publish(&paho.Publish{Topic: "q/1", QoS: 1, Payload: []byte("1")})
 	// The PUBACK means NATS has the message, not that it has reached the
 	// session's subscription, which drops it silently. Resumed too soon, the
 	// session is attached again when it arrives and takes it live, which is
-	// not a fault: the opt-out keeps nothing, it does not promise a loss. There
-	// is no event to wait on, so give in-process NATS ample time.
-	time.Sleep(200 * time.Millisecond)
+	// not a fault: the opt-out keeps nothing, it does not promise a loss.
+	// The copy having been seen is the event to wait on.
+	awaitLiveCopies(t, b, seen, 1)
 
 	back := dialRaw(t, addr)
 	require.True(t, back.connect(rawConnect("offline-off", 300)).SessionPresent)

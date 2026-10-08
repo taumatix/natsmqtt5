@@ -5,7 +5,6 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/stretchr/testify/assert"
@@ -300,7 +299,7 @@ func TestAMessageQueuedWhileTheAuthorizerRunsIsNotDelivered(t *testing.T) {
 			return errors.New("no longer permitted")
 		})
 	}
-	addr := startBroker(t, startNATS(t), authorize)
+	b, addr, _ := startBrokerHandle(t, startNATS(t), authorize)
 
 	first, _ := connectClient(t, addr, durableConnect("queued", 300))
 	first.subscribe(paho.SubscribeOptions{Topic: "secret/#", QoS: 1})
@@ -325,8 +324,9 @@ func TestAMessageQueuedWhileTheAuthorizerRunsIsNotDelivered(t *testing.T) {
 	// attach has already happened, so this lands in the resuming connection's
 	// delivery queue against a subscription that is about to be denied.
 	pub, _ := connectClient(t, addr, connectOpts("pub"))
+	seen := natsmqtt5.LiveCopies(b)
 	pub.publish(&paho.Publish{Topic: "secret/a", QoS: 1, Payload: []byte("classified")})
-	time.Sleep(200 * time.Millisecond)
+	awaitLiveCopies(t, b, seen, 1)
 
 	close(release)
 

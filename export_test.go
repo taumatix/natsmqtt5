@@ -50,6 +50,10 @@ func InflightCount(b *Broker, clientID string) int {
 	return len(s.inflight)
 }
 
+// LiveCopies is the number of live NATS copies the broker's subscription
+// handlers have finished with, delivered to a connection or dropped.
+func LiveCopies(b *Broker) int64 { return b.liveSeen.Load() }
+
 // SetNextPacketID makes the next Packet Identifier the session for clientID
 // allocates the one after id. It stands in for the 65535 allocations it would
 // take to come round to an identifier again.
