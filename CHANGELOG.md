@@ -11,15 +11,29 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
-### Added
+## [0.11.0] - 2026-10-08
 
-- **Keep clients off `$` topics, opt in.** `Options.RestrictDollarTopics`
-  (`-restrict-dollar-topics`, `NATSMQTT5_RESTRICT_DOLLAR_TOPICS`) makes the broker follow MQTT 5.0
-  §4.7.2's "SHOULD prevent Clients from using such Topic Names" for every `$` topic: a PUBLISH or
-  Will to one is refused with Topic Name invalid (0x90), a subscription to one with Topic Filter
-  invalid (0x8F), and a `$share/...` subscription is allowed unless the filter inside it starts
-  with `$`. Off by default, so `$app/...` keeps working; `$retained` and `$queue` stay refused
-  either way.
+**Behaviour changes for existing deployments, none of them behind an option.** A broker upgraded
+from v0.10.0 with no configuration change now: enforces Message Expiry Interval on every delivery
+path (a message past its interval is no longer delivered); delivers a shared subscription's QoS 1
+message to another member when the first one's session ends, and deletes the shared backlog when the
+last member leaves; sweeps detached sessions whose Session Expiry Interval has passed, so a session
+a client never resumes is now gone; sends an acknowledgement over the client's Maximum Packet Size
+without its Reason String instead of dropping it; and disconnects with 0x82 Protocol Error a client
+that sets No Local on a shared subscription, puts a Subscription Identifier in a PUBLISH, or sends a
+wildcard Response Topic. Clients that were lenient about these will notice. Three new options are
+opt-in and change nothing until set: `DurableWills`, `DurablePublish`, `RestrictDollarTopics`. The Go
+API is additive: new `Options` fields and `DefaultSessionSweepInterval`, nothing removed or changed.
+
+### Changed by default
+
+- **Message Expiry Interval is enforced.** A message whose interval has passed is no longer
+  delivered, and one still live goes out with the interval less the time it waited in the broker,
+  on every path: live, retained (the wait counts from storage, and an expired retained message is
+  removed from the stream), offline-queue replay, catch-up, shared backlog and resends. Time is
+  counted in whole seconds, rounded down. A resent QoS 1 PUBLISH that expired in flight is
+  deleted; a QoS 2 PUBLISH already sent is resent regardless [MQTT-3.3.2-5], [MQTT-3.3.2-6],
+  [MQTT-4.3.3-7].
 
 - **A shared subscription ends when its last session does.** The backlog consumer behind
   `$share/g/f` is now deleted, with the messages in it, when the last session subscribed to it
@@ -36,11 +50,47 @@ honestly be reconstructed now.
   not resume the subscription. A member that PUBACKs is never redelivered to. [MQTT-4.8.2-6]
   stays as it was; this is the MQTT 5.0 §4.8.2 SHOULD.
 
-- **A PUBACK or PUBREC that means the message is safe, opt in.** `Options.DurablePublish`
-  (`-durable-publish`, `NATSMQTT5_DURABLE_PUBLISH`) makes the broker acknowledge a QoS 1 or 2
-  PUBLISH only once JetStream has stored the queue's copy and the NATS server has confirmed the live
-  publish (a flush), and refuse it with 0x83 otherwise. It requires the offline queue and costs one
-  more NATS round trip per publish; the README has the measured cost of the queue and of this.
+- **Detached sessions that are never resumed are now expired.** A session whose client disconnected
+  with a non-zero Session Expiry Interval kept its NATS subscriptions until the client returned or the
+  broker stopped, so a workload that churns through Client Identifiers grew the broker's subscription
+  set without bound. A sweep now drops each such session once its interval (capped by
+  `MaxSessionExpiry`) has passed, and unsubscribes it from NATS. `Options.SessionSweepInterval`
+  (default `DefaultSessionSweepInterval`, one minute) sets how often it runs. A session lives at
+  least its interval and at most one sweep longer; sessions with an interval of 0 and connected
+  sessions are not touched. [MQTT-3.1.2-23].
+
+- **An acknowledgement over the client's Maximum Packet Size is sent without its Reason String.**
+  A CONNACK, PUBACK, PUBREC or DISCONNECT that would exceed the limit was discarded whole, so a
+  refused CONNECT, or a refused QoS 1 or 2 PUBLISH, got no answer at all and the client's exchange
+  never finished. The Reason String and User Properties are dropped first and the rest is sent;
+  only a packet that is still too large is discarded [MQTT-3.2.2-19], [MQTT-3.2.2-20],
+  [MQTT-3.4.2-2], [MQTT-3.5.2-2], [MQTT-3.14.2-3]. A CONNECT's Maximum Packet Size now also binds
+  the CONNACK that refuses it for an unsupported Authentication Method.
+
+- **No Local on a shared subscription is a Protocol Error.** A SUBSCRIBE that set No Local on a
+  `$share/` filter used to get 0x82 inside the SUBACK, which is not a valid SUBACK Reason Code.
+  The broker now sends a DISCONNECT with 0x82 and closes the connection, and subscribes none of
+  the packet's filters [MQTT-3.8.3-4], [MQTT-3.9.3-2], [MQTT-4.13.1-1].
+
+- **A client PUBLISH with a Subscription Identifier is a Protocol Error.** The broker used to
+  accept, acknowledge and forward it. It now sends a DISCONNECT with 0x82 and closes the
+  connection, acknowledging and forwarding nothing [MQTT-3.3.4-6], [MQTT-4.13.1-1].
+
+- **A Response Topic with a wildcard is a Protocol Error.** The broker forwarded it unchecked. A
+  PUBLISH carrying one now gets a DISCONNECT with 0x82 and the connection is closed, and a CONNECT
+  whose Will carries one is refused with CONNACK 0x82 [MQTT-3.3.2-14], [MQTT-4.13.1-1].
+
+- **Nothing follows a server DISCONNECT.** A PUBLISH queued for a client could still be written
+  after the broker's DISCONNECT, because the delivery goroutine and the read loop write
+  independently. Once the DISCONNECT is written, or decided against, every later write on that
+  connection is refused [MQTT-3.14.4-1].
+
+- **An Authenticator's Reason Code is checked.** A `ConnectError` code was sent in the CONNACK as
+  given, so a success code, or one only DISCONNECT or SUBACK may carry, could reach the wire. A
+  code MQTT-5.0 Table 3-1 does not list for a CONNACK is logged and sent as 0x80 (Unspecified
+  error) [MQTT-3.2.2-8]. Codes the table lists are unchanged.
+
+### Added (opt in, off by default)
 
 - **The Will Message of a broker that was killed is now published.** `Options.DurableWills`
   (`-durable-wills`, `NATSMQTT5_DURABLE_WILLS`) keeps the Will of every open connection in a
@@ -52,14 +102,19 @@ honestly be reconstructed now.
   stores the Will's payload in clear text in that bucket, and it needs JetStream. Behaviour
   without the option is unchanged. [MQTT-3.1.2-7], [MQTT-3.1.2-8], [MQTT-3.1.2-10], [MQTT-3.1.3-9].
 
-- **Detached sessions that are never resumed are now expired.** A session whose client disconnected
-  with a non-zero Session Expiry Interval kept its NATS subscriptions until the client returned or the
-  broker stopped, so a workload that churns through Client Identifiers grew the broker's subscription
-  set without bound. A sweep now drops each such session once its interval (capped by
-  `MaxSessionExpiry`) has passed, and unsubscribes it from NATS. `Options.SessionSweepInterval`
-  (default `DefaultSessionSweepInterval`, one minute) sets how often it runs. A session lives at
-  least its interval and at most one sweep longer; sessions with an interval of 0 and connected
-  sessions are not touched. [MQTT-3.1.2-23].
+- **A PUBACK or PUBREC that means the message is safe, opt in.** `Options.DurablePublish`
+  (`-durable-publish`, `NATSMQTT5_DURABLE_PUBLISH`) makes the broker acknowledge a QoS 1 or 2
+  PUBLISH only once JetStream has stored the queue's copy and the NATS server has confirmed the live
+  publish (a flush), and refuse it with 0x83 otherwise. It requires the offline queue and costs one
+  more NATS round trip per publish; the README has the measured cost of the queue and of this.
+
+- **Keep clients off `$` topics, opt in.** `Options.RestrictDollarTopics`
+  (`-restrict-dollar-topics`, `NATSMQTT5_RESTRICT_DOLLAR_TOPICS`) makes the broker follow MQTT 5.0
+  §4.7.2's "SHOULD prevent Clients from using such Topic Names" for every `$` topic: a PUBLISH or
+  Will to one is refused with Topic Name invalid (0x90), a subscription to one with Topic Filter
+  invalid (0x8F), and a `$share/...` subscription is allowed unless the filter inside it starts
+  with `$`. Off by default, so `$app/...` keeps working; `$retained` and `$queue` stay refused
+  either way.
 
 ### Fixed
 
@@ -69,19 +124,23 @@ honestly be reconstructed now.
   has no bound) was answered Session Present 1 and given a session with none of the stored filters,
   and the empty set was written back to the record. The second connection now finishes the restore.
   [MQTT-3.1.2-23], [MQTT-3.2.2-3].
+
 - **A session narrowed repeatedly no longer runs out of Packet Identifiers.** The identifier of a
   message taken back on resume (its filter was denied) stayed spent until the client acknowledged
   it, and a client that never does left it spent for the life of the session. It is now forgotten
   on the second resumption after the withdrawal, when the client has had two connections to send
   the acknowledgement [MQTT-2.2.1-4].
+
 - **A withdrawn identifier only accepts the acknowledgement it is owed.** A PUBCOMP for a withdrawn
   QoS 1 message, or a PUBACK for a QoS 2 one, used up the record and was ignored; it is now a
   Protocol Error, and the record stays for the right acknowledgement.
+
 - **A late acknowledgement no longer disconnects the client.** An acknowledgement that landed
   between a resend reading the in-flight entry and writing it left the broker resending a finished
   exchange, and the client's acknowledgement of that copy was answered with 0x82 Protocol Error. The
   connection now remembers which identifiers it resent and ignores the unmatched acknowledgement it
   is owed for them [MQTT-4.4.0-1].
+
 - **A resume no longer skips a message the dropped connection was sending.** The resumed
   connection took its list of unacknowledged messages while the old connection's delivery
   goroutine could still send and track one more, so that message was missing from the resend and
@@ -89,42 +148,28 @@ honestly be reconstructed now.
   connection now waits, bounded, for the old one's delivery goroutine before it resends
   [MQTT-4.4.0-1]. Reproduced on one scheduler thread at about one resume in twenty.
 
-- **An Authenticator's Reason Code is checked.** A `ConnectError` code was sent in the CONNACK as
-  given, so a success code, or one only DISCONNECT or SUBACK may carry, could reach the wire. A
-  code MQTT-5.0 Table 3-1 does not list for a CONNACK is logged and sent as 0x80 (Unspecified
-  error) [MQTT-3.2.2-8]. Codes the table lists are unchanged.
-
-- **Nothing follows a server DISCONNECT.** A PUBLISH queued for a client could still be written
-  after the broker's DISCONNECT, because the delivery goroutine and the read loop write
-  independently. Once the DISCONNECT is written, or decided against, every later write on that
-  connection is refused [MQTT-3.14.4-1].
-
-- **An acknowledgement over the client's Maximum Packet Size is sent without its Reason String.**
-  A CONNACK, PUBACK, PUBREC or DISCONNECT that would exceed the limit was discarded whole, so a
-  refused CONNECT, or a refused QoS 1 or 2 PUBLISH, got no answer at all and the client's exchange
-  never finished. The Reason String and User Properties are dropped first and the rest is sent;
-  only a packet that is still too large is discarded [MQTT-3.2.2-19], [MQTT-3.2.2-20],
-  [MQTT-3.4.2-2], [MQTT-3.5.2-2], [MQTT-3.14.2-3]. A CONNECT's Maximum Packet Size now also binds
-  the CONNACK that refuses it for an unsupported Authentication Method.
-
-- **A Response Topic with a wildcard is a Protocol Error.** The broker forwarded it unchecked. A
-  PUBLISH carrying one now gets a DISCONNECT with 0x82 and the connection is closed, and a CONNECT
-  whose Will carries one is refused with CONNACK 0x82 [MQTT-3.3.2-14], [MQTT-4.13.1-1].
-
-- **A client PUBLISH with a Subscription Identifier is a Protocol Error.** The broker used to
-  accept, acknowledge and forward it. It now sends a DISCONNECT with 0x82 and closes the
-  connection, acknowledging and forwarding nothing [MQTT-3.3.4-6], [MQTT-4.13.1-1].
-
-- **No Local on a shared subscription is a Protocol Error.** A SUBSCRIBE that set No Local on a
-  `$share/` filter used to get 0x82 inside the SUBACK, which is not a valid SUBACK Reason Code.
-  The broker now sends a DISCONNECT with 0x82 and closes the connection, and subscribes none of
-  the packet's filters [MQTT-3.8.3-4], [MQTT-3.9.3-2], [MQTT-4.13.1-1].
-
 - **A retained message no longer carries its publisher's Topic Alias.** A subscriber on the same
   broker could be sent the alias the publisher used, which means nothing on its connection and is
   not allowed when the subscriber advertised no Topic Alias Maximum [MQTT-3.1.2-26],
   [MQTT-3.1.2-27], [MQTT-3.3.2-11]. It showed up in about one run in four, depending on whether the
   broker's own copy or the one read back from the stream was served.
+
+- **A connection that drops while behind no longer loses what was waiting for it.** The messages
+  queued for a client, and the stretch of the offline queue a catch-up had still to send, used to
+  be discarded when its connection ended, and the resume replay started only 2 seconds before
+  the disconnect, so a client minutes behind lost those minutes [MQTT-3.1.2-23], [MQTT-4.5.0-1].
+  The replay now starts at the lowest queue sequence the client had not been sent. It also no
+  longer gives up after 30 seconds: a slow client with a long backlog gets all of it, at its own
+  pace. A session restored from the session store still replays from the time it was released.
+
+- **A restored session replays from what it was owed, and a killed broker's sessions are replayed.**
+  With `PersistentSessions`, the session record now holds the lowest queue sequence the client had
+  not been sent and the ids it had been sent above it, so a session resumed after a restart or on
+  another broker gets what was waiting for it, not only what was published after the release
+  [MQTT-3.1.2-23], [MQTT-4.5.0-1]. Records written by earlier versions still load and replay as
+  before. A session left attached by a broker that was killed outright is replayed from the start
+  of the queue (`OfflineQueueMaxAge`) when it is resumed, which loses nothing and can repeat
+  messages the dead connection delivered.
 
 - **A session restored from the session store resends what it had in flight.** With
   `PersistentSessions`, a session resumed after a restart or on another broker used to come back
@@ -137,29 +182,6 @@ honestly be reconstructed now.
   back from the offline queue, so a message with no copy there is not resent; a record too large for
   one key-value value is cut, newest entries first, and logged. Records written by earlier
   versions still load.
-
-- **Message Expiry Interval is enforced.** A message whose interval has passed is no longer
-  delivered, and one still live goes out with the interval less the time it waited in the broker,
-  on every path: live, retained (the wait counts from storage, and an expired retained message is
-  removed from the stream), offline-queue replay, catch-up, shared backlog and resends. Time is
-  counted in whole seconds, rounded down. A resent QoS 1 PUBLISH that expired in flight is
-  deleted; a QoS 2 PUBLISH already sent is resent regardless [MQTT-3.3.2-5], [MQTT-3.3.2-6],
-  [MQTT-4.3.3-7].
-- **A connection that drops while behind no longer loses what was waiting for it.** The messages
-  queued for a client, and the stretch of the offline queue a catch-up had still to send, used to
-  be discarded when its connection ended, and the resume replay started only 2 seconds before
-  the disconnect, so a client minutes behind lost those minutes [MQTT-3.1.2-23], [MQTT-4.5.0-1].
-  The replay now starts at the lowest queue sequence the client had not been sent. It also no
-  longer gives up after 30 seconds: a slow client with a long backlog gets all of it, at its own
-  pace. A session restored from the session store still replays from the time it was released.
-- **A restored session replays from what it was owed, and a killed broker's sessions are replayed.**
-  With `PersistentSessions`, the session record now holds the lowest queue sequence the client had
-  not been sent and the ids it had been sent above it, so a session resumed after a restart or on
-  another broker gets what was waiting for it, not only what was published after the release
-  [MQTT-3.1.2-23], [MQTT-4.5.0-1]. Records written by earlier versions still load and replay as
-  before. A session left attached by a broker that was killed outright is replayed from the start
-  of the queue (`OfflineQueueMaxAge`) when it is resumed, which loses nothing and can repeat
-  messages the dead connection delivered.
 
 ## [0.10.0] - 2026-10-08
 
@@ -590,7 +612,8 @@ mapping `nats-server` uses for its own MQTT support.
 [#13]: https://github.com/taumatix/natsmqtt5/pull/13
 [#19]: https://github.com/taumatix/natsmqtt5/pull/19
 [#24]: https://github.com/taumatix/natsmqtt5/pull/24
-[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/taumatix/natsmqtt5/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/taumatix/natsmqtt5/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/taumatix/natsmqtt5/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/taumatix/natsmqtt5/compare/v0.8.0...v0.9.0
