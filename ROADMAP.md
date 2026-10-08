@@ -60,16 +60,18 @@ the message dropped, and a filter unsubscribed before the release whose message 
 
 # Tier 2: MUST statements on rare or optional paths
 
-## A packet over the client's Maximum Packet Size is dropped whole
+## A success CONNACK is larger than a very small Maximum Packet Size
 
-**Today:** a CONNACK, PUBACK, PUBREC or DISCONNECT that would exceed the client's Maximum Packet
-Size is discarded entirely (`conn.go`, the write path), where the spec says to drop the Reason
-String and User Properties first and send the rest. A CONNECT with Maximum Packet Size 40 and an
-empty Client Identifier got no CONNACK at all, and a lost PUBACK or PUBREC leaves the client's
-exchange unfinished. [MQTT-3.2.2-19], [MQTT-3.2.2-20], [MQTT-3.4.2-2], [MQTT-3.5.2-2],
-[MQTT-3.14.2-3].
+**Today:** the CONNACK the broker sends on success states its own limits (Receive Maximum, Maximum
+Packet Size, Topic Alias Maximum, and four availability flags), about 24 bytes before an Assigned Client
+Identifier and about 54 with the 27-byte one the broker makes (counted by hand). A client whose Maximum Packet Size is under
+that gets no CONNACK, because none of those properties is a Reason String or User Property and
+dropping them would let the client assume limits the broker does not keep [MQTT-3.1.2-24]. A
+client that small is rare.
 
-**Shape:** on an oversize ack, retry without the optional properties before giving up. Size S.
+**Shape:** drop the availability flags that restate their default (all four are 1), which saves 8
+bytes losslessly, and decide whether a client under the remainder should be refused with a CONNACK
+that fits, or served on assumed defaults. Size S, and a decision.
 
 ## Packets may still go out after a server DISCONNECT
 
