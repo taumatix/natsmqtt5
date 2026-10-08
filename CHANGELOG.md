@@ -11,6 +11,14 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed, unreleased.** A client that reconnected with its session while its old connection was still
+  ending could have the new connection's Will published or cancelled by the old one, and the old
+  connection's Will went out although the client was live again. The Will now belongs to the connection
+  that set it, a takeover with the session kept cancels the displaced connection's Will (and its stored
+  record with `DurableWills`), and a replaced Will no longer leaves a record in the Will bucket for a
+  surviving broker to publish. A clean-start takeover still publishes the old Will, because the session
+  ends. [MQTT-3.1.2-8], [MQTT-3.1.2-10], [MQTT-3.1.3-9].
+
 - **Fixed, unreleased.** A subscriber that dropped and resumed could lose a message when its live copy
   reached the broker after the connection had ended and a later message had already raised the replay
   position. The resume now replays by time when the message at that position was stored after the rewind

@@ -366,7 +366,7 @@ func (c *conn) finish(cause error) {
 	if errors.Is(cause, errNormalDisconnect) {
 		// A DISCONNECT with reason 0x00 deletes the Will Message
 		// [MQTT-3.1.2-8].
-		_, _, lease := c.sess.takeWill()
+		_, _, lease := c.sess.takeWill(c)
 		c.broker.wills.drop(lease)
 	} else {
 		c.scheduleWill()
@@ -416,7 +416,7 @@ func causeString(err error) string {
 // first, and cancels if a new connection claims the session in the meantime
 // [MQTT-3.1.3-9].
 func (c *conn) scheduleWill() {
-	will, delay, lease := c.sess.takeWill()
+	will, delay, lease := c.sess.takeWill(c)
 	if will == nil {
 		return
 	}
