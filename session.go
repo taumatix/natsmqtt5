@@ -267,6 +267,11 @@ type session struct {
 
 	will      *packet.Will
 	willDelay time.Duration
+	// willConn is the connection that set will. Only that connection's end
+	// takes it: a connection that was replaced finishes after its successor
+	// has set its own, and must neither publish nor cancel that one
+	// [MQTT-3.1.2-8].
+	willConn *conn
 	// willLease is the stored record of the Will held in will or pendingWill,
 	// or nil when Options.DurableWills is off; see willstore.go.
 	willLease *willLease
@@ -957,33 +962,46 @@ func (s *session) removeSubscription(filter string) (*subscription, bool) {
 	return sub, ok
 }
 
-func (s *session) setWill(w *packet.Will, delay time.Duration, lease *willLease) {
+// setWill makes w the Will of connection c. It returns the stored record of a
+// Will it replaced, which the caller removes: left in the Will store, a broker
+// that outlived this one would publish it [MQTT-3.1.2-10].
+func (s *session) setWill(c *conn, w *packet.Will, delay time.Duration, lease *willLease) (replaced *willLease) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.will, s.willDelay, s.willLease = w, delay, lease
+	if s.will != nil {
+		replaced = s.willLease
+	}
+	s.will, s.willDelay, s.willLease, s.willConn = w, delay, lease, c
+	return replaced
 }
 
-// takeWill removes and returns the Will Message, so it can only ever be
-// published once, with the stored record that goes with it.
-func (s *session) takeWill() (*packet.Will, time.Duration, *willLease) {
+// takeWill removes and returns connection c's Will Message, so it can only ever
+// be published once, with the stored record that goes with it. A Will that
+// another connection set is not c's to take.
+func (s *session) takeWill(c *conn) (*packet.Will, time.Duration, *willLease) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.willConn != c {
+		return nil, 0, nil
+	}
 	w, d, l := s.will, s.willDelay, s.willLease
-	s.will, s.willDelay, s.willLease = nil, 0, nil
+	s.will, s.willDelay, s.willLease, s.willConn = nil, 0, nil, nil
 	return w, d, l
 }
 
-// takePendingLease returns the stored record of a Will waiting out its delay
-// and forgets it, for a resumption that is about to cancel that Will
-// [MQTT-3.1.3-9].
-func (s *session) takePendingLease() *willLease {
+// cancelWills forgets every Will the session holds, the connection's and one
+// waiting out its delay, and returns their stored records, for a new connection
+// that is about to be attached [MQTT-3.1.2-8], [MQTT-3.1.3-9]. The client is
+// live again: none of them may be published.
+func (s *session) cancelWills() *willLease {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.pendingWill == nil {
+	if s.will == nil && s.pendingWill == nil {
 		return nil
 	}
 	l := s.willLease
-	s.willLease = nil
+	s.will, s.willDelay, s.willLease, s.willConn = nil, 0, nil, nil
+	s.pendingWill = nil
 	return l
 }
 

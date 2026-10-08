@@ -139,21 +139,6 @@ cuts the broker's NATS connection once the JetStream publish-ack has passed.
 A Will published by `publishWillFor` goes through the queue's keep but is not flushed, and a Will
 has no client to refuse to. Whether a published Will should wait for the flush is undecided.
 
-## A reconnect leaves the previous Will lease behind
-
-**Today:** `setWill` (`handshake.go` around 262, `session.go` around 860) overwrites the session's
-live Will lease without dropping it, so the record it replaced stays in the `_wills` bucket, owned by
-this broker. After this broker restarts, another broker finds the owner dead and publishes that
-orphan. **Shape:** `setWill` returns the previous lease and the caller drops it. Test: connect with a
-Will, replace it on the same session, kill and restart the broker, assert one Will at most.
-
-## An old connection's finish can take the new connection's Will
-
-**Today:** if the old connection's `finish` runs after the new connection's `setWill`, `takeWill`
-takes the new connection's Will and publishes or cancels it. This predates v0.10.0 and is more
-visible with `DurableWills` leases. **Shape:** key the Will to the connection that set it, so
-`takeWill` only returns its own. Test: a takeover whose old connection finishes late.
-
 # Tier 3: SHOULD statements
 
 ## A held shared message: the killed-broker window and the missing cap

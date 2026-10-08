@@ -374,6 +374,15 @@ func (b *Broker) takeOverSession(clientID string, cleanStart bool) (*session, bo
 	b.mu.Unlock()
 
 	if ok {
+		if !cleanStart {
+			// The client connects again with its session: the connection it is
+			// displacing ends with a new one already open, so its Will is not
+			// published, and cancelling it first is what keeps the displaced
+			// connection's end from racing this decision [MQTT-3.1.2-8],
+			// [MQTT-3.1.3-9]. With a clean start the session ends instead, and
+			// the Will goes out with it.
+			b.wills.drop(existing.cancelWills())
+		}
 		existing.takeOver()
 	}
 

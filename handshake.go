@@ -223,7 +223,11 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 	sess.setPrincipal(identity, username)
 	sess.setExpiry(c.sessionExpiry(props))
 
-	cancelled := sess.takePendingLease()
+	// A client that connects again is live: the Will of the connection it
+	// replaces, or one waiting out its delay, is not published
+	// [MQTT-3.1.2-8], [MQTT-3.1.3-9]. The old connection's own end then finds
+	// nothing of its to take.
+	cancelled := sess.cancelWills()
 	if prev := sess.attach(c); prev != nil && prev != c {
 		prev.close()
 	}
@@ -259,7 +263,7 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 			}
 			lease = wills.register(ctx, clientID, cp.Will, recDelay)
 		}
-		sess.setWill(cp.Will, delay, lease)
+		c.broker.wills.drop(sess.setWill(c, cp.Will, delay, lease))
 	}
 
 	ack := &packet.Connack{

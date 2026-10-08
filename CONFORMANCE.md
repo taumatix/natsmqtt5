@@ -98,6 +98,10 @@ conforming client hits in ordinary use:
 - **Fixed, unreleased.** A QoS 2 message sent to a client is recorded before its PUBLISH and before its
   PUBREL go out, so a broker killed at any step resends the PUBLISH or the PUBREL and never delivers the
   message again as a new one (`killed_qos2_outbound_test.go`, SIGKILL). [MQTT-4.3.3-6], [MQTT-4.4.0-1].
+- **Fixed, unreleased.** The Will belongs to the connection that set it: a reconnect that keeps the
+  session cancels the displaced connection's Will, the displaced connection's end cannot take the new
+  one's, and a replaced Will leaves no stored record (`will_ownership_test.go`). A clean-start takeover
+  publishes the old Will, as the session ends. [MQTT-3.1.2-8], [MQTT-3.1.2-10], [MQTT-3.1.3-9].
 - **Fixed, unreleased.** A message whose live copy reaches the broker after the subscriber's connection
   ended is still sent on resume, however long the copy was delayed, on the same broker and on a broker
   that restores the session from its record (`late_live_copy_delay_test.go`). Not covered: a copy that
