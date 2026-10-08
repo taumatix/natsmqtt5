@@ -336,7 +336,7 @@ func (c *conn) resumeSubscriptions(ctx context.Context, stored []storedSubscript
 		// Same race as a SUBSCRIBE: mayResume asked the Authorizer, and a
 		// second CONNECT on this Client Identifier can take the session over
 		// while it was out.
-		old, installed := c.sess.installSubscription(c, sub)
+		old, installed, _ := c.sess.installSubscription(c, sub)
 		if !installed {
 			unsubscribeAll(sub)
 			return fmt.Errorf("restoring %q for %q: the session was taken over mid-handshake", st.Filter, c.sess.clientID)

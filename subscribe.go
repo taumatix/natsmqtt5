@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -145,18 +146,34 @@ func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID
 		grantedQoS: granted,
 		id:         subID,
 	}
-	if err := c.bindNATS(sub); err != nil {
-		c.logger.Warn("could not create the NATS subscription",
-			"filter", want.Filter, "subject", full, "error", err)
-		c.broker.leaveGroup(c.sess, want.Filter)
-		return nil, false, packet.ImplementationSpecificError
+	// Subscribing again to a non-shared filter the session already holds keeps
+	// the NATS subscriptions it has and replaces only what the broker says about
+	// them: the options, the granted QoS, the identifier. Tearing them down and
+	// binding anew leaves the old interest gone before the new one has reached
+	// the server, and "Application Messages MUST NOT be lost due to replacing
+	// the Subscription" [MQTT-3.8.4-4]. installSubscription does the handover
+	// and asks for a fresh binding if there turns out to be nothing to take over.
+	bound := false
+	if share == "" && c.sess.holdsBound(want.Filter) {
+		sub.natsSubs = nil
+	} else {
+		if err := c.bindNATS(sub); err != nil {
+			return c.bindFailed(sub, err)
+		}
+		bound = true
 	}
 
 	// The Authorizer call above can outlast this connection's hold on the
 	// session; installSubscription re-checks that under the session lock. A
 	// refusal is answered with 0x80, which nothing will read: the socket was
 	// closed by the takeover that displaced this connection.
-	old, installed := c.sess.installSubscription(c, sub)
+	old, installed, rebind := c.sess.installSubscription(c, sub)
+	if rebind && !bound {
+		if err := c.bindNATS(sub); err != nil {
+			return c.bindFailed(sub, err)
+		}
+		old, installed, _ = c.sess.installSubscription(c, sub)
+	}
 	if !installed {
 		unsubscribeAll(sub)
 		c.broker.leaveGroup(c.sess, want.Filter)
@@ -169,12 +186,27 @@ func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID
 	// is identical to a Non-shared Subscription's Topic Filter for the current
 	// Session, then it MUST replace that existing Subscription"
 	// [MQTT-3.8.4-3]. Replacing means tearing the old NATS subscriptions down,
-	// since the options may have changed; the new ones are already bound.
+	// since the options may have changed. A shared subscription's are bound
+	// anew, and the old ones leave only now that the new are in the queue group;
+	// a message that reaches the old ones meanwhile is handed to the new
+	// (replacedBy). Anything else's were taken over by sub and are not touched.
 	existed := old != nil
 	if existed {
-		unsubscribeAll(old)
+		// Drained, not unsubscribed: unsubscribing drops the messages the server
+		// has already sent to the old subscription, and those are the ones a
+		// queue group routed to it before the new member was known [MQTT-3.8.4-4].
+		drainAll(old)
 	}
 	return sub, existed, packet.ReasonCode(granted)
+}
+
+// bindFailed answers a subscription whose NATS subscriptions could not be
+// created.
+func (c *conn) bindFailed(sub *subscription, err error) (*subscription, bool, packet.ReasonCode) {
+	c.logger.Warn("could not create the NATS subscription",
+		"filter", sub.filter, "subject", sub.subject, "error", err)
+	c.broker.leaveGroup(c.sess, sub.filter)
+	return nil, false, packet.ImplementationSpecificError
 }
 
 func anyGranted(granted []*subscription) bool {
@@ -217,18 +249,25 @@ func (c *conn) bindNATS(sub *subscription) error {
 		}
 		sub.backlog = backlog
 	}
+	cell := new(atomic.Pointer[subscription])
+	cell.Store(sub)
+	sub.cell = cell
 	handler := func(msg *nats.Msg) {
-		if !sub.live.Load() {
+		// The newest subscription for the filter delivers: a client that
+		// subscribed again has replaced this one, and the message must reach it
+		// anyway [MQTT-3.8.4-4].
+		cur := cell.Load().latest()
+		if !cur.live.Load() {
 			// Bound but not installed, or already removed: no connection has
 			// been cleared to receive through it.
 			return
 		}
-		if sub.backlog != nil && msg.Header.Get(hdrQueued) != "" {
+		if cur.backlog != nil && msg.Header.Get(hdrQueued) != "" {
 			// The backlog delivers this one, to whichever member pulls it.
 			return
 		}
-		if cur := sess.currentConn(); cur != nil {
-			cur.onNATSMessage(sub, msg)
+		if conn := sess.currentConn(); conn != nil {
+			conn.onNATSMessage(cur, msg)
 		}
 	}
 
@@ -436,7 +475,7 @@ func (c *conn) deliverLoop() {
 				// late, and QoS 2 must not deliver twice.
 				continue
 			}
-			if d.sub != nil && !d.sub.live.Load() {
+			if d.sub != nil && !d.sub.wanted() {
 				// Queued before its subscription was removed, by an UNSUBSCRIBE
 				// or by Broker.Reauthorize. A server "MAY continue to deliver any
 				// existing messages buffered" after an UNSUBSCRIBE (MQTT-5.0
@@ -477,7 +516,7 @@ func (c *conn) deliver(d *delivery) error {
 			return nil
 		}
 	}
-	if d.sub != nil && !d.sub.live.Load() {
+	if d.sub != nil && !d.sub.wanted() {
 		// Revoked or unsubscribed while this waited for room, which is
 		// unbounded. A revocation landing between here and the write below
 		// still lets this one message out: it was earned before the change.

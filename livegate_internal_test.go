@@ -59,7 +59,7 @@ func TestABoundButUninstalledSubscriptionDeliversNothing(t *testing.T) {
 	}
 
 	// Bound, not installed: the displaced connection's install is refused.
-	_, installed := sess.installSubscription(displaced, sub)
+	_, installed, _ := sess.installSubscription(displaced, sub)
 	require.False(t, installed, "the displaced connection must not be able to install")
 	publish("before")
 	select {
@@ -70,7 +70,7 @@ func TestABoundButUninstalledSubscriptionDeliversNothing(t *testing.T) {
 
 	// The same subscription, installed by the connection entitled to it,
 	// delivers — so the silence above was the gate and not a broken fixture.
-	_, installed = sess.installSubscription(current, sub)
+	_, installed, _ = sess.installSubscription(current, sub)
 	require.True(t, installed)
 	publish("after")
 	select {
