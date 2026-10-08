@@ -85,19 +85,19 @@ with `0x82 Protocol Error`, and its identifier can be handed to a new message fi
 attach count they were withdrawn under, so the two-resumptions rule applies across a restart. Size
 S; it changes the record, so it needs a `sessionRecordVersion` decision.
 
-## A broker that is alive but cut off from NATS announces its clients as dead
+## Self-fencing is proven for a silent link, not for an isolated NATS server
 
-**Today:** with `DurableWills`, a broker that stops answering its liveness
-subject is presumed dead and a survivor publishes its clients' Wills. A broker
-that is only partitioned from the NATS cluster still holds those connections,
-so the Will of a connected client is published. The two-ping confirmation makes
-this rare, not impossible.
+**Today:** a broker that cannot reach NATS for twice `WillCheckInterval` closes
+its clients (`willStore.selfLoop`). `nats_partition_test.go` proves it with a
+proxy that stops forwarding between the broker and a single server. Two paths
+are reasoned about and not tested: a broker whose server is alive but cut off
+from its cluster (only the Will-bucket read in `reachable` notices), and a
+fenced broker's own disconnect path, which waits out the Will-store timeouts
+and then publishes its own copy of the Will once NATS returns, relying on the
+record's compare-and-swap to keep it to one publication.
 
-**Shape:** a broker that loses its NATS connection closes its client sockets
-(the connection is the lease), or a lease with a deadline the owner must renew
-and a survivor waits out in full. Needs a decision on which, then a test that
-partitions a real broker (a proxy in front of NATS) and asserts no Will for a
-client that is still connected.
+**Shape:** a test on a three-server cluster that isolates the server one broker
+uses, and one that heals a long partition and counts the Will publications.
 
 ## The Will check reads every record on every tick
 

@@ -101,6 +101,24 @@ type willStore struct {
 	owner string
 	ping  *nats.Subscription
 
+	// fence closes every client connection of this broker. It is called when the
+	// broker can no longer prove to the rest of the cluster that it is alive,
+	// see selfLoop.
+	fence func()
+	// fenceAfter is how long this broker may go without a successful round trip
+	// to NATS before it fences itself; selfEvery is how often it checks;
+	// selfTimeout bounds one check. waitOut is how long a surviving broker must
+	// have seen an owner silent before it takes the owner's Wills: fenceAfter
+	// plus the longest the owner can take to notice (one check interval, and one
+	// timed-out check, with slack for a second). The survivor starts counting
+	// when a ping has already failed, which is no earlier than the owner's last
+	// success, so a silent owner has closed its connections by then and the Will
+	// of a client still connected is not published.
+	fenceAfter, selfEvery, selfTimeout, waitOut time.Duration
+	// silentSince is when each owner was first seen not answering. Only
+	// adoptOrphans touches it.
+	silentSince map[string]time.Time
+
 	// publish sends an adopted Will. The broker supplies it.
 	publish func(clientID string, w *packet.Will)
 	// closing closes when the broker shuts down, which abandons Wills waiting
@@ -111,7 +129,7 @@ type willStore struct {
 }
 
 func newWillStore(ctx context.Context, js jetstream.JetStream, nc *nats.Conn, opts *resolved, logger *slog.Logger,
-	publish func(string, *packet.Will), closing <-chan struct{}) (*willStore, error) {
+	publish func(string, *packet.Will), fence func(), closing <-chan struct{}) (*willStore, error) {
 	bucket := opts.StreamPrefix + "_wills"
 	kv, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
 		Bucket:      bucket,
@@ -137,14 +155,21 @@ func newWillStore(ctx context.Context, js jetstream.JetStream, nc *nats.Conn, op
 		checkEvery:    every,
 		owner:         owner,
 		publish:       publish,
+		fence:         fence,
 		closing:       closing,
+		silentSince:   map[string]time.Time{},
 	}
+	w.fenceAfter = 2 * every
+	w.selfEvery = every / 2
+	w.selfTimeout = min(ownerPingTimeout, every)
+	w.waitOut = w.fenceAfter + w.selfEvery + 2*w.selfTimeout
 	if w.ping, err = nc.Subscribe(brokerPingSubject(opts.SubjectPrefix, owner), replyEmpty); err != nil {
 		return nil, fmt.Errorf("subscribing to the Will liveness subject: %w", err)
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	w.stop = cancel
 	go w.checkLoop(runCtx)
+	go w.selfLoop(runCtx)
 	return w, nil
 }
 
@@ -284,7 +309,19 @@ func (w *willStore) settle(ctx context.Context, clientID string, resumed bool) {
 			continue
 		}
 		if resumed {
-			w.drop(l)
+			// A survivor may adopt the record between our read and our removal,
+			// which changes its revision; read it again and remove that one, or
+			// the adopter would publish a Will this resumption must cancel
+			// [MQTT-3.1.3-9].
+			for attempt := 0; attempt < 3; attempt++ {
+				err := w.remove(l)
+				if err == nil || !isRevisionConflict(err) {
+					break
+				}
+				if l, ok = w.read(ctx, key); !ok {
+					break
+				}
+			}
 			w.logger.Debug("cancelled a Will Message: the session was resumed", "client_id", clientID)
 			continue
 		}
@@ -320,6 +357,50 @@ func (w *willStore) checkLoop(ctx context.Context) {
 	}
 }
 
+// selfLoop makes this broker prove, every selfEvery, that it can still reach the
+// rest of the cluster: its NATS connection is up, it gets an answer on its own
+// liveness subject, and it can read the Will bucket. A broker that cannot do so
+// for fenceAfter closes its client connections. A client whose broker is cut off
+// from NATS is not served by anyone, so its connection is over, and closing it
+// is what lets a surviving broker publish the Will without announcing a client
+// that is still connected as dead [MQTT-3.1.2-8].
+func (w *willStore) selfLoop(ctx context.Context) {
+	lastOK := time.Now()
+	t := time.NewTicker(w.selfEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		started := time.Now()
+		if w.reachable(ctx) {
+			lastOK = started
+			continue
+		}
+		if time.Since(lastOK) >= w.fenceAfter && ctx.Err() == nil {
+			w.logger.Warn("cut off from NATS: closing client connections so that their Will Messages can be published",
+				"cut_off_for", time.Since(lastOK).Round(time.Millisecond))
+			w.fence()
+		}
+	}
+}
+
+// reachable reports whether this broker can still talk to the cluster.
+func (w *willStore) reachable(ctx context.Context) bool {
+	if !w.nc.IsConnected() {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, w.selfTimeout)
+	defer cancel()
+	if _, err := w.nc.RequestWithContext(ctx, brokerPingSubject(w.subjectPrefix, w.owner), nil); err != nil {
+		return false
+	}
+	_, err := w.kv.Get(ctx, "fence-probe")
+	return err == nil || errors.Is(err, jetstream.ErrKeyNotFound)
+}
+
 // adoptOrphans claims every Will whose owner no longer answers a liveness
 // request. The claim is a compare-and-swap that names this broker as owner, so
 // of any number of brokers looking at the same record exactly one holds it; that
@@ -333,6 +414,14 @@ func (w *willStore) adoptOrphans(ctx context.Context) {
 		return
 	}
 	alive := map[string]bool{}
+	seen := map[string]bool{}
+	defer func() {
+		for owner := range w.silentSince {
+			if !seen[owner] {
+				delete(w.silentSince, owner)
+			}
+		}
+	}()
 	for key := range keys.Keys() {
 		l, ok := w.read(listCtx, key)
 		if !ok || l.rec.Owner == w.owner {
@@ -340,10 +429,24 @@ func (w *willStore) adoptOrphans(ctx context.Context) {
 		}
 		up, known := alive[l.rec.Owner]
 		if !known {
-			up = w.ownerAlive(listCtx, l.rec.Owner)
+			// One request, not two: silence has to last waitOut across checks
+			// before anything is adopted, which is the confirmation.
+			up = brokerAnswers(listCtx, w.nc, w.subjectPrefix, l.rec.Owner)
 			alive[l.rec.Owner] = up
 		}
-		if !up {
+		seen[l.rec.Owner] = true
+		if up {
+			delete(w.silentSince, l.rec.Owner)
+			continue
+		}
+		// Silent is not dead: an owner cut off from NATS still holds its clients
+		// until it fences itself, which takes up to waitOut.
+		first, ok := w.silentSince[l.rec.Owner]
+		if !ok {
+			first = time.Now()
+			w.silentSince[l.rec.Owner] = first
+		}
+		if time.Since(first) >= w.waitOut {
 			w.adopt(l)
 		}
 	}

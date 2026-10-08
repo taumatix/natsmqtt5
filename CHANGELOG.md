@@ -11,6 +11,15 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed, unreleased.** With `DurableWills`, a broker that was alive but cut off from NATS had its
+  clients' Wills published by a survivor while they were still connected. The broker now checks every
+  half `WillCheckInterval` that it can reach NATS, and closes its client sockets after twice that interval
+  without; a survivor adopts a silent broker's Wills only once the silence has lasted long enough for
+  that to have happened. The Will of a broker that really died is therefore published up to about 4.5
+  `WillCheckInterval` later than before. A reconnect that resumes the session while a survivor is adopting
+  the old Will now cancels the adopted record too, rather than losing the race and leaving it to be
+  published. [MQTT-3.1.2-8], [MQTT-3.1.3-9].
+
 - **Fixed, unreleased.** A client that reconnected with its session while its old connection was still
   ending could have the new connection's Will published or cancelled by the old one, and the old
   connection's Will went out although the client was live again. The Will now belongs to the connection

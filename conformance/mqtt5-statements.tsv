@@ -20,7 +20,7 @@ MQTT-3.1.2-4	3.1.2.4 Clean Start	CS	CITED-TESTED			broker_test.go:560 persistent
 MQTT-3.1.2-5	3.1.2.4 Clean Start	S	CITED-TESTED			broker_test.go:514 killed_broker_test.go:TestAKilledBrokersClientIsNotSentWhatItAlreadyGotAgain
 MQTT-3.1.2-6	3.1.2.4 Clean Start	S	UNCITED	a		No stored session -> newSession, Session Present 0 (handshake.go:195-200, 228-231).
 MQTT-3.1.2-7	3.1.2.5 Will Flag	S	CITED-TESTED			will_durable_test.go willstore.go handshake.go (DurableWills keeps it across a broker's death)
-MQTT-3.1.2-8	3.1.2.5 Will Flag	S	CITED-TESTED			broker_test.go:424 conn.go will_durable_test.go willstore.go (the Will of a killed broker, with DurableWills) will_ownership_test.go
+MQTT-3.1.2-8	3.1.2.5 Will Flag	S	CITED-TESTED			broker_test.go:424 conn.go will_durable_test.go willstore.go (the Will of a killed broker, with DurableWills) will_ownership_test.go nats_partition_test.go
 MQTT-3.1.2-9	3.1.2.5 Will Flag	C	CLIENT-ONLY (UNCITED)			
 MQTT-3.1.2-10	3.1.2.5 Will Flag	S	CITED-TESTED			will_durable_test.go willstore.go conn.go (removed by CAS once published or on DISCONNECT 0x00) will_ownership_test.go
 MQTT-3.1.2-11	3.1.2.6 Will QoS	C	CLIENT-ONLY (CITED-CODE)			packet/connect.go:92
