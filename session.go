@@ -45,6 +45,39 @@ type subscription struct {
 	// is, a message must not go anywhere. Cleared again when the subscription
 	// leaves the session.
 	live atomic.Bool
+
+	// replacedBy is the subscription that took this one's place when the client
+	// subscribed again to the same Topic Filter [MQTT-3.8.4-3]. A message that
+	// reaches or waits for the replaced one is delivered by its successor
+	// instead of being dropped: "Application Messages MUST NOT be lost due to
+	// replacing the Subscription" [MQTT-3.8.4-4].
+	replacedBy atomic.Pointer[subscription]
+	// cell is shared by a subscription and the ones that replace it on the same
+	// NATS subscriptions (see subscribeOne), and always holds the newest. The
+	// NATS handler reads it to find who is to deliver.
+	cell *atomic.Pointer[subscription]
+}
+
+// latest follows the chain of replacements to the subscription now in force.
+func (s *subscription) latest() *subscription {
+	for {
+		next := s.replacedBy.Load()
+		if next == nil {
+			return s
+		}
+		s = next
+	}
+}
+
+// wanted reports whether a message queued for s is still wanted: s is live, or
+// something that replaced it is.
+func (s *subscription) wanted() bool {
+	for ; s != nil; s = s.replacedBy.Load() {
+		if s.live.Load() {
+			return true
+		}
+	}
+	return false
 }
 
 // outbound tracks a QoS 1 or QoS 2 message the broker has sent to the client
@@ -521,6 +554,15 @@ func unsubscribeAll(sub *subscription) {
 	sub.natsSubs = nil
 }
 
+// drainAll ends sub's NATS subscriptions after their handlers have seen the
+// messages already queued for them, which unsubscribeAll would discard.
+func drainAll(sub *subscription) {
+	for _, ns := range sub.natsSubs {
+		_ = ns.Drain()
+	}
+	sub.natsSubs = nil
+}
+
 // nextID allocates a Packet Identifier that is not currently in flight. It
 // returns false when all 65535 identifiers are in use, which the caller turns
 // into back-pressure rather than a protocol error.
@@ -813,19 +855,45 @@ func (s *session) subscriptions() []*subscription {
 // lock attach takes, an install either lands before the attach — and the sweep
 // sees it — or after, and is refused here. Checked any earlier, it could land
 // after the sweep had already run and be delivered to a principal nobody asked.
-func (s *session) installSubscription(c *conn, sub *subscription) (old *subscription, installed bool) {
+//
+// A sub that has no NATS subscriptions of its own (natsSubs empty) takes over
+// the ones the subscription it replaces holds, so a repeated SUBSCRIBE on a
+// non-shared filter never leaves the NATS server: there is no instant when the
+// interest is gone, or doubled. When there is nothing to take over, rebind is
+// true and nothing is changed.
+func (s *session) installSubscription(c *conn, sub *subscription) (old *subscription, installed, rebind bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.conn != c {
-		return nil, false
+		return nil, false, false
 	}
 	old = s.subs[sub.filter]
-	if old != nil {
-		old.live.Store(false)
+	if len(sub.natsSubs) == 0 {
+		if old == nil || old.cell == nil || len(old.natsSubs) == 0 {
+			return nil, false, true
+		}
+		sub.natsSubs, old.natsSubs = old.natsSubs, nil
+		sub.cell = old.cell
 	}
 	s.subs[sub.filter] = sub
+	// Live before the old one is retired, so a message arriving between the two
+	// is delivered by one of them and not by neither.
 	sub.live.Store(true)
-	return old, true
+	if old != nil {
+		old.replacedBy.Store(sub)
+		sub.cell.Store(sub)
+		old.live.Store(false)
+	}
+	return old, true, false
+}
+
+// holdsBound reports whether the session holds a subscription on filter whose
+// NATS subscriptions can be taken over by its replacement.
+func (s *session) holdsBound(filter string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old := s.subs[filter]
+	return old != nil && old.cell != nil && len(old.natsSubs) > 0
 }
 
 // removeSubscriptionFor removes filter on behalf of c, which must still be the

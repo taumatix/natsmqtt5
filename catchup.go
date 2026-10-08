@@ -227,7 +227,7 @@ func (c *conn) drainDeliveries(sent map[uint64]bool) error {
 			if d.id != "" && c.wasReplayed(d.id) {
 				continue
 			}
-			if d.sub != nil && !d.sub.live.Load() {
+			if d.sub != nil && !d.sub.wanted() {
 				continue
 			}
 			if d.seq != 0 {

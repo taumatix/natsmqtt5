@@ -150,7 +150,7 @@ MQTT-3.8.3-5	3.8.3.1 Subscription Options	S	CITED-CODE			packet/subscribe.go:66
 MQTT-3.8.4-1	3.8.4 SUBSCRIBE Actions	S	UNCITED	a		handleSubscribe always writes a SUBACK (subscribe.go:60).
 MQTT-3.8.4-2	3.8.4 SUBSCRIBE Actions	S	UNCITED	a		SUBACK uses p.PacketID (subscribe.go:60).
 MQTT-3.8.4-3	3.8.4 SUBSCRIBE Actions	S	CITED-CODE			subscribe.go:154
-MQTT-3.8.4-4	3.8.4 SUBSCRIBE Actions	S	CITED-TESTED			broker_test.go:242
+MQTT-3.8.4-4	3.8.4 SUBSCRIBE Actions	S	CITED-TESTED			broker_test.go:242 subscribe_replace_test.go:122
 MQTT-3.8.4-5	3.8.4 SUBSCRIBE Actions	S	UNCITED	a		Filters handled one by one, one SUBACK (subscribe.go:27-60).
 MQTT-3.8.4-6	3.8.4 SUBSCRIBE Actions	S	CITED-CODE			packet/suback.go:4 subscribe.go:15
 MQTT-3.8.4-7	3.8.4 SUBSCRIBE Actions	S	CITED-TESTED			broker_test.go:334 session.go:26 subscribe.go:114 README.md:356 ROADMAP.md:218

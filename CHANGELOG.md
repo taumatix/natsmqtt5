@@ -11,6 +11,12 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+### Fixed
+- Subscribing again to a filter the session already holds no longer loses the messages published
+  while the subscription is replaced [MQTT-3.8.4-4]. A repeated SUBSCRIBE on a non-shared filter
+  keeps its NATS subscriptions and swaps only the options; a shared one hands the messages the old
+  member had been sent to the new. Before, 1 to 7 of 300 messages went missing across 12 repeats.
+
 ## [0.11.0] - 2026-10-08
 
 **Behaviour changes for existing deployments, none of them behind an option.** A broker upgraded
