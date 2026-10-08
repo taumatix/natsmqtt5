@@ -29,7 +29,12 @@ import (
 // [MQTT-4.4.0-1], and the QoS 2 identifiers received and not released, which it
 // holds so that a resent PUBLISH is not forwarded twice [MQTT-4.3.3-10]. Those
 // two are written at once, not on the tick, when the broker is about to promise
-// something about them (checkpointNow).
+// something about them (checkpointNow). So is the state of a QoS 2 message sent
+// to the client: before its PUBLISH goes out (deliver) and before its PUBREL does
+// (handlePubrec), so that a successor resends that packet and never delivers the
+// message again as a new one [MQTT-4.3.3-6]. A QoS 1 message acknowledged in the
+// last interval is still sent again: the broker cannot record a PUBACK before
+// it has received it.
 
 // checkpointSkew is how far before the moment of a checkpoint its replay time
 // reaches. A message stored in the queue just before the checkpoint can still

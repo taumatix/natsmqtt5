@@ -277,8 +277,13 @@ What it costs and what it does not cover yet:
   it off). The next broker to resume the session sees it attached to an owner
   that no longer answers and replays from the last position written, so a kill
   costs the client the messages it was sent in that last interval, sent again,
-  and loses none; a QoS 2 message delivered in that window can be delivered a
-  second time ([ROADMAP.md](ROADMAP.md)). With the checkpoint off, or for a
+  and loses none. A QoS 2 message is the exception: its record is written before the
+  PUBLISH goes out and before the PUBREL does (about 0.3 ms each against a local NATS
+  server, so a lockstep QoS 2 delivery takes about 0.77 ms instead of 0.16 ms;
+  `BenchmarkQoS2Delivery`), so a kill at any step of the exchange resends the PUBLISH or
+  the PUBREL and never delivers the message again as a new one [MQTT-4.3.3-6]. A QoS 1
+  message acknowledged in the last interval is sent again, as any at-least-once sender
+  that dies before it records the PUBACK must. With the checkpoint off, or for a
   record written before it existed, the replay is everything the queue still
   holds, up to `OfflineQueueMaxAge`. The cost is one key-value write per
   interval for each client that received or was sent something in it.
@@ -410,9 +415,10 @@ What it costs and what it does not cover:
   (retained, or with the queue off) travels in the record as its encoded PUBLISH
   when that is 16 KiB or less, and a larger one, or one whose queue copy has aged
   out, is logged and not resent; a broker killed outright leaves what its connections last checkpointed
-  (`-session-checkpoint-interval`, one second): an unacknowledged message sent in
-  that last interval is not in the record, and one whose exchange finished in it
-  is sent again; and a record is cut to fit
+  (`-session-checkpoint-interval`, one second): a QoS 1 message sent or
+  acknowledged in that last interval is not (or no longer) in the record and is sent
+  again, while a QoS 2 message is recorded before each packet that moves its exchange on;
+  and a record is cut to fit
   the NATS server's `max_payload` (1 MiB by default), newest in-flight entries
   first, which is about 15000 entries, so a client with a Receive Maximum beyond
   that and that many messages unacknowledged loses the newest, logged.

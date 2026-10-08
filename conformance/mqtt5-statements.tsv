@@ -201,7 +201,7 @@ MQTT-4.3.3-2	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		QoS 2, DUP 0 on fi
 MQTT-4.3.3-3	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		In flight until PUBREC (publish.go:183-212).
 MQTT-4.3.3-4	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		PUBREL with the same id on PUBREC < 0x80 (publish.go:210-211).
 MQTT-4.3.3-5	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		awaitPubcomp keeps it in flight (publish.go:210, session.go:350).
-MQTT-4.3.3-6	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		Resume resends PUBREL, not PUBLISH, once past PUBREC (retransmit.go:80-99).
+MQTT-4.3.3-6	4.3.3 QoS 2: Exactly once delivery	CS	CITED-TESTED	fixed unreleased		retransmit.go subscribe.go:deliver publish.go:handlePubrec killed_qos2_outbound_test.go:TestAKilledBrokersQoS2MessageAfterPubrelIsNotPublishedAgain (SIGKILL).
 MQTT-4.3.3-7	4.3.3 QoS 2: Exactly once delivery	CS	CITED-TESTED	fixed unreleased		retransmit.go expiry_test.go TestExpiryDoesNotDropAQoS2PublishThatWasAlreadySent
 MQTT-4.3.3-8	4.3.3 QoS 2: Exactly once delivery	CS	CITED-TESTED			reauthorise_test.go:212 retransmit_test.go:180 retransmit.go:82 session.go:414
 MQTT-4.3.3-9	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		releaseQoS2 on an error PUBREC (publish.go:155).
