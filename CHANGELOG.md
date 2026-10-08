@@ -13,6 +13,10 @@ honestly be reconstructed now.
 
 ### Fixed
 
+- **Tests, unreleased.** The restore of a session record is now driven over the wire for a queue copy
+  that aged out between the release and the resume (dropped, the session carries on) and for a message
+  still unacknowledged when its filter was unsubscribed (still resent). [MQTT-4.4.0-1].
+
 - **Fixed, unreleased.** With `PersistentSessions`, an unacknowledged message with no offline-queue
   copy (a retained message sent on subscribing, or any with `DisableOfflineQueue`) was left out of the
   session record and not resent by a restored session. The record now carries its encoded PUBLISH

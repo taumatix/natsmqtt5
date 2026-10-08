@@ -33,13 +33,6 @@ subscribing, or any with the queue off) is kept in the session record as its enc
 sequence in the record, so the record stays within `max_payload`. Needs a test with a 100 KiB
 retained payload and a SIGKILL.
 
-## The restore paths without a test over the wire
-
-**Today:** the restore is driven end to end for QoS 1, QoS 2 in both states, the inbound QoS 2
-identifier, expiry, a denied filter, no queue, and a record cut for size. Not driven: a queue copy
-that has aged out (`OfflineQueueMaxAge`) between the release and the resume, which is logged and
-the message dropped, and a filter unsubscribed before the release whose message is still owed.
-
 ## Timing-sensitive tests that fail on a loaded CI runner
 
 **Today:** the CI history since 2026-10-07 shows tests with tight wall-clock margins failing once
@@ -47,7 +40,12 @@ and passing on rerun: `TestExpiryReplayOnARestoredSessionHonoursTheQueueTimestam
 interval, 1.5 s wait and a broker restart: a 3 s stall expires the message),
 `TestDurablePublishAddsOneNATSRoundTripToThePUBACK` (72 ms measured against a 75 ms floor),
 `TestReauthorizeDiscardsAWillWaitingOutItsDelay` and
-`TestWithoutTheOfflineQueueNothingPublishedWhileAwayArrives`. Each needs the same treatment as
+`TestWithoutTheOfflineQueueNothingPublishedWhileAwayArrives`, and
+`TestPersistentSessionMovesToAnotherLiveBroker` (2026-10-08, macOS: the session bucket's watcher
+logged "consumer not found" and the 5 s wait for the displaced connection ran out), and
+`TestNoMessageIsLostOrDeliveredTwiceAcrossADropAndResume` (2026-10-08, macOS: 299 of 300 messages seen,
+0 retransmissions; 90 runs on a laptop never lost one, so find out whether the runner is slow or a
+message published as the connection goes down is lost). Each needs the same treatment as
 `TestAnUnacknowledgedSharedMessageGoesToAnotherMemberWhenTheSessionExpires`: reproduce by delaying
 the step the margin depends on, then widen the margin or assert on a fake clock, not retry.
 
