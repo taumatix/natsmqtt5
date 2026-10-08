@@ -3,6 +3,7 @@ package natsmqtt5_test
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/stretchr/testify/assert"
@@ -68,10 +69,22 @@ func TestSmokeSessionMovesBetweenBrokers(t *testing.T) {
 	// clearing anything a previous run left: a Clean Start deletes the stored
 	// record, and a Session Expiry Interval of zero means this connection
 	// leaves none of its own behind.
-	wipe, _ := connectClient(t, addrA, connectOpts(clientID))
-	require.NoError(t, wipe.Client.Disconnect(&paho.Disconnect{ReasonCode: 0}))
-
-	onA, connack := connectClient(t, addrA, durableConnect(clientID, 300))
+	// The broker removes the record after the DISCONNECT is acknowledged, so a
+	// connection made at once can still find it; wipe again until it does not.
+	var (
+		onA     *testClient
+		connack *paho.Connack
+	)
+	for attempt := 0; attempt < 10; attempt++ {
+		wipe, _ := connectClient(t, addrA, connectOpts(clientID))
+		require.NoError(t, wipe.Client.Disconnect(&paho.Disconnect{ReasonCode: 0}))
+		onA, connack = connectClient(t, addrA, durableConnect(clientID, 300))
+		if !connack.SessionPresent {
+			break
+		}
+		require.NoError(t, onA.Client.Disconnect(&paho.Disconnect{ReasonCode: 0}))
+		time.Sleep(200 * time.Millisecond)
+	}
 	require.False(t, connack.SessionPresent, "the run started from a clean session")
 	onA.subscribe(paho.SubscribeOptions{Topic: "smoke/roam/#", QoS: 1})
 	require.NoError(t, onA.Client.Disconnect(&paho.Disconnect{ReasonCode: 0}))
