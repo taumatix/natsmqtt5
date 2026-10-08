@@ -1,6 +1,7 @@
 package natsmqtt5
 
 import (
+	"context"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -102,6 +103,11 @@ type outbound struct {
 	// queue, or 0 when it has none. It is what a session record keeps in place
 	// of the payload; see sessionRecord.Inflight.
 	queueSeq uint64
+	// blobKey and blobAt are where the PUBLISH of a message with no queue copy
+	// and too large for the record was last written to the payload bucket, and
+	// when, so a record is not followed by a rewrite of the payload each time.
+	blobKey string
+	blobAt  time.Time
 	// quotaHeld records that this entry holds a slot in the current
 	// connection's send quota, so that its acknowledgement returns that slot
 	// and an acknowledgement for anything else does not.
@@ -1315,9 +1321,14 @@ func (s *session) commitRecord(gen uint64, rec *sessionRecord, rev uint64) {
 // inflightState is what the session record keeps of the unacknowledged messages
 // and the received QoS 2 identifiers: the entries in the order they were sent,
 // and the identifiers in ascending order. unrecorded counts in-flight messages
-// left out because they have no copy in the offline queue to be read back, so a
-// restored session could not resend them.
-func (s *session) inflightState() (inflight []storedInflight, received []uint16, unrecorded int) {
+// left out because they have no copy in the offline queue to be read back and no
+// way to keep their PUBLISH, so a restored session could not resend them.
+//
+// With blobs set, a PUBLISH too large for the record is not counted as left out
+// but returned in pending, for the caller to write to the payload bucket and
+// name in the entry at pending[i].index (stashBlobs): the write is a JetStream
+// round trip and this runs under the session lock.
+func (s *session) inflightState(blobs *sessionStore) (inflight []storedInflight, received []uint16, unrecorded int, pending []pendingBlob) {
 	s.mu.Lock()
 	entries := make([]*outbound, 0, len(s.inflight))
 	for _, o := range s.inflight {
@@ -1337,12 +1348,22 @@ func (s *session) inflightState() (inflight []storedInflight, received []uint16,
 				st.SubID = p.SubscriptionIdentifiers[0]
 			}
 		default:
-			raw, ok := storablePublish(o)
-			if !ok {
+			raw, ok := encodeStorable(o)
+			switch {
+			case !ok:
 				unrecorded++
 				continue
+			case len(raw) <= maxStoredPublish:
+				st.Pub = raw
+			case blobs == nil || len(raw) > blobs.valueLimit():
+				unrecorded++
+				continue
+			case o.blobKey != "" && !blobs.blobStale(o.blobAt):
+				st.Blob = o.blobKey
+			default:
+				pending = append(pending, pendingBlob{index: len(inflight), o: o, raw: raw})
 			}
-			st.Pub, st.At, st.Exp = raw, o.arrived, o.expiry
+			st.At, st.Exp = o.arrived, o.expiry
 		}
 		inflight = append(inflight, st)
 	}
@@ -1353,20 +1374,80 @@ func (s *session) inflightState() (inflight []storedInflight, received []uint16,
 	}
 	s.mu.Unlock()
 	sort.Slice(received, func(i, j int) bool { return received[i] < received[j] })
-	return inflight, received, unrecorded
+	return inflight, received, unrecorded, pending
 }
 
-// storablePublish encodes the PUBLISH of an in-flight message that has no copy
+// blobsStale reports whether a payload this session keeps in the payload bucket
+// is due to be written again, which a checkpoint does even when nothing else has
+// moved: an unacknowledged message can stay unacknowledged for longer than the
+// bucket keeps its payload.
+func (s *session) blobsStale(store *sessionStore) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, o := range s.inflight {
+		if o.blobKey != "" && store.blobStale(o.blobAt) {
+			return true
+		}
+	}
+	return false
+}
+
+// pendingBlob is an in-flight entry whose PUBLISH is to be written to the
+// payload bucket before the record that names it.
+type pendingBlob struct {
+	index int
+	o     *outbound
+	raw   []byte
+}
+
+// stashBlobs writes the payloads in pending and names them in rec.Inflight. An
+// entry whose payload could not be written is dropped from the record, as one
+// too large to keep always was, and counted in the result.
+//
+// Each payload has a deadline of its own: they are up to a value each, and one
+// budget for all of them would let a few starve the record write that follows.
+func (s *session) stashBlobs(store *sessionStore, rec *sessionRecord, pending []pendingBlob) (unrecorded int, err error) {
+	if len(pending) == 0 {
+		return 0, nil
+	}
+	drop := make(map[int]struct{})
+	for _, p := range pending {
+		ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
+		key, perr := store.putBlob(ctx, p.raw)
+		cancel()
+		if perr != nil {
+			err = perr
+			drop[p.index] = struct{}{}
+			continue
+		}
+		rec.Inflight[p.index].Blob = key
+		s.mu.Lock()
+		p.o.blobKey, p.o.blobAt = key, time.Now()
+		s.mu.Unlock()
+	}
+	if len(drop) > 0 {
+		kept := rec.Inflight[:0]
+		for i, st := range rec.Inflight {
+			if _, gone := drop[i]; !gone {
+				kept = append(kept, st)
+			}
+		}
+		rec.Inflight = kept
+	}
+	return len(drop), err
+}
+
+// encodeStorable encodes the PUBLISH of an in-flight message that has no copy
 // in the offline queue, as it should be resent: the DUP flag is the resend's to
-// set. It reports false for a message too large to keep in a record.
-func storablePublish(o *outbound) ([]byte, bool) {
+// set. It reports false for a message that cannot be encoded.
+func encodeStorable(o *outbound) ([]byte, bool) {
 	if o.publish == nil {
 		return nil, false
 	}
 	p := *o.publish
 	p.Dup = false
 	raw, err := packet.Encode(&p)
-	if err != nil || len(raw) > maxStoredPublish {
+	if err != nil {
 		return nil, false
 	}
 	return raw, true

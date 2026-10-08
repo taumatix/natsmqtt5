@@ -1,0 +1,180 @@
+package natsmqtt5_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"testing"
+	"time"
+
+	"github.com/eclipse/paho.golang/paho"
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/taumatix/natsmqtt5"
+	"github.com/taumatix/natsmqtt5/packet"
+)
+
+// A message in flight that has no copy in the offline queue (a retained message
+// is the common case) and a payload over what a session record keeps inline.
+// The record names the payload and the successor reads it back.
+//
+//	[MQTT-4.4.0-1] "When a Client reconnects with Clean Start set to 0 and a
+//	  session is present, both the Client and Server MUST resend any
+//	  unacknowledged PUBLISH packets (where QoS > 0) and PUBREL packets using
+//	  their original Packet Identifiers."
+
+// [MQTT-4.4.0-1]: a 100 KiB retained message sent at QoS 1 to a client of a broker
+// killed with SIGKILL is resent by the broker that takes the session over, whole,
+// with its Packet Identifier, DUP and RETAIN as first sent.
+func TestAKilledBrokersOversizeRetainedMessageInFlightIsResent(t *testing.T) {
+	natsURL := startNATS(t)
+	child := startBrokerBinary(t, natsURL, "-persistent-sessions", "-session-checkpoint-interval", killedBrokerCheckpoint)
+	survivor := startBroker(t, natsURL, persistentWithQueue)
+
+	big := bytes.Repeat([]byte("0123456789abcdef"), 100<<6) // 100 KiB
+	pub, _ := connectClient(t, survivor, connectOpts("pub-killed-big"))
+	pub.publish(&paho.Publish{Topic: "kb/a", QoS: 1, Retain: true, Payload: big})
+	// Older than the checkpoint's skew, so the successor's replay of the queue
+	// does not also hold this message as one published while the broker died.
+	time.Sleep(time.Second)
+
+	c := dialRaw(t, child.addr)
+	c.connect(rawConnect("killed-big", 300))
+	c.subscribe("kb/#", packet.QoS1)
+	first := c.expectPublish()
+	require.Equal(t, big, first.Payload)
+	require.True(t, first.Retain)
+	time.Sleep(700 * time.Millisecond)
+	child.kill9(t)
+
+	back := dialRaw(t, survivor)
+	require.True(t, back.connect(rawConnect("killed-big", 300)).SessionPresent)
+	got := back.expectPublish()
+	assert.Equal(t, first.PacketID, got.PacketID, "[MQTT-4.4.0-1] the original Packet Identifier")
+	assert.True(t, got.Dup)
+	assert.True(t, got.Retain)
+	assert.Equal(t, big, got.Payload, "the whole payload, not a truncated or missing one")
+	back.send(&packet.Puback{Ack: packet.Ack{PacketID: got.PacketID}})
+	back.expectNothing()
+}
+
+// [MQTT-4.4.0-1]: the same for QoS 2, a PUBLISH not yet answered.
+func TestAKilledBrokersOversizeQoS2RetainedMessageInFlightIsResent(t *testing.T) {
+	natsURL := startNATS(t)
+	child := startBrokerBinary(t, natsURL, "-persistent-sessions", "-session-checkpoint-interval", "1h")
+	survivor := startBroker(t, natsURL, persistentWithQueue)
+
+	big := bytes.Repeat([]byte("fedcba9876543210"), 100<<6)
+	pub, _ := connectClient(t, survivor, connectOpts("pub-killed-big2"))
+	pub.publish(&paho.Publish{Topic: "kb2/a", QoS: 2, Retain: true, Payload: big})
+	time.Sleep(time.Second)
+
+	c := dialRaw(t, child.addr)
+	c.connect(rawConnect("killed-big2", 300))
+	c.subscribe("kb2/#", packet.QoS2)
+	first := c.expectPublish()
+	require.Equal(t, big, first.Payload)
+	child.kill9(t)
+
+	back, got := afterTheKill(t, survivor, "killed-big2")
+	pubs := p3Publishes(got)
+	require.Len(t, pubs, 1, "[MQTT-4.4.0-1] once, with the checkpoint interval at an hour: the write before the PUBLISH")
+	assert.Equal(t, first.PacketID, pubs[0].PacketID)
+	assert.True(t, pubs[0].Dup)
+	assert.Equal(t, big, pubs[0].Payload)
+	back.send(&packet.Pubrec{Ack: packet.Ack{PacketID: first.PacketID}})
+	assert.Equal(t, first.PacketID, back.expectPubrel().PacketID)
+}
+
+// A payload over what a record keeps inline stays out of the record, and a
+// payload that is gone when the session is restored costs that one message, not
+// the ones after it [MQTT-4.4.0-1].
+func TestAnOversizePayloadStaysOutOfTheRecordAndItsLossSpoilsOnlyThatMessage(t *testing.T) {
+	natsURL := startNATS(t)
+	noQueue := func(o *natsmqtt5.Options) { o.PersistentSessions, o.DisableOfflineQueue = true, true }
+	addrA, stopA := startStoppableBroker(t, natsURL, noQueue)
+	addrB := startBroker(t, natsURL, noQueue)
+
+	c := dialRaw(t, addrA)
+	c.connect(rawConnect("big-gone", 300))
+	c.subscribe("bg/#", packet.QoS1)
+	pub, _ := connectClient(t, addrA, connectOpts("pub-big-gone"))
+	pub.publish(&paho.Publish{Topic: "bg/large", QoS: 1, Payload: bytes.Repeat([]byte("y"), 200<<10)})
+	pub.publish(&paho.Publish{Topic: "bg/small", QoS: 1, Payload: []byte("small")})
+	require.Equal(t, "bg/large", c.expectPublish().Topic)
+	small := c.expectPublish()
+	c.drop()
+	time.Sleep(100 * time.Millisecond)
+	stopA()
+
+	nc, err := nats.Connect(natsURL)
+	require.NoError(t, err)
+	defer nc.Close()
+	js, err := jetstream.New(nc)
+	require.NoError(t, err)
+	ctx := context.Background()
+	sessions, err := js.KeyValue(ctx, natsmqtt5.DefaultStreamPrefix+"_sessions")
+	require.NoError(t, err)
+	entry, err := sessions.Get(ctx, base64.RawURLEncoding.EncodeToString([]byte("big-gone")))
+	require.NoError(t, err)
+	assert.Less(t, len(entry.Value()), 4<<10, "the record names the payload and does not hold it")
+
+	blobs, err := js.KeyValue(ctx, natsmqtt5.DefaultStreamPrefix+"_inflight")
+	require.NoError(t, err)
+	keys, err := blobs.Keys(ctx)
+	require.NoError(t, err)
+	require.Len(t, keys, 1, "the payload is in the bucket, once")
+	require.NoError(t, blobs.Purge(ctx, keys[0]))
+
+	back := dialRaw(t, addrB)
+	require.True(t, back.connect(rawConnect("big-gone", 300)).SessionPresent)
+	got := back.expectPublish()
+	assert.Equal(t, small.PacketID, got.PacketID)
+	assert.Equal(t, "small", string(got.Payload))
+	back.expectNothing()
+}
+
+// A payload the bucket holds for an unacknowledged message is kept for as long
+// as the session is served, however long the client leaves the message
+// unacknowledged: the bucket ages values out after twice the maximum Session
+// Expiry Interval (4 s here) and the session writes it again before then
+// [MQTT-4.4.0-1].
+func TestAnOversizePayloadOfAMessageLeftUnacknowledgedIsKeptAlive(t *testing.T) {
+	natsURL := startNATS(t)
+	short := func(o *natsmqtt5.Options) {
+		o.PersistentSessions, o.DisableOfflineQueue = true, true
+		o.MaxSessionExpiry = 4 * time.Second
+		o.SessionCheckpointInterval = 100 * time.Millisecond
+	}
+	addr := startBroker(t, natsURL, short)
+
+	c := dialRaw(t, addr)
+	c.connect(rawConnect("big-idle", 300))
+	c.subscribe("bi/#", packet.QoS1)
+	pub, _ := connectClient(t, addr, connectOpts("pub-big-idle"))
+	pub.publish(&paho.Publish{Topic: "bi/large", QoS: 1, Payload: bytes.Repeat([]byte("z"), 64<<10)})
+	require.Equal(t, "bi/large", c.expectPublish().Topic)
+
+	nc, err := nats.Connect(natsURL)
+	require.NoError(t, err)
+	defer nc.Close()
+	js, err := jetstream.New(nc)
+	require.NoError(t, err)
+	ctx := context.Background()
+	var kv jetstream.KeyValue
+	require.Eventually(t, func() bool {
+		kv, err = js.KeyValue(ctx, natsmqtt5.DefaultStreamPrefix+"_inflight")
+		return err == nil
+	}, 3*time.Second, 50*time.Millisecond, "the payload is stored while the client is connected")
+	keys, err := kv.Keys(ctx)
+	require.NoError(t, err)
+	require.Len(t, keys, 1)
+
+	time.Sleep(11 * time.Second) // more than the bucket's 8 s
+	keys, err = kv.Keys(ctx)
+	require.NoError(t, err, "the payload is still there after the bucket's time to live")
+	assert.Len(t, keys, 1)
+}
