@@ -37,6 +37,10 @@ import (
 
 const handBackAckWait = 900 * time.Millisecond
 
+// handBackSessionLife is, in seconds, how long the session of a dropped member
+// lasts in the test that waits for it to expire.
+const handBackSessionLife = 3
+
 const group = "$share/g/jobs/#"
 
 type sharedFleet struct {
@@ -84,7 +88,12 @@ func (c *rawClient) expectNoPublishFor(d time.Duration) {
 // member gets it (§4.8.2, the SHOULD), and gets it once.
 func TestAnUnacknowledgedSharedMessageGoesToAnotherMemberWhenTheSessionExpires(t *testing.T) {
 	f := newSharedFleet(t)
-	m1 := member(t, f.a, "m1", 1)
+	// The session lasts handBackSessionLife after the drop. The "not early"
+	// check below runs once m2 has connected and joined the group, which on a
+	// loaded runner took long enough to outlast a one-second session (seen on a
+	// macOS CI runner, and reproduced by delaying m2 by 800 ms), so the check
+	// saw the hand-back it was meant to rule out. The margin is now seconds.
+	m1 := member(t, f.a, "m1", handBackSessionLife)
 	f.publish(t, "job-1")
 	first := m1.expectPublish()
 	require.Equal(t, "job-1", string(first.Payload))
@@ -92,8 +101,8 @@ func TestAnUnacknowledgedSharedMessageGoesToAnotherMemberWhenTheSessionExpires(t
 	m1.drop()
 
 	m2 := member(t, f.b, "m2", 300)
-	// The session of m1 is still there for a second: it is not handed back
-	// early, which would duplicate the message for a client that returns.
+	// The session of m1 is still there: it is not handed back early, which
+	// would duplicate the message for a client that returns.
 	m2.expectNothing()
 
 	got := m2.expectPublish() // within the read deadline, the sweep has run
