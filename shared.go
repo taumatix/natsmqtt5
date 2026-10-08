@@ -155,9 +155,13 @@ func (c *conn) pull(sub *subscription) {
 			continue
 		}
 
+		header := m.Headers()
+		if meta, err := m.Metadata(); err == nil {
+			header = setArrived(header, meta.Timestamp)
+		}
 		it := &sharedItem{
 			sub:  sub,
-			msg:  &nats.Msg{Subject: c.broker.queue.liveSubject(m.Subject()), Header: m.Headers(), Data: m.Data()},
+			msg:  &nats.Msg{Subject: c.broker.queue.liveSubject(m.Subject()), Header: header, Data: m.Data()},
 			done: make(chan bool, 1),
 		}
 		var taken bool

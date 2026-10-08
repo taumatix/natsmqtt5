@@ -13,6 +13,13 @@ honestly be reconstructed now.
 
 ### Fixed
 
+- **Message Expiry Interval is enforced.** A message whose interval has passed is no longer
+  delivered, and one still live goes out with the interval less the time it waited in the broker,
+  on every path: live, retained (the wait counts from storage, and an expired retained message is
+  removed from the stream), offline-queue replay, catch-up, shared backlog and resends. Time is
+  counted in whole seconds, rounded down. A resent QoS 1 PUBLISH that expired in flight is
+  deleted; a QoS 2 PUBLISH already sent is resent regardless [MQTT-3.3.2-5], [MQTT-3.3.2-6],
+  [MQTT-4.3.3-7].
 - **A connection that drops while behind no longer loses what was waiting for it.** The messages
   queued for a client, and the stretch of the offline queue a catch-up had still to send, used to
   be discarded when its connection ended, and the resume replay started only 2 seconds before

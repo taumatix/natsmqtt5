@@ -27,19 +27,6 @@ per behind client; the gain is that a kill costs a second of repeats rather than
 `TestASessionLeftAttachedByAKilledBrokerIsReplayedFromTheQueue` rewrites a record to simulate the
 kill; a real one needs a harness that ends a broker without its cleanup.
 
-## Message Expiry Interval enforcement
-
-**Today:** the property is forwarded unaltered. MQTT-5.0 §3.3.2.3.3 says a
-server must delete a message whose expiry has passed before onward delivery,
-and must decrement the value by the time the message waited. [MQTT-3.3.2-5],
-[MQTT-3.3.2-6]. A probe confirmed it: a retained message with a 1 s expiry was
-still delivered after it had passed, with the interval unchanged. The same
-applies to the offline replay and to resends.
-
-**Shape:** for retained messages, an expiry sweep over the retained stream. The
-decrement needs the message's arrival timestamp, which JetStream already
-records.
-
 ## Retransmission that survives a broker restart
 
 **Today:** the resend on resume reaches as far as this broker's memory. A
@@ -269,6 +256,30 @@ spec's broader advice is that applications do not use `$` topics for their own p
 that a Server SHOULD prevent clients exchanging messages on them (MQTT-5.0 §4.7.2). Refusing every
 `$` topic other than `$share/` would follow it, at the cost of breaking anyone who uses `$app/…`
 today. A decision for a minor release, with an option to keep the old behaviour.
+
+## Expired retained messages nobody subscribes to stay in the stream
+
+**Today:** Message Expiry is enforced for retained messages when a subscription looks for them: an
+expired one is not sent, and is removed from the in-memory view and deleted from the retained
+stream [MQTT-3.3.2-5]. One that no subscription matches after it expired is never looked at and
+stays in the stream (and in every broker's map) until a publish to its topic replaces it or a
+restart reads it again. It is never delivered, so no statement is violated; it is storage.
+
+**Shape:** a periodic sweep over the retained map, or a per-message TTL on the stream
+(`AllowMsgTTL`, nats-server 2.11 and later, with the interval as the `Nats-TTL` header), which would
+also need a floor for the servers that do not have it.
+
+## A message's wait is counted from this broker's receipt, and in whole seconds
+
+**Today:** the interval is whole seconds on the wire and the time waited is counted in whole seconds,
+rounded down (README, "What it does not do"). A live message's wait starts when this broker's NATS
+subscription receives it, not when the publishing broker did, so time spent in NATS between brokers
+is not subtracted; a message stored in the queue starts at the JetStream timestamp. An interval of 0
+therefore survives a fraction of a second rather than none.
+
+**Shape:** a live copy could carry its publisher's receive time in a header
+(`Mqtt5-Published-At`), at the cost of trusting two brokers' clocks to agree. Worth doing only if
+someone runs brokers apart enough for the difference to matter.
 
 # Tier 4: features MQTT 5 defines that the broker does not offer
 

@@ -24,6 +24,20 @@ type retained struct {
 	payload   []byte
 	qos       packet.QoS
 	props     *packet.Properties
+	// stored is when the message was stored, which is when its Message Expiry
+	// Interval starts to run; seq is its stream sequence, 0 if unknown.
+	stored time.Time
+	seq    uint64
+}
+
+// expired reports whether the message's Message Expiry Interval has passed
+// [MQTT-3.3.2-5].
+func (r *retained) expired(now time.Time) bool {
+	if r.props == nil || r.props.MessageExpiryInterval == nil {
+		return false
+	}
+	_, expired := remainingExpiry(*r.props.MessageExpiryInterval, r.stored, now)
+	return expired
 }
 
 // properties returns a copy, so a subscriber-specific Subscription Identifier
@@ -192,12 +206,19 @@ func (s *retainedStore) apply(msg jetstream.Msg) {
 		return
 	}
 	qos, _, _, props := fromNATS(&nats.Msg{Header: msg.Headers(), Data: msg.Data()})
-	s.byTopic[name] = &retained{
+	r := &retained{
 		topicName: name,
 		payload:   msg.Data(),
 		qos:       qos,
 		props:     props,
+		stored:    time.Now(),
 	}
+	// The stream's timestamp, so a message stored before this broker started
+	// has been waiting since then and not since the broker read it.
+	if md, err := msg.Metadata(); err == nil {
+		r.stored, r.seq = md.Timestamp, md.Sequence.Stream
+	}
+	s.byTopic[name] = r
 }
 
 func trimRetainedMarker(subject string) (string, bool) {
@@ -222,7 +243,8 @@ func (s *retainedStore) store(ctx context.Context, subject, originClientID strin
 		// message it replaces.
 		msg.Data = nil
 	}
-	if _, err := s.js.PublishMsg(ctx, msg); err != nil {
+	ack, err := s.js.PublishMsg(ctx, msg)
+	if err != nil {
 		return err
 	}
 
@@ -241,21 +263,61 @@ func (s *retainedStore) store(ctx context.Context, subject, originClientID strin
 		payload:   p.Payload,
 		qos:       p.QoS,
 		props:     p.Properties,
+		stored:    time.Now(),
+		seq:       ack.Sequence,
 	}
 	return nil
 }
 
-// match returns the retained messages whose Topic Name matches the filter.
+// match returns the retained messages whose Topic Name matches the filter and
+// have not expired. An expired one is deleted, here and from the stream, as
+// the specification requires of a message that has passed its interval
+// [MQTT-3.3.2-5]; doing it when a subscription looks is the sweep, and it
+// costs nothing while no one asks.
 func (s *retainedStore) match(filter string) []*retained {
+	now := time.Now()
+	var out, expired []*retained
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var out []*retained
 	for name, r := range s.byTopic {
-		if topic.Match(filter, name) {
-			out = append(out, r)
+		if !topic.Match(filter, name) {
+			continue
 		}
+		if r.expired(now) {
+			expired = append(expired, r)
+			continue
+		}
+		out = append(out, r)
+	}
+	s.mu.RUnlock()
+	if len(expired) > 0 {
+		s.discard(expired)
 	}
 	return out
+}
+
+// discard removes expired messages from the local view and from the stream.
+// A message replaced since it was seen stays: only the one that expired goes.
+func (s *retainedStore) discard(expired []*retained) {
+	s.mu.Lock()
+	for _, r := range expired {
+		if s.byTopic[r.topicName] == r {
+			delete(s.byTopic, r.topicName)
+		}
+	}
+	s.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), retainStoreTimeout)
+	defer cancel()
+	for _, r := range expired {
+		if r.seq == 0 {
+			continue
+		}
+		// Another broker may have deleted it first, which is as good.
+		if err := s.stream.DeleteMsg(ctx, r.seq); err != nil &&
+			!errors.Is(err, jetstream.ErrMsgNotFound) {
+			s.logger.Debug("deleting an expired retained message failed", "topic", r.topicName, "error", err)
+		}
+	}
 }
 
 func (s *retainedStore) close() {

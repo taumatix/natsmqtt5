@@ -176,7 +176,7 @@ func (q *offlineQueue) replayFrom(ctx context.Context, start jetstream.OrderedCo
 				header = nats.Header{}
 			}
 			header.Set(hdrQueueSeq, strconv.FormatUint(meta.Sequence.Stream, 10))
-			fn(&nats.Msg{Subject: subject, Header: header, Data: m.Data()})
+			fn(&nats.Msg{Subject: subject, Header: setArrived(header, meta.Timestamp), Data: m.Data()})
 			if meta.Sequence.Stream >= last {
 				return last, nil
 			}

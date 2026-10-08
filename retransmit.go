@@ -1,6 +1,10 @@
 package natsmqtt5
 
-import "github.com/taumatix/natsmqtt5/packet"
+import (
+	"time"
+
+	"github.com/taumatix/natsmqtt5/packet"
+)
 
 // retransmit resends what the previous network connection left unacknowledged:
 //
@@ -112,6 +116,25 @@ func (c *conn) writeResend(o outbound, live bool) (spentQuota bool, err error) {
 	// to the session, which outlives this connection.
 	dup := *o.publish
 	dup.Dup = true
+	if o.expiry != nil {
+		// "The PUBLISH packet sent to a Client by the Server MUST contain a
+		// Message Expiry Interval set to the received value minus the time
+		// that the message has been waiting" [MQTT-3.3.2-6], and the wait
+		// includes the time since the first send.
+		remaining, expired := remainingExpiry(*o.expiry, o.arrived, time.Now())
+		if expired && o.qos == packet.QoS1 {
+			// Deleted rather than resent, and the exchange ends: the client
+			// will never acknowledge what it is not sent, so keeping it in
+			// flight would hold its identifier and quota slot for good.
+			c.sess.completeInflight(c, o.packetID)
+			return false, nil
+		}
+		// A QoS 2 PUBLISH that has been sent is not subject to expiry
+		// [MQTT-4.3.3-7]; it goes out again with what the field can say.
+		props := *dup.Properties
+		props.MessageExpiryInterval = packet.Uint32(remaining)
+		dup.Properties = &props
+	}
 	sent, err := c.writePublish(&dup)
 	if err != nil {
 		return false, err

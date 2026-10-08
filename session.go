@@ -55,6 +55,11 @@ type outbound struct {
 	// (QoS 1), true once PUBREL has gone out and we expect PUBCOMP.
 	awaitingPubcomp bool
 	publish         *packet.Publish
+	// arrived and expiry are when the broker took the message in and the
+	// Message Expiry Interval it arrived with (nil for none), which a resend
+	// needs to say how much of the interval is left; see expiry.go.
+	arrived time.Time
+	expiry  *uint32
 	// seq counts sends, so the in-flight set can be put back in the order it
 	// went out. Packet Identifiers cannot do that job: they cycle through
 	// 1..65535 and wrap.
