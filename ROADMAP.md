@@ -73,19 +73,6 @@ client that small is rare.
 bytes losslessly, and decide whether a client under the remainder should be refused with a CONNACK
 that fits, or served on assumed defaults. Size S, and a decision.
 
-## A resume replay can repeat an acknowledged message
-
-**Today:** `TestAConnectionDroppedDuringTheResumeReplayStillGetsTheRest` failed once on CI (push to
-main at ca826dd, Go 1.26 on ubuntu and macOS; green on the next three runs and 15 of 15 locally under
-`-race`). On the resume after the drop, message 0 of 200 was "00009" where "00010" was expected: an
-acknowledged message came again, with a NATS log line `consumer not found ... $KV.MQTT5_sessions.>`
-beside it. Not caused by the change it failed on (an oversize-ack fix); unreproduced, so the cause is
-unknown. Either a real duplicate of an acknowledged QoS 1 message after a resume (allowed with DUP, but
-it should not reorder) or a test that races its own acknowledgement.
-
-**Shape:** loop the test under `-race -cpu 1,2` until it fails, capture the broker log, decide whether
-the replay position or the test is wrong. Size S, and a reproduction first.
-
 ## A late acknowledgement can get a client disconnected
 
 **Today:** `conn.resend` re-reads the live in-flight entry immediately before

@@ -13,6 +13,13 @@ honestly be reconstructed now.
 
 ### Fixed
 
+- **A resume no longer skips a message the dropped connection was sending.** The resumed
+  connection took its list of unacknowledged messages while the old connection's delivery
+  goroutine could still send and track one more, so that message was missing from the resend and
+  from the replay (the replay believed it delivered) and came only on the next resumption. The new
+  connection now waits, bounded, for the old one's delivery goroutine before it resends
+  [MQTT-4.4.0-1]. Reproduced on one scheduler thread at about one resume in twenty.
+
 - **An Authenticator's Reason Code is checked.** A `ConnectError` code was sent in the CONNACK as
   given, so a success code, or one only DISCONNECT or SUBACK may carry, could reach the wire. A
   code MQTT-5.0 Table 3-1 does not list for a CONNACK is logged and sent as 0x80 (Unspecified

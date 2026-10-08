@@ -178,7 +178,7 @@ func (c *conn) deliverTracked(d *delivery) error {
 // rewinds the same way.
 func (c *conn) awayFloor() away {
 	a := away{at: time.Now()}
-	if !c.loopStarted {
+	if !c.loopStarted.Load() {
 		return a
 	}
 	c.close()

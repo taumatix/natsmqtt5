@@ -374,6 +374,11 @@ func (c *conn) enqueue(d *delivery) {
 // that a resumed session's arrears go out before anything published since.
 func (c *conn) deliverLoop() {
 	defer close(c.loopDone)
+	// The snapshot of what is unacknowledged has to include everything the
+	// connection this one replaced sent: its delivery goroutine may yet track
+	// one more message, and one taken sooner would miss it until the next
+	// resumption. Its reader is not waited for; see awaitPredecessorLoop.
+	c.sess.awaitPredecessorLoop(c)
 	if err := c.retransmit(); err != nil {
 		c.logger.Debug("could not resend the unacknowledged messages", "error", err)
 		c.close()

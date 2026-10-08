@@ -260,6 +260,29 @@ func (s *session) awaitPredecessor(c *conn) {
 	}
 }
 
+// awaitPredecessorLoop returns once the delivery goroutine of the connection
+// this one displaced, if it ran one, has stopped, or when c ends. Until then
+// it can still send and track a message the successor's resend would miss.
+//
+// It does not wait for the predecessor's reader, which awaitPredecessor does:
+// that one can be held up arbitrarily by an Authorizer or a slow packet, and a
+// resumed client must not wait for it. A PUBACK still unread there is applied
+// when it is read, and the successor's resend of that message carries DUP
+// [MQTT-4.4.0-1]; see completeInflight.
+func (s *session) awaitPredecessorLoop(c *conn) {
+	s.mu.Lock()
+	prev := s.predecessor
+	s.mu.Unlock()
+	if prev == nil || prev == c || !prev.loopStarted.Load() {
+		return
+	}
+	select {
+	case <-prev.loopDone:
+	case <-c.done:
+	case <-time.After(predecessorWait):
+	}
+}
+
 // predecessorWait bounds awaitPredecessor, which is only waiting for the
 // displaced connection to stop its delivery goroutine.
 const predecessorWait = 10 * time.Second
