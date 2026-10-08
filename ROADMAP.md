@@ -42,7 +42,10 @@ interval, 1.5 s wait and a broker restart: a 3 s stall expires the message),
 `TestReauthorizeDiscardsAWillWaitingOutItsDelay` and
 `TestWithoutTheOfflineQueueNothingPublishedWhileAwayArrives`, and
 `TestPersistentSessionMovesToAnotherLiveBroker` (2026-10-08, macOS: the session bucket's watcher
-logged "consumer not found" and the 5 s wait for the displaced connection ran out). Each needs the same treatment as
+logged "consumer not found" and the 5 s wait for the displaced connection ran out), and
+`TestNoMessageIsLostOrDeliveredTwiceAcrossADropAndResume` (2026-10-08, macOS: 299 of 300 messages seen,
+0 retransmissions; 90 runs on a laptop never lost one, so find out whether the runner is slow or a
+message published as the connection goes down is lost). Each needs the same treatment as
 `TestAnUnacknowledgedSharedMessageGoesToAnotherMemberWhenTheSessionExpires`: reproduce by delaying
 the step the margin depends on, then widen the margin or assert on a fake clock, not retry.
 
