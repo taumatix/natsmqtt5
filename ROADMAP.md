@@ -187,13 +187,19 @@ entry per member session, the consumer deleted by whoever leaves last). What rem
   again, on its first failed pull (up to `sharedPullWait` later). A message published in that window
   is not in the new consumer, which starts at the next message.
 
-## Keeping clients off `$` topics
+## Restricting `$` topics by default
 
-v0.9.1 reserves `$retained` and `$queue`, the two levels the broker's own data lives under. The
-spec's broader advice is that applications do not use `$` topics for their own purposes, and
-that a Server SHOULD prevent clients exchanging messages on them (MQTT-5.0 §4.7.2). Refusing every
-`$` topic other than `$share/` would follow it, at the cost of breaking anyone who uses `$app/…`
-today. A decision for a minor release, with an option to keep the old behaviour.
+`Options.RestrictDollarTopics` (opt in) refuses every `$` topic but
+`$share/...`, which is the spec's advice (MQTT-5.0 §4.7.2). Defaulting it on breaks anyone using
+`$app/...`, so it waits for the next major version: consider flipping the default there, with a
+`MIGRATION.md` and a release that logs a warning the first time a client uses a `$` topic. What
+remains of the entry today:
+
+- A subscription a persistent session stored before the option was turned on is resumed, so a
+  `$app/...` filter keeps receiving. Dropping it at resume, as a denied filter is, would finish
+  the restriction.
+- The broker publishes nothing of its own on `$SYS`; the option leaves that namespace unused
+  rather than serving it.
 
 ## Expired retained messages nobody subscribes to stay in the stream
 

@@ -111,25 +111,26 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 	fs.SetOutput(stderr)
 
 	var (
-		natsURL       = fs.String("nats", nats.DefaultURL, "URL of the NATS server to use")
-		listen        = fs.String("listen", natsmqtt5.DefaultListen, "address to accept MQTT connections on")
-		subjectPrefix = fs.String("subject-prefix", natsmqtt5.DefaultSubjectPrefix, "NATS subject prefix for MQTT traffic")
-		streamPrefix  = fs.String("stream-prefix", natsmqtt5.DefaultStreamPrefix, "name prefix for the JetStream assets")
-		creds         = fs.String("creds", "", "path to a NATS credentials file")
-		natsUser      = fs.String("nats-user", "", "NATS username")
-		natsPass      = fs.String("nats-password", "", "NATS password")
-		noRetained    = fs.Bool("no-retained", false, "disable retained messages, so JetStream is not required")
-		persistSess   = fs.Bool("persistent-sessions", false, "keep session state in JetStream, so it survives a restart and moves between brokers")
-		durableWills  = fs.Bool("durable-wills", false, "keep Will Messages in JetStream so the Will of a killed broker is published by a surviving one")
-		willCheck     = fs.Duration("will-check-interval", 0, "how often to look for Wills whose broker has died, with -durable-wills; 0 means 5s")
-		offlineQueue  = fs.Bool("offline-queue", false, "require the offline queue, failing to start without it (it is on by default whenever JetStream is used)")
-		noOffline     = fs.Bool("no-offline-queue", false, "do not keep QoS 1 and 2 messages for disconnected sessions; a resumed session misses what was published while it was away")
-		offlineMaxAge = fs.Duration("offline-queue-max-age", 24*time.Hour, "how long a queued message is kept for a disconnected session")
-		durablePub    = fs.Bool("durable-publish", false, "acknowledge QoS 1 and 2 publishes only once the offline queue has stored them and NATS has confirmed the live copy (implies -offline-queue)")
-		maxQoS        = fs.Int("max-qos", 2, "highest QoS the broker accepts (0, 1 or 2)")
-		keepAlive     = fs.Int("server-keep-alive", 0, "override the client's Keep Alive, in seconds; 0 leaves it to the client")
-		logLevel      = fs.String("log-level", "info", "debug, info, warn or error")
-		showVersion   = fs.Bool("version", false, "print the version and exit")
+		natsURL        = fs.String("nats", nats.DefaultURL, "URL of the NATS server to use")
+		listen         = fs.String("listen", natsmqtt5.DefaultListen, "address to accept MQTT connections on")
+		subjectPrefix  = fs.String("subject-prefix", natsmqtt5.DefaultSubjectPrefix, "NATS subject prefix for MQTT traffic")
+		streamPrefix   = fs.String("stream-prefix", natsmqtt5.DefaultStreamPrefix, "name prefix for the JetStream assets")
+		creds          = fs.String("creds", "", "path to a NATS credentials file")
+		natsUser       = fs.String("nats-user", "", "NATS username")
+		natsPass       = fs.String("nats-password", "", "NATS password")
+		noRetained     = fs.Bool("no-retained", false, "disable retained messages, so JetStream is not required")
+		persistSess    = fs.Bool("persistent-sessions", false, "keep session state in JetStream, so it survives a restart and moves between brokers")
+		durableWills   = fs.Bool("durable-wills", false, "keep Will Messages in JetStream so the Will of a killed broker is published by a surviving one")
+		willCheck      = fs.Duration("will-check-interval", 0, "how often to look for Wills whose broker has died, with -durable-wills; 0 means 5s")
+		offlineQueue   = fs.Bool("offline-queue", false, "require the offline queue, failing to start without it (it is on by default whenever JetStream is used)")
+		noOffline      = fs.Bool("no-offline-queue", false, "do not keep QoS 1 and 2 messages for disconnected sessions; a resumed session misses what was published while it was away")
+		offlineMaxAge  = fs.Duration("offline-queue-max-age", 24*time.Hour, "how long a queued message is kept for a disconnected session")
+		durablePub     = fs.Bool("durable-publish", false, "acknowledge QoS 1 and 2 publishes only once the offline queue has stored them and NATS has confirmed the live copy (implies -offline-queue)")
+		restrictDollar = fs.Bool("restrict-dollar-topics", false, "refuse publishes and subscriptions on topics starting with $ (MQTT 5.0 section 4.7.2), except $share/ subscriptions")
+		maxQoS         = fs.Int("max-qos", 2, "highest QoS the broker accepts (0, 1 or 2)")
+		keepAlive      = fs.Int("server-keep-alive", 0, "override the client's Keep Alive, in seconds; 0 leaves it to the client")
+		logLevel       = fs.String("log-level", "info", "debug, info, warn or error")
+		showVersion    = fs.Bool("version", false, "print the version and exit")
 	)
 
 	fs.Usage = func() {
@@ -169,21 +170,22 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 
 	return &config{
 		broker: natsmqtt5.Options{
-			NATSURL:             *natsURL,
-			NATSOptions:         natsOpts,
-			Listen:              *listen,
-			SubjectPrefix:       *subjectPrefix,
-			StreamPrefix:        *streamPrefix,
-			DisableRetained:     *noRetained,
-			PersistentSessions:  *persistSess,
-			DurableWills:        *durableWills,
-			WillCheckInterval:   *willCheck,
-			DurablePublish:      *durablePub,
-			OfflineQueue:        *offlineQueue,
-			DisableOfflineQueue: *noOffline,
-			OfflineQueueMaxAge:  *offlineMaxAge,
-			MaximumQoS:          natsmqtt5.Ptr(uint8(*maxQoS)),
-			ServerKeepAlive:     uint16(*keepAlive),
+			NATSURL:              *natsURL,
+			NATSOptions:          natsOpts,
+			Listen:               *listen,
+			SubjectPrefix:        *subjectPrefix,
+			StreamPrefix:         *streamPrefix,
+			DisableRetained:      *noRetained,
+			PersistentSessions:   *persistSess,
+			DurableWills:         *durableWills,
+			RestrictDollarTopics: *restrictDollar,
+			WillCheckInterval:    *willCheck,
+			DurablePublish:       *durablePub,
+			OfflineQueue:         *offlineQueue,
+			DisableOfflineQueue:  *noOffline,
+			OfflineQueueMaxAge:   *offlineMaxAge,
+			MaximumQoS:           natsmqtt5.Ptr(uint8(*maxQoS)),
+			ServerKeepAlive:      uint16(*keepAlive),
 		},
 		level:       level,
 		showVersion: *showVersion,

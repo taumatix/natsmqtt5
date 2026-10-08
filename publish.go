@@ -56,6 +56,10 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 	if err := topic.ValidateName(topicName); err != nil {
 		return c.rejectPublish(p, packet.TopicNameInvalid, err.Error())
 	}
+	if c.broker.opts.RestrictDollarTopics && dollarName(topicName) {
+		// MQTT-5.0 §4.7.2 (dollar.go).
+		return c.rejectPublish(p, packet.TopicNameInvalid, "clients may not publish to topics starting with $")
+	}
 
 	// A QoS 2 PUBLISH whose Packet Identifier is already outstanding is a
 	// redelivery: acknowledge it, but do not deliver the message twice

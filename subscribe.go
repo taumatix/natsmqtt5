@@ -101,6 +101,11 @@ func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID
 	if err != nil {
 		return nil, false, packet.TopicFilterInvalid
 	}
+	if c.broker.opts.RestrictDollarTopics && dollarFilter(want.Filter) {
+		// MQTT-5.0 §4.7.2 (dollar.go). Before the Authorizer: no client may.
+		c.logger.Debug("rejecting a subscription to a $ topic", "filter", want.Filter)
+		return nil, false, packet.TopicFilterInvalid
+	}
 	if a := c.broker.opts.Authorizer; a != nil {
 		identity, username := c.sess.principal()
 		req := &AuthzRequest{

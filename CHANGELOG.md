@@ -13,6 +13,14 @@ honestly be reconstructed now.
 
 ### Added
 
+- **Keep clients off `$` topics, opt in.** `Options.RestrictDollarTopics`
+  (`-restrict-dollar-topics`, `NATSMQTT5_RESTRICT_DOLLAR_TOPICS`) makes the broker follow MQTT 5.0
+  §4.7.2's "SHOULD prevent Clients from using such Topic Names" for every `$` topic: a PUBLISH or
+  Will to one is refused with Topic Name invalid (0x90), a subscription to one with Topic Filter
+  invalid (0x8F), and a `$share/...` subscription is allowed unless the filter inside it starts
+  with `$`. Off by default, so `$app/...` keeps working; `$retained` and `$queue` stay refused
+  either way.
+
 - **A shared subscription ends when its last session does.** The backlog consumer behind
   `$share/g/f` is now deleted, with the messages in it, when the last session subscribed to it
   leaves by UNSUBSCRIBE, by a Session Expiry Interval of 0, by expiry, by a Clean Start takeover or
