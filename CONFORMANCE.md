@@ -94,6 +94,9 @@ conforming client hits in ordinary use:
   outright leaves the in-flight state of its last checkpoint, and a QoS 2 PUBLISH the client
   sent is recorded before its PUBREC and cleared before its PUBCOMP, proved with a real SIGKILL
   (`killed_inflight_test.go`). [MQTT-4.4.0-1], [MQTT-4.3.3-10], [MQTT-4.3.3-12].
+- **Fixed, unreleased.** A QoS 2 message sent to a client is recorded before its PUBLISH and before its
+  PUBREL go out, so a broker killed at any step resends the PUBLISH or the PUBREL and never delivers the
+  message again as a new one (`killed_qos2_outbound_test.go`, SIGKILL). [MQTT-4.3.3-6], [MQTT-4.4.0-1].
 - **Fixed, unreleased.** A retained message could carry its publisher's Topic Alias to a subscriber
   on the same broker, an alias that means nothing on its connection. [MQTT-3.1.2-26],
   [MQTT-3.1.2-27], [MQTT-3.3.2-11].

@@ -260,6 +260,10 @@ func (c *conn) handlePubrec(p *packet.Pubrec) error {
 	}
 	c.sess.awaitPubcomp(p.Ack.PacketID)
 	c.activity.Add(1)
+	// The record says PUBREL before the PUBREL goes out: the client may answer it
+	// and the broker be killed before the next tick, and a successor that still
+	// resent the PUBLISH would break [MQTT-4.3.3-6].
+	c.checkpointNow()
 	return c.write(&packet.Pubrel{Ack: packet.Ack{PacketID: p.Ack.PacketID}})
 }
 

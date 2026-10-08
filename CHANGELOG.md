@@ -11,6 +11,16 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed, unreleased.** A QoS 2 message delivered to a client in the last second before its broker
+  was killed outright was delivered again as a new message by the broker that took the session over.
+  The session record is now written before the PUBLISH goes out and before the PUBREL does, so a kill
+  at any step of the exchange resends the PUBLISH (DUP 1) or the PUBREL with the original Packet
+  Identifier and never publishes the message a second time [MQTT-4.3.3-6], [MQTT-4.4.0-1]. The cost
+  is two key-value writes per QoS 2 message sent to a persistent session: a lockstep delivery takes
+  about 0.77 ms instead of 0.16 ms (`BenchmarkQoS2Delivery`); `-session-checkpoint-interval -1`
+  turns every checkpoint off. Proved with a real SIGKILL at each step
+  (`killed_qos2_outbound_test.go`).
+
 ### Fixed
 
 - **Fixed, unreleased.** Two ways a client could lose what it was owed. A QoS 1 or 2 live copy that

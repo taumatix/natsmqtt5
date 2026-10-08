@@ -9,20 +9,6 @@ today and cites the statements it violates.
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
-## A QoS 2 message delivered in the last second before a kill is delivered again
-
-**Today:** a connected session checkpoints its replay position once per
-`Options.SessionCheckpointInterval` (one second), so a broker killed outright costs its client the
-messages sent since the last checkpoint, delivered again by the successor. A QoS 1 repeat is
-allowed by [MQTT-4.4.0-1] only as a resend of an unacknowledged PUBLISH, so a repeat of an
-acknowledged one is a deviation, and a QoS 2 message whose exchange completed in that window is
-delivered a second time as a new Application Message.
-
-**Shape:** write the checkpoint when a QoS 2 exchange completes (PUBCOMP received) rather than on
-the tick, or on the first delivery after an idle interval, so the window closes for QoS 2 at the
-cost of one key-value write per completed exchange. The same write is already made for the QoS 2 PUBLISH a client sends.
-A test kills `cmd/natsmqtt5` between the PUBCOMP and the next tick.
-
 ## In-flight messages with no queue copy and a payload over 16 KiB are not restored
 
 **Today:** an unacknowledged message with no offline-queue sequence (a retained message sent on
@@ -349,6 +335,16 @@ narrowed permission into an outage and loses the filters that are still allowed.
 
 **Shape:** a User Property per dropped filter, and a line in the README saying
 it is this broker's own and not part of MQTT v5.
+
+## Two record writes serialise the delivery of every QoS 2 message
+
+**Today:** a QoS 2 message sent to a persistent session is recorded before its PUBLISH and before
+its PUBREL ([MQTT-4.3.3-6]), each a key-value write the delivery goroutine waits for. Measured
+(`BenchmarkQoS2Delivery`, file-backed JetStream on the same host, one client in lockstep): 0.77 ms a
+message against 0.16 ms with the tick only, so one connection's QoS 2 rate is about 1300 a second.
+**Shape:** one write for every message already waiting in the connection's queue (group commit),
+or a write only when the record would change a successor's answer; measure before and after, and
+with `sync_always` on the NATS server, where the writes cost more.
 
 ## Tombstone accumulation in the retained stream
 

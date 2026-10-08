@@ -552,6 +552,14 @@ func (c *conn) deliver(d *delivery) error {
 		// the resume resends and not also a new one the replay sends.
 		c.sess.noteDelivered(d.id, d.seq)
 	}
+	if d.qos == packet.QoS2 {
+		// In the stored record before the PUBLISH is on the wire, so that a
+		// successor of a broker killed after the client has it resends this one
+		// message with its identifier [MQTT-4.4.0-1] and does not deliver it
+		// again as a new one from the replay (the position and the delivered id
+		// are written with it).
+		c.checkpointNow()
+	}
 	sent, err := c.writePublish(pub)
 	if err != nil {
 		return err
