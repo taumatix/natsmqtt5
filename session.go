@@ -87,6 +87,23 @@ type outbound struct {
 	resentOn *conn
 }
 
+// ackOwed names a resent identifier's connection and the acknowledgement the
+// client owes for it.
+type ackOwed struct {
+	conn *conn
+	typ  packet.Type
+}
+
+// owedAck is the acknowledgement that closes o's exchange from the client's
+// side: a PUBACK for QoS 1, and for QoS 2 the PUBCOMP (the PUBREC before it is
+// answered by handlePubrec, which does not disconnect).
+func owedAck(o *outbound) packet.Type {
+	if o.qos == packet.QoS1 {
+		return packet.PUBACK
+	}
+	return packet.PUBCOMP
+}
+
 // withdrawal is an identifier the session no longer holds a message for, but
 // whose acknowledgement the client may still send.
 type withdrawal struct {
@@ -142,6 +159,23 @@ type session struct {
 	// acknowledgement for them, so one has to be ignored rather than answered
 	// with a protocol error.
 	withdrawn map[uint16]withdrawal
+	// resent records the Packet Identifiers the current connection put back on
+	// the wire after a resumption, and the acknowledgement each one is owed.
+	//
+	// Reading the in-flight entry and writing the packet cannot be one step
+	// without holding this lock across a socket write, so an acknowledgement
+	// can complete the exchange in between. The copy then goes out for an
+	// exchange the session has finished, and the client's acknowledgement of it
+	// is unmatched. A client that did what [MQTT-4.4.0-1] asks of it must not be
+	// disconnected for that, so an unmatched acknowledgement of the kind a
+	// resend is owed is ignored; see forgetResent.
+	//
+	// It is not emptied by the ordinary acknowledgement, which cannot be told
+	// from the late one, so an entry can outlive its exchange. The cost is that
+	// a client acknowledging an identifier the broker resent, twice, is not
+	// disconnected for the second; the set is per connection and is cleared by
+	// the next attach.
+	resent map[uint16]ackOwed
 
 	will      *packet.Will
 	willDelay time.Duration
@@ -197,6 +231,7 @@ func newSession(clientID string) *session {
 		inflight:     make(map[uint16]*outbound),
 		receivedQoS2: make(map[uint16]struct{}),
 		withdrawn:    make(map[uint16]withdrawal),
+		resent:       make(map[uint16]ackOwed),
 	}
 }
 
@@ -224,6 +259,7 @@ func (s *session) attach(c *conn) *conn {
 	for _, o := range s.inflight {
 		o.quotaHeld = false
 	}
+	s.resent = make(map[uint16]ackOwed)
 	return prev
 }
 
@@ -401,6 +437,7 @@ func (s *session) takeQuotaSlot(c *conn, id uint16) bool {
 	if ok {
 		o.quotaHeld = true
 		o.resentOn = c
+		s.resent[id] = ackOwed{conn: c, typ: owedAck(o)}
 	}
 	return ok
 }
@@ -413,8 +450,22 @@ func (s *session) markResent(c *conn, id uint16) bool {
 	o, ok := s.inflight[id]
 	if ok {
 		o.resentOn = c
+		s.resent[id] = ackOwed{conn: c, typ: owedAck(o)}
 	}
 	return ok
+}
+
+// forgetResent reports whether c resent id and the acknowledgement of type t
+// is the one owed for it, and forgets the record if so.
+func (s *session) forgetResent(c *conn, id uint16, t packet.Type) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.resent[id]
+	if !ok || r.conn != c || r.typ != t {
+		return false
+	}
+	delete(s.resent, id)
+	return true
 }
 
 // awaitPubcomp records that PUBREL has gone out for id, so the broker now

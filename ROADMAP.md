@@ -73,34 +73,19 @@ client that small is rare.
 bytes losslessly, and decide whether a client under the remainder should be refused with a CONNACK
 that fits, or served on assumed defaults. Size S, and a decision.
 
-## A late acknowledgement can get a client disconnected
+## A resend that an acknowledgement overtook spends a send-quota slot it does not hold
 
-**Today:** `conn.resend` re-reads the live in-flight entry immediately before
-writing, so the long window — the wait for send quota — is closed. A
-microsecond one is not: an acknowledgement that lands between that read and the
-write leaves the broker resending a completed exchange, and the client's
-acknowledgement of *that* arrives for a Packet Identifier the session no longer
-holds, which `handlePuback` answers with `0x82 Protocol Error`. A conforming
-client is disconnected for the broker's mistake, and its next reconnect can hit
-the same window.
+**Today:** found by reading while closing the late-acknowledgement entry, not by a test. A resend
+claims a slot, and `takeQuotaSlot` marks the entry as holding it. If the acknowledgement of the
+original lands before the copy is written, `completeInflight` returns that slot, the copy goes out
+anyway, and the client's acknowledgement of it is now ignored (`forgetResent`) and returns nothing.
+For the length of that exchange the connection has one more message in flight than its Receive
+Maximum allows [MQTT-3.3.4-9].
 
-**Reaching it** needs an acknowledgement for a message received on the previous
-connection to arrive during that window, from a client that flushes owed
-acknowledgements on reconnect. The other route, a displaced connection still
-decoding packets its socket had buffered, is closed since v0.4.3: completing an
-exchange its successor resent leaves the identifier owed (`resentOn` in
-`completeInflight`). This entry is the same-connection case, which `resentOn`
-cannot tell from an ordinary acknowledgement.
-
-**Shape:** keep the set of Packet Identifiers this connection resent, and answer
-an unmatched acknowledgement for one of them by ignoring it rather than by
-disconnecting. Making the read and the write atomic is the other option and the
-worse one: it means holding the session lock across a socket write.
-
-Half the mechanism now exists: `session.withdrawn` and `forgetWithdrawn` are
-exactly "an identifier the client may still acknowledge, whose acknowledgement
-is ignored", built for the filters denied on resume. What this entry needs is
-the same set populated from `conn.resend` rather than from the handshake.
+**Shape:** have `forgetResent` say whether the resend was claimed before the acknowledgement it
+follows, and take the slot back from the quota then, or have the gate-and-write path re-check the
+entry after taking the quota. Size S; it needs a test that holds the write as `late_ack_test.go` does
+and reads the quota.
 
 ## The withdrawn-identifier set only empties when the client acknowledges
 

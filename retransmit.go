@@ -73,6 +73,13 @@ func (c *conn) resend(snapshot outbound) error {
 	return err
 }
 
+// gateResend is the test seam between claiming an entry and writing it.
+func (c *conn) gateResend(id uint16) {
+	if f := c.broker.resendGate.Load(); f != nil {
+		(*f)(id)
+	}
+}
+
 // writeResend writes the packet the entry still owes and reports whether it
 // consumed a send-quota slot.
 func (c *conn) writeResend(o outbound, live bool) (spentQuota bool, err error) {
@@ -100,6 +107,7 @@ func (c *conn) writeResend(o outbound, live bool) (spentQuota bool, err error) {
 		if !c.sess.markResent(c, o.packetID) {
 			return false, nil
 		}
+		c.gateResend(o.packetID)
 		return false, c.write(&packet.Pubrel{Ack: packet.Ack{PacketID: o.packetID}})
 	}
 
@@ -110,6 +118,7 @@ func (c *conn) writeResend(o outbound, live bool) (spentQuota bool, err error) {
 	if !c.sess.takeQuotaSlot(c, o.packetID) {
 		return false, nil
 	}
+	c.gateResend(o.packetID)
 
 	// DUP is set by the fact of the retransmission and is never copied from
 	// anywhere [MQTT-3.3.1-3]. The stored packet is left untouched: it belongs
