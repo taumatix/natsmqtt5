@@ -12,6 +12,11 @@ honestly be reconstructed now.
 ## [Unreleased]
 
 ### Fixed
+
+- **Fixed, unreleased.** With `PersistentSessions`, an unacknowledged message with no offline-queue
+  copy (a retained message sent on subscribing, or any with `DisableOfflineQueue`) was left out of the
+  session record and not resent by a restored session. The record now carries its encoded PUBLISH
+  (up to 16 KiB), and the session is checkpointed with the queue off too. [MQTT-4.4.0-1].
 - A session whose broker was killed outright (`kill -9`) was resumed from the start of the offline
   queue, up to a day of repeats. A connected session now writes its replay position to its record
   once a second while it moves, and the broker that takes the session over replays from it, so a

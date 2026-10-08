@@ -172,7 +172,22 @@ type storedInflight struct {
 	// acknowledges, holds or hands back the very message the previous one was
 	// holding.
 	Ack string `json:",omitempty"`
+	// Pub is the PUBLISH packet as it first went out, for a message that has no
+	// copy in the offline queue (a retained message, one a plain NATS publisher
+	// sent, any with the queue off): the payload cannot be read back, so it is
+	// kept here when it is small (maxStoredPublish). At is when the broker took
+	// the message in and Exp the Message Expiry Interval it arrived with, which
+	// a resend counts down from.
+	Pub []byte    `json:",omitempty"`
+	At  time.Time `json:",omitempty"`
+	Exp *uint32   `json:",omitempty"`
 }
+
+// maxStoredPublish is the largest PUBLISH kept in a session record for a
+// message with no queue copy. The record is rewritten while the session moves,
+// and a value holds about a megabyte, so a big payload is left out (and logged)
+// rather than squeezing the rest of the record out.
+const maxStoredPublish = 16 << 10
 
 // storedDelivered is a delivered message's id and the queue sequence of its
 // copy, as kept in the record by session.awayState.

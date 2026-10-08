@@ -406,10 +406,10 @@ What it costs and what it does not cover:
   original identifiers and DUP 1, resends the PUBREL for a QoS 2 exchange the
   client had taken ownership of, and acknowledges a resent QoS 2 PUBLISH without
   forwarding it twice. A message that expired in the meantime is dropped. Limits:
-  it needs the offline queue (on by default), because the payload lives there; a
-  message with no copy in the queue (retained, from a shared subscription, or
-  with the queue off) and one whose copy has aged out of it are logged and not
-  resent; a broker killed outright leaves what its connections last checkpointed
+  a message with a copy in the offline queue is read back from it; one with none
+  (retained, or with the queue off) travels in the record as its encoded PUBLISH
+  when that is 16 KiB or less, and a larger one, or one whose queue copy has aged
+  out, is logged and not resent; a broker killed outright leaves what its connections last checkpointed
   (`-session-checkpoint-interval`, one second): an unacknowledged message sent in
   that last interval is not in the record, and one whose exchange finished in it
   is sent again; and a record is cut to fit

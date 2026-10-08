@@ -292,30 +292,6 @@ func TestARestoredResendIsWithdrawnWhenTheFilterIsDeniedOnResume(t *testing.T) {
 	back.expectNothing()
 }
 
-// With the offline queue off there is no copy of a payload to resend from, so a
-// restored session has nothing in flight: the boundary the record states
-// honestly rather than recording identifiers it cannot honour.
-func TestWithoutTheOfflineQueueARestoredSessionCannotResend(t *testing.T) {
-	natsURL := startNATS(t)
-	noQueue := func(o *natsmqtt5.Options) { o.PersistentSessions, o.DisableOfflineQueue = true, true }
-	addrA, stopA := startStoppableBroker(t, natsURL, noQueue)
-	addrB := startBroker(t, natsURL, noQueue)
-
-	c := dialRaw(t, addrA)
-	c.connect(rawConnect("restore-noqueue", 300))
-	c.subscribe("rs/nq", packet.QoS1)
-	pub, _ := connectClient(t, addrA, connectOpts("pub-restore-noqueue"))
-	pub.publish(&paho.Publish{Topic: "rs/nq", QoS: 1, Payload: []byte("lost")})
-	c.expectPublish()
-	c.drop()
-	time.Sleep(100 * time.Millisecond)
-	stopA()
-
-	back := dialRaw(t, addrB)
-	require.True(t, back.connect(rawConnect("restore-noqueue", 300)).SessionPresent)
-	back.expectNothing()
-}
-
 // A record that would not fit a key-value value is cut to fit, oldest first,
 // rather than failing the release and losing the whole session: the oldest
 // in-flight messages are the ones that must go out first [MQTT-4.6.0-5].

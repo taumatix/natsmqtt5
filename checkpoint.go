@@ -198,7 +198,7 @@ func (c *conn) checkpointNow() {
 // connection's checkpointing.
 func (b *Broker) checkpointSession(c *conn) error {
 	s := c.sess
-	if b.store == nil || b.queue == nil || s.expiry() == 0 {
+	if b.store == nil || s.expiry() == 0 {
 		return nil
 	}
 	s.persistMu.Lock()
@@ -219,12 +219,16 @@ func (b *Broker) checkpointSession(c *conn) error {
 	if rec == nil {
 		return nil
 	}
-	rec.AwayAt, rec.AwayFromSeq = pos.at, pos.fromSeq
-	var dropped int
-	rec.Delivered, dropped = s.deliveredSince(pos.fromSeq, pos.at)
-	if dropped > 0 {
-		b.logger.Warn("the session record keeps only some of the delivered message ids; "+
-			"a restored replay may repeat the rest", "client_id", s.clientID, "dropped", dropped)
+	if b.queue != nil {
+		// With the queue off there is no replay, and nothing to say where it
+		// starts.
+		rec.AwayAt, rec.AwayFromSeq = pos.at, pos.fromSeq
+		var dropped int
+		rec.Delivered, dropped = s.deliveredSince(pos.fromSeq, pos.at)
+		if dropped > 0 {
+			b.logger.Warn("the session record keeps only some of the delivered message ids; "+
+				"a restored replay may repeat the rest", "client_id", s.clientID, "dropped", dropped)
+		}
 	}
 	// What the client has not acknowledged and what it sent that is not yet
 	// released, for a successor that finds this broker dead [MQTT-4.4.0-1],

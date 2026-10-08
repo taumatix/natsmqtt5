@@ -89,7 +89,8 @@ conforming client hits in ordinary use:
 - **Fixed, unreleased.** With `PersistentSessions`, a restored session resent nothing it had in
   flight and forwarded a resent QoS 2 PUBLISH twice. The record now keeps each unacknowledged
   message's identifier, QoS state and queue sequence, and the QoS 2 identifiers received and not
-  released. What is still not covered: messages with no copy in the offline queue. A broker killed
+  released. A message with no copy in the offline queue (retained, or the queue off) travels in the record
+  when its PUBLISH is 16 KiB or less (`restore_nocopy_test.go`). A broker killed
   outright leaves the in-flight state of its last checkpoint, and a QoS 2 PUBLISH the client
   sent is recorded before its PUBREC and cleared before its PUBCOMP, proved with a real SIGKILL
   (`killed_inflight_test.go`). [MQTT-4.4.0-1], [MQTT-4.3.3-10], [MQTT-4.3.3-12].
