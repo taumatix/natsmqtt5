@@ -496,6 +496,13 @@ func (c *conn) checkWill(cp *packet.Connect) error {
 		c.refuse(packet.RetainNotSupported, "this broker has retained messages disabled")
 		return errors.New("will retain requested but retained messages are disabled")
 	}
+	if wp := cp.Will.Properties; wp != nil && hasWildcard(wp.ResponseTopic) {
+		// [MQTT-3.3.2-14] applies to the Will's Response Topic as it does to a
+		// PUBLISH's: the Will is published later, as an ordinary PUBLISH.
+		c.refuse(packet.ProtocolError,
+			fmt.Sprintf("the Will's Response Topic %q contains a wildcard", wp.ResponseTopic))
+		return fmt.Errorf("will response topic %q contains a wildcard", wp.ResponseTopic)
+	}
 	if err := topic.ValidateName(cp.Will.Topic); err != nil {
 		c.refuse(packet.TopicNameInvalid, err.Error())
 		return fmt.Errorf("will topic %q: %w", cp.Will.Topic, err)

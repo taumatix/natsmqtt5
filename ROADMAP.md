@@ -80,13 +80,6 @@ send more packets and MUST close the connection. [MQTT-3.14.4-1].
 **Shape:** a test that queues deliveries and triggers a server DISCONNECT, then the order fixed
 if it fails. Size S.
 
-## A Response Topic with wildcards is forwarded
-
-**Today:** a PUBLISH whose Response Topic contains wildcards is forwarded unchecked; a Response
-Topic MUST be a valid Topic Name. [MQTT-3.3.2-14].
-
-**Shape:** validate it as a Topic Name and refuse the PUBLISH with 0x82 if not. Size S.
-
 ## An Authenticator's Reason Code is not checked
 
 **Today:** a Reason Code returned by an `Authenticator` is sent in the CONNACK as given

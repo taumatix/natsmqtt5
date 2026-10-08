@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/taumatix/natsmqtt5/packet"
 	"github.com/taumatix/natsmqtt5/topic"
@@ -35,6 +36,17 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 		// [MQTT-3.2.2-14]
 		c.sendDisconnect(packet.RetainNotSupported, "this broker has retained messages disabled")
 		return errors.New("retained PUBLISH but retained messages are disabled")
+	}
+
+	// "The Response Topic MUST NOT contain wildcard characters" [MQTT-3.3.2-14].
+	// The packet parsed, so it is not Malformed; it holds data the protocol does
+	// not allow, which is a Protocol Error (MQTT-5.0 §1.2): DISCONNECT 0x82 and
+	// the connection closed [MQTT-4.13.1-1]. 0x90 would describe this PUBLISH's own
+	// Topic Name, and a QoS 0 PUBLISH has no acknowledgement to carry it.
+	if p.Properties != nil && hasWildcard(p.Properties.ResponseTopic) {
+		c.sendDisconnect(packet.ProtocolError,
+			fmt.Sprintf("the Response Topic %q contains a wildcard", p.Properties.ResponseTopic))
+		return errors.New("PUBLISH with a wildcard in its Response Topic")
 	}
 
 	topicName, err := c.resolveAlias(p)
@@ -106,6 +118,12 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 	default:
 		return c.write(&packet.Pubrec{Ack: packet.Ack{PacketID: p.PacketID}})
 	}
+}
+
+// hasWildcard reports whether a Response Topic holds a wildcard character
+// [MQTT-3.3.2-14].
+func hasWildcard(responseTopic string) bool {
+	return strings.ContainsAny(responseTopic, "+#")
 }
 
 // resolveAlias applies the Topic Alias rules of MQTT-5.0 §3.3.2.3.4: a PUBLISH
