@@ -302,11 +302,20 @@ func (c *conn) releaseQuota() {
 // on the broker rather than the connection, because the Will may fire after
 // the connection object is gone.
 func (b *Broker) publishWill(s *session, will *packet.Will) {
+	b.publishWillFor(s.clientID, will)
+}
+
+// publishAdoptedWill publishes the Will of a connection whose broker is gone.
+func (b *Broker) publishAdoptedWill(clientID string, will *packet.Will) {
+	b.publishWillFor(clientID, will)
+}
+
+func (b *Broker) publishWillFor(clientID string, will *packet.Will) {
 	name := will.Topic
 	subject, err := topic.NameToSubject(name)
 	if err != nil {
 		b.logger.Warn("dropping a will message with an unusable topic",
-			"client_id", s.clientID, "topic", name, "error", err)
+			"client_id", clientID, "topic", name, "error", err)
 		return
 	}
 
@@ -319,14 +328,14 @@ func (b *Broker) publishWill(s *session, will *packet.Will) {
 	}
 	if will.Retain && b.retain != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), retainStoreTimeout)
-		if err := b.retain.store(ctx, subject, s.clientID, p); err != nil {
+		if err := b.retain.store(ctx, subject, clientID, p); err != nil {
 			b.logger.Warn("storing a retained will message failed", "topic", name, "error", err)
 		}
 		cancel()
 	}
 
 	full := topic.Prefix(b.opts.SubjectPrefix, subject)
-	msg := toNATS(full, s.clientID, p)
+	msg := toNATS(full, clientID, p)
 	if b.queue != nil && p.QoS > packet.QoS0 {
 		kctx, cancel := context.WithTimeout(context.Background(), offlineKeepTimeout)
 		if err := b.queue.keep(kctx, b.js, subject, msg); err != nil {
@@ -339,7 +348,7 @@ func (b *Broker) publishWill(s *session, will *packet.Will) {
 		b.logger.Warn("publishing a will message failed", "topic", name, "error", err)
 		return
 	}
-	b.logger.Info("published will message", "client_id", s.clientID, "topic", name)
+	b.logger.Info("published will message", "client_id", clientID, "topic", name)
 }
 
 // willProperties selects the Will Properties that describe the message itself.

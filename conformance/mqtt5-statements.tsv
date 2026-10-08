@@ -19,10 +19,10 @@ MQTT-3.1.2-3	3.1.2.3 Connect Flags	S	CITED-CODE			packet/connect.go:80
 MQTT-3.1.2-4	3.1.2.4 Clean Start	CS	CITED-TESTED			broker_test.go:560 persistent_test.go:281 sessionstore.go:283
 MQTT-3.1.2-5	3.1.2.4 Clean Start	S	CITED-TESTED			broker_test.go:514
 MQTT-3.1.2-6	3.1.2.4 Clean Start	S	UNCITED	a		No stored session -> newSession, Session Present 0 (handshake.go:195-200, 228-231).
-MQTT-3.1.2-7	3.1.2.5 Will Flag	S	UNCITED	a		Will stored on the session (handshake.go:220-226).
-MQTT-3.1.2-8	3.1.2.5 Will Flag	S	CITED-TESTED			broker_test.go:424 conn.go:205 conn.go:278
+MQTT-3.1.2-7	3.1.2.5 Will Flag	S	CITED-TESTED			will_durable_test.go willstore.go handshake.go (DurableWills keeps it across a broker's death)
+MQTT-3.1.2-8	3.1.2.5 Will Flag	S	CITED-TESTED			broker_test.go:424 conn.go will_durable_test.go willstore.go (the Will of a killed broker, with DurableWills)
 MQTT-3.1.2-9	3.1.2.5 Will Flag	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.1.2-10	3.1.2.5 Will Flag	S	UNCITED	a		takeWill removes it on normal DISCONNECT or when published (conn.go:276-281, 314-317).
+MQTT-3.1.2-10	3.1.2.5 Will Flag	S	CITED-TESTED			will_durable_test.go willstore.go conn.go (removed by CAS once published or on DISCONNECT 0x00)
 MQTT-3.1.2-11	3.1.2.6 Will QoS	C	CLIENT-ONLY (CITED-CODE)			packet/connect.go:92
 MQTT-3.1.2-12	3.1.2.6 Will QoS	C	CLIENT-ONLY (CITED-CODE)			packet/connect.go:167 packet/connect.go:98
 MQTT-3.1.2-13	3.1.2.7 Will Retain	C	CLIENT-ONLY (CITED-CODE)			packet/connect.go:95
@@ -51,7 +51,7 @@ MQTT-3.1.3-5	3.1.3.1 Client Identifier (ClientID)	S	UNCITED	a		Only limit is 128
 MQTT-3.1.3-6	3.1.3.1 Client Identifier (ClientID)	S	CITED-TESTED			broker_test.go:626 example_test.go:51 handshake.go:115 README.md:171
 MQTT-3.1.3-7	3.1.3.1 Client Identifier (ClientID)	S	CITED-TESTED			broker_test.go:626 handshake.go:117 options.go:316
 MQTT-3.1.3-8	3.1.3.1 Client Identifier (ClientID)	S	UNCITED	a		checkClientID refuses with 0x85 and closes (handshake.go:244-253, 73-80).
-MQTT-3.1.3-9	3.1.3.2.2 Will Delay Interval	S	CITED-CODE			conn.go:313 conn.go:346
+MQTT-3.1.3-9	3.1.3.2.2 Will Delay Interval	S	CITED-TESTED			will_durable_test.go conn.go willstore.go
 MQTT-3.1.3-10	3.1.3.2.8 User Property	S	UNCITED	a		willProperties copies the User slice in order (publish.go:320-332).
 MQTT-3.1.3-11	3.1.3.3 Will Topic	C	CLIENT-ONLY (UNCITED)			
 MQTT-3.1.3-12	3.1.3.5 User Name	C	CLIENT-ONLY (UNCITED)			

@@ -217,9 +217,14 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 	sess.setPrincipal(identity, username)
 	sess.setExpiry(c.sessionExpiry(props))
 
+	cancelled := sess.takePendingLease()
 	if prev := sess.attach(c); prev != nil && prev != c {
 		prev.close()
 	}
+	// The resumption cancelled a Will waiting out its delay [MQTT-3.1.3-9];
+	// the stored copy goes with it, or a broker that adopted it later would
+	// publish it for a client that came back.
+	c.broker.wills.drop(cancelled)
 	c.sess = sess
 	c.broker.registerSession(sess)
 
@@ -229,12 +234,26 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 		}
 	}
 
+	// What an earlier connection of this client left in the Will store is
+	// settled before this one's Will is written; see willStore.settle.
+	c.broker.wills.settle(ctx, clientID, resumed)
+
 	if cp.Will != nil {
 		var delay time.Duration
 		if cp.Will.Properties != nil && cp.Will.Properties.WillDelayInterval != nil {
 			delay = time.Duration(*cp.Will.Properties.WillDelayInterval) * time.Second
 		}
-		sess.setWill(cp.Will, delay)
+		var lease *willLease
+		if wills := c.broker.wills; wills != nil {
+			// The record names the Will Delay Interval as it will be waited:
+			// no longer than the session lasts.
+			recDelay := delay
+			if exp := time.Duration(sess.expiry()) * time.Second; exp < recDelay {
+				recDelay = exp
+			}
+			lease = wills.register(ctx, clientID, cp.Will, recDelay)
+		}
+		sess.setWill(cp.Will, delay, lease)
 	}
 
 	ack := &packet.Connack{

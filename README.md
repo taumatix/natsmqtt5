@@ -365,16 +365,46 @@ What it costs and what it does not cover:
   Code to carry the refusal, so the dropped filters are logged and the client
   still sees `SessionPresent: true`; it finds out by not receiving. The
   unacknowledged messages a dropped filter earned go with it.
-- **The Will Message is not persisted.** A Will belongs to the network
-  connection (MQTT-5.0 §3.1.2.5), and a broker reading a record cannot tell a
-  connection that has ended from an owner that is merely busy, so publishing
-  from there would announce live clients as dead. A broker that shuts down
-  cleanly still publishes its clients' Wills; one killed outright does not.
+- **The Will Message of a killed broker is published only with `-durable-wills`.**
+  Without it a Will belongs to the connection in memory, as before: a broker
+  that shuts down cleanly publishes its clients' Wills, one killed outright does
+  not. See [Durable Will Messages](#durable-will-messages).
 - **A session whose broker was killed outright is resumed whenever its client
   comes back**, however long that takes. Expiry is measured from the moment a
   session is released, and a `kill -9` records no release. A background sweep
   reclaims such a record once it is older than `MaxSessionExpiry` and its broker
   has stopped answering.
+
+## Durable Will Messages
+
+A Will Message is published by the broker holding the connection, so a broker
+that is killed outright (`kill -9`, a lost machine) takes its clients' Wills
+with it. Set `Options.DurableWills`, or `-durable-wills` /
+`NATSMQTT5_DURABLE_WILLS=true` for the binary, and every connection's Will is
+also written to the `<StreamPrefix>_wills` key-value bucket, keyed by connection
+so a reconnect never overwrites its predecessor's record.
+
+- A broker whose owner has stopped answering its liveness subject (two missed
+  pings, so a busy broker is not mistaken for a dead one) has its Wills adopted
+  by a survivor, which waits out the rest of the Will Delay Interval and
+  publishes. Whoever wins a compare-and-swap delete of the record publishes it,
+  so there is one publication however many brokers noticed
+  [MQTT-3.1.2-8], [MQTT-3.1.2-10].
+- A client that reconnects inside the delay cancels the Will if its session is
+  resumed [MQTT-3.1.3-9]; one that starts a new session (Clean Start, or the
+  session had ended) gets the old Will published first.
+- A DISCONNECT with Reason Code 0x00 leaves nothing to publish
+  [MQTT-3.1.2-8], [MQTT-3.1.2-10]; a Will on a live connection stays put.
+- `WillCheckInterval` (`-will-check-interval`, default 5s) is how often a
+  broker looks; the delay is counted from when a survivor notices, up to that
+  long after the connection was lost.
+
+It is off by default because the Will's payload sits in clear text in that
+bucket, which therefore needs the access control of the session bucket, and
+because it needs JetStream. It works with or without `PersistentSessions`.
+A broker cut off from NATS but still serving clients looks dead to the others
+and its clients' Wills are published while they are connected; ROADMAP.md
+has this.
 
 ## What it does not do
 

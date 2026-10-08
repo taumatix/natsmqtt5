@@ -334,7 +334,8 @@ func (c *conn) finish(cause error) {
 	if errors.Is(cause, errNormalDisconnect) {
 		// A DISCONNECT with reason 0x00 deletes the Will Message
 		// [MQTT-3.1.2-8].
-		c.sess.takeWill()
+		_, _, lease := c.sess.takeWill()
+		c.broker.wills.drop(lease)
 	} else {
 		c.scheduleWill()
 	}
@@ -383,10 +384,11 @@ func causeString(err error) string {
 // first, and cancels if a new connection claims the session in the meantime
 // [MQTT-3.1.3-9].
 func (c *conn) scheduleWill() {
-	will, delay := c.sess.takeWill()
+	will, delay, lease := c.sess.takeWill()
 	if will == nil {
 		return
 	}
+	wills := c.broker.wills
 
 	// "The Server delays publishing the Client's Will Message until the Will
 	// Delay Interval has passed or the Session ends, whichever happens first"
@@ -398,13 +400,22 @@ func (c *conn) scheduleWill() {
 		delay = expiry
 	}
 	if delay == 0 {
-		c.broker.publishWill(sess, will)
+		if wills.fire(lease) {
+			c.broker.publishWill(sess, will)
+		}
+		return
+	}
+
+	// The stored copy now says the connection is over, so that a broker which
+	// outlives this one can tell a Will waiting out its delay from a live
+	// connection's.
+	if !wills.ended(lease, time.Now().Add(delay)) {
 		return
 	}
 
 	// Held where Broker.Reauthorize can find it, so a Will whose permission
 	// is revoked during the delay can be discarded before it fires.
-	sess.setPendingWill(will)
+	sess.setPendingWill(will, lease)
 	go func() {
 		timer := time.NewTimer(delay)
 		defer timer.Stop()
@@ -415,6 +426,7 @@ func (c *conn) scheduleWill() {
 		if sess.hasConn() {
 			// The session was resumed before the delay elapsed
 			// [MQTT-3.1.3-9].
+			wills.drop(lease)
 			return
 		}
 		if !sess.takePendingWill(will) {
@@ -422,7 +434,9 @@ func (c *conn) scheduleWill() {
 			// that has since ended in a disconnect of its own.
 			return
 		}
-		c.broker.publishWill(sess, will)
+		if wills.fire(lease) {
+			c.broker.publishWill(sess, will)
+		}
 	}()
 }
 

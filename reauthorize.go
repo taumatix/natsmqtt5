@@ -115,7 +115,7 @@ func (b *Broker) reauthorizeLocal(ctx context.Context, clientID string) (held bo
 		if err != nil {
 			b.logger.Warn("discarding a Will Message whose permission was revoked",
 				"client_id", clientID, "topic", will.Topic, "error", err)
-			s.discardWill(will)
+			b.wills.drop(s.discardWill(will))
 		}
 	}
 	return true, nil

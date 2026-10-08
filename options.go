@@ -120,9 +120,10 @@ type Options struct {
 	// A resumed session carries its subscription set, and the offline queue
 	// delivers what was published while it was away. Messages that were in
 	// flight to the client when its broker went down are not stored, so they
-	// are not resent; the Will Message is not stored because it belongs to the
-	// network connection rather than to the session (MQTT-5.0 §3.1.2.5).
-	// ROADMAP.md has both.
+	// are not resent. The Will Message is not part of the session record, because
+	// it belongs to the network connection rather than to the session
+	// (MQTT-5.0 §3.1.2.5); DurableWills stores it separately. ROADMAP.md has
+	// the first.
 	PersistentSessions bool
 	// SessionStorage selects file or memory storage for the session bucket.
 	// Defaults to file storage. Memory storage makes sessions survive a broker
@@ -131,6 +132,29 @@ type Options struct {
 	// SessionReplicas is the JetStream replica count for the session bucket.
 	// Defaults to 1.
 	SessionReplicas int
+
+	// DurableWills keeps the Will Message of every open connection in a
+	// JetStream key-value bucket, so that the Will of a broker that is killed
+	// outright is still published: a surviving broker notices the owner has
+	// stopped answering its liveness subject, adopts the Will, waits out
+	// whatever is left of the Will Delay Interval and publishes it
+	// [MQTT-3.1.2-7], [MQTT-3.1.2-8], [MQTT-3.1.3-9]. Exactly one broker publishes a given Will,
+	// by compare-and-swap on the record.
+	//
+	// Off by default, because it changes where Wills live: the Will's payload
+	// is written to the "<StreamPrefix>_wills" bucket in clear text, so that
+	// bucket needs the access control of the session bucket. It needs JetStream
+	// and works with or without PersistentSessions; without them a client that
+	// reconnects to a different broker starts a new session, so a Will waiting
+	// out its delay is published when it does, rather than cancelled.
+	//
+	// The delay is counted from the moment a surviving broker notices, which is
+	// up to WillCheckInterval after the connection was lost.
+	DurableWills bool
+	// WillCheckInterval is how often a broker looks for Wills whose owner has
+	// gone, with DurableWills. It bounds how long after a broker's death its
+	// clients' Wills wait to be noticed. Defaults to 5 seconds.
+	WillCheckInterval time.Duration
 
 	// OfflineQueue requires the offline queue, so a broker that cannot set it
 	// up fails to start.

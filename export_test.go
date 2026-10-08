@@ -39,3 +39,32 @@ func SetNextPacketID(b *Broker, clientID string, id uint16) {
 	s.nextPacketID = id
 	s.mu.Unlock()
 }
+
+// Kill makes a broker vanish the way a killed process does: its NATS
+// connection and every socket are closed under it, so none of its disconnect
+// handling can reach NATS or JetStream, and the clients see their connection
+// drop. The handlers still run in this process, but they find nothing to talk
+// to, which is what a process that never ran them looks like from outside.
+// TestWillOfAKilledProcess does it with a real SIGKILL for the one case this
+// stands in for.
+func Kill(b *Broker) {
+	// Marked closed so Serve treats the dead listener as the end of the broker,
+	// not as an accept failure; shutdown stays open, as nothing signals it in a
+	// process that is simply gone.
+	b.mu.Lock()
+	b.closed = true
+	b.mu.Unlock()
+	b.nc.Close()
+	if b.listener != nil {
+		_ = b.listener.Close()
+	}
+	b.mu.Lock()
+	conns := make([]*conn, 0, len(b.conns))
+	for c := range b.conns {
+		conns = append(conns, c)
+	}
+	b.mu.Unlock()
+	for _, c := range conns {
+		_ = c.nc.Close()
+	}
+}

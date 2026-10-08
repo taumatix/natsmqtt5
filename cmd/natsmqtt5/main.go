@@ -120,6 +120,8 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 		natsPass      = fs.String("nats-password", "", "NATS password")
 		noRetained    = fs.Bool("no-retained", false, "disable retained messages, so JetStream is not required")
 		persistSess   = fs.Bool("persistent-sessions", false, "keep session state in JetStream, so it survives a restart and moves between brokers")
+		durableWills  = fs.Bool("durable-wills", false, "keep Will Messages in JetStream so the Will of a killed broker is published by a surviving one")
+		willCheck     = fs.Duration("will-check-interval", 0, "how often to look for Wills whose broker has died, with -durable-wills; 0 means 5s")
 		offlineQueue  = fs.Bool("offline-queue", false, "require the offline queue, failing to start without it (it is on by default whenever JetStream is used)")
 		noOffline     = fs.Bool("no-offline-queue", false, "do not keep QoS 1 and 2 messages for disconnected sessions; a resumed session misses what was published while it was away")
 		offlineMaxAge = fs.Duration("offline-queue-max-age", 24*time.Hour, "how long a queued message is kept for a disconnected session")
@@ -173,6 +175,8 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 			StreamPrefix:        *streamPrefix,
 			DisableRetained:     *noRetained,
 			PersistentSessions:  *persistSess,
+			DurableWills:        *durableWills,
+			WillCheckInterval:   *willCheck,
 			OfflineQueue:        *offlineQueue,
 			DisableOfflineQueue: *noOffline,
 			OfflineQueueMaxAge:  *offlineMaxAge,
