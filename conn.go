@@ -138,6 +138,8 @@ type conn struct {
 	// activity counts deliveries enqueued and sent, so the checkpoint writes
 	// only when something moved.
 	activity atomic.Uint64
+	// cpMark is what the last checkpoint stood for; guarded by sess.persistMu.
+	cpMark   checkpointMark
 	loopDone chan struct{}
 	// loopStarted is set by serve before it starts deliverLoop, which is the
 	// goroutine that closes loopDone.

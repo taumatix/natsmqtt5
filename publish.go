@@ -132,6 +132,11 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 	case packet.QoS1:
 		return c.write(&packet.Puback{Ack: packet.Ack{PacketID: p.PacketID}})
 	default:
+		// The identifier is in the stored record before the PUBREC that tells the
+		// client its PUBLISH need not be sent again; a successor of a broker killed
+		// after it must not forward a resend [MQTT-4.3.3-10].
+		c.sess.qos2Forwarded(p.PacketID)
+		c.checkpointNow()
 		return c.write(&packet.Pubrec{Ack: packet.Ack{PacketID: p.PacketID}})
 	}
 }
@@ -218,6 +223,7 @@ func (c *conn) handlePuback(p *packet.Puback) error {
 			fmt.Sprintf("PUBACK for Packet Identifier %d, which is a QoS 2 exchange", p.Ack.PacketID))
 		return errors.New("PUBACK for a QoS 2 message")
 	}
+	c.activity.Add(1)
 	c.releaseQuotaFor(o)
 	return nil
 }
@@ -248,10 +254,12 @@ func (c *conn) handlePubrec(p *packet.Pubrec) error {
 		// greater the corresponding PUBLISH packet is treated as acknowledged,
 		// and MUST NOT be retransmitted" [MQTT-4.4.0-2].
 		done, _ := c.sess.completeInflight(c, p.Ack.PacketID)
+		c.activity.Add(1)
 		c.releaseQuotaFor(done)
 		return nil
 	}
 	c.sess.awaitPubcomp(p.Ack.PacketID)
+	c.activity.Add(1)
 	return c.write(&packet.Pubrel{Ack: packet.Ack{PacketID: p.Ack.PacketID}})
 }
 
@@ -264,6 +272,10 @@ func (c *conn) handlePubrel(p *packet.Pubrel) error {
 		// (MQTT-5.0 §3.6.2.1).
 		code = packet.PacketIdentifierNotFound
 	}
+	// Released in the stored record before the PUBCOMP, after which the
+	// identifier is a new message again [MQTT-4.3.3-12]: a successor that still
+	// held it would take that PUBLISH for a repeat and drop it.
+	c.checkpointNow()
 	return c.write(&packet.Pubcomp{Ack: packet.Ack{PacketID: p.Ack.PacketID, ReasonCode: code}})
 }
 
@@ -281,6 +293,7 @@ func (c *conn) handlePubcomp(p *packet.Pubcomp) error {
 			fmt.Sprintf("PUBCOMP for unknown Packet Identifier %d", p.Ack.PacketID))
 		return fmt.Errorf("PUBCOMP for unknown packet id %d", p.Ack.PacketID)
 	}
+	c.activity.Add(1)
 	c.releaseQuotaFor(o)
 	return nil
 }

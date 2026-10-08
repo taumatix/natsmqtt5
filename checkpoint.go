@@ -23,6 +23,13 @@ import (
 // the client stood within the last interval, and a successor of a dead broker
 // replays from there. What a kill still costs is what the client was sent in
 // that last interval (and checkpointSkew before it), which is sent again.
+//
+// The record also gets the in-flight state: the messages sent and not
+// acknowledged, which the successor resends with their identifiers
+// [MQTT-4.4.0-1], and the QoS 2 identifiers received and not released, which it
+// holds so that a resent PUBLISH is not forwarded twice [MQTT-4.3.3-10]. Those
+// two are written at once, not on the tick, when the broker is about to promise
+// something about them (checkpointNow).
 
 // checkpointSkew is how far before the moment of a checkpoint its replay time
 // reaches. A message stored in the queue just before the checkpoint can still
@@ -31,6 +38,10 @@ import (
 // it if the broker died in that moment. The ids delivered in the skew are
 // written with the position, so the replay does not repeat them.
 const checkpointSkew = 500 * time.Millisecond
+
+// checkpointPositionWait bounds how long checkpointNow waits for a resumed
+// connection's replay position to be taken.
+const checkpointPositionWait = 2 * time.Second
 
 // seqSet counts queue sequences. A message that matches two subscriptions of a
 // session is delivered twice, so one sequence can be in it twice.
@@ -125,15 +136,17 @@ func (c *conn) livePosition() away {
 }
 
 // checkpointMark is what the last checkpoint written stood for, so that the
-// next one is skipped when nothing has moved.
+// next one is skipped when nothing has moved. It belongs to the connection and
+// is guarded by the session's persistMu.
 type checkpointMark struct {
 	activity uint64
 	fromSeq  uint64
 	written  bool
 }
 
-// checkpointLoop writes the connection's replay position to the session record
-// every interval while it changes, until the connection ends.
+// checkpointLoop writes the connection's replay position and in-flight state to
+// the session record every interval while they change, until the connection
+// ends.
 func (c *conn) checkpointLoop(interval time.Duration) {
 	select {
 	case <-c.positioned:
@@ -142,24 +155,48 @@ func (c *conn) checkpointLoop(interval time.Duration) {
 	}
 	t := time.NewTicker(interval)
 	defer t.Stop()
-	var mark checkpointMark
 	for {
 		select {
 		case <-c.done:
 			return
 		case <-t.C:
 		}
-		if err := c.broker.checkpointSession(c, &mark); errors.Is(err, errLostSession) {
+		if err := c.broker.checkpointSession(c); errors.Is(err, errLostSession) {
 			return
 		}
 	}
 }
 
-// checkpointSession writes the replay position of c's session into its record,
-// unless nothing has moved since mark. The record stays Attached and owned: only
-// the position changes. It fails with errLostSession when another broker has
-// claimed the record, which ends the connection's checkpointing.
-func (b *Broker) checkpointSession(c *conn, mark *checkpointMark) error {
+// checkpointNow writes the checkpoint before an acknowledgement the client acts
+// on, for the state that must not be older than what the client was told: the
+// QoS 2 identifiers received (before the PUBREC that promises not to forward
+// the message again [MQTT-4.3.3-10]) and released (before the PUBCOMP after
+// which the identifier is a new message again [MQTT-4.3.3-12]). A failed write
+// is logged by checkpointSession and does not stop the acknowledgement: the
+// session is served as one without persistence would be.
+func (c *conn) checkpointNow() {
+	if c.broker.opts.SessionCheckpointInterval <= 0 {
+		return
+	}
+	c.activity.Add(1)
+	// A write before the resumed position is taken would replace it, so wait for
+	// that, which is quick: it follows the predecessor's end.
+	select {
+	case <-c.positioned:
+		_ = c.broker.checkpointSession(c)
+	case <-c.done:
+	case <-time.After(checkpointPositionWait):
+		c.logger.Warn("the session was not checkpointed before an acknowledgement: "+
+			"its replay position has not been taken", "client_id", c.sess.clientID)
+	}
+}
+
+// checkpointSession writes the replay position and the in-flight state of c's
+// session into its record, unless nothing has moved since the last write. The
+// record stays Attached and owned: only the state changes. It fails with
+// errLostSession when another broker has claimed the record, which ends the
+// connection's checkpointing.
+func (b *Broker) checkpointSession(c *conn) error {
 	s := c.sess
 	if b.store == nil || b.queue == nil || s.expiry() == 0 {
 		return nil
@@ -167,20 +204,13 @@ func (b *Broker) checkpointSession(c *conn, mark *checkpointMark) error {
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
 	if c.isClosed() {
-		// The release has run or is about to, and writes the final position.
+		// The release has run or is about to, and writes the final state.
 		return nil
 	}
 
+	mark := &c.cpMark
 	activity := c.activity.Load()
 	pos := c.livePosition()
-	// A message sent and not acknowledged is owed a resend a restored session
-	// cannot make, so the replay starts at it and delivers it again.
-	unacked := s.unackedQueueSeqs()
-	for _, seq := range unacked {
-		if pos.fromSeq == 0 || seq < pos.fromSeq {
-			pos.fromSeq = seq
-		}
-	}
 	if mark.written && activity == mark.activity && pos.fromSeq == mark.fromSeq {
 		return nil
 	}
@@ -191,11 +221,17 @@ func (b *Broker) checkpointSession(c *conn, mark *checkpointMark) error {
 	}
 	rec.AwayAt, rec.AwayFromSeq = pos.at, pos.fromSeq
 	var dropped int
-	rec.Delivered, dropped = s.deliveredSince(pos.fromSeq, pos.at, unacked)
+	rec.Delivered, dropped = s.deliveredSince(pos.fromSeq, pos.at)
 	if dropped > 0 {
 		b.logger.Warn("the session record keeps only some of the delivered message ids; "+
 			"a restored replay may repeat the rest", "client_id", s.clientID, "dropped", dropped)
 	}
+	// What the client has not acknowledged and what it sent that is not yet
+	// released, for a successor that finds this broker dead [MQTT-4.4.0-1],
+	// [MQTT-4.3.3-10]. The release logs what it cannot keep; a checkpoint every
+	// interval would repeat it, so it does not.
+	rec.Inflight, rec.ReceivedQoS2, _ = s.inflightState()
+	fitRecord(rec, b.store.valueLimit())
 
 	ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
 	defer cancel()
@@ -203,6 +239,8 @@ func (b *Broker) checkpointSession(c *conn, mark *checkpointMark) error {
 	if err != nil {
 		if errors.Is(err, errLostSession) {
 			b.logger.Debug("could not checkpoint the stored session", "client_id", s.clientID, "error", err)
+		} else {
+			b.logger.Warn("could not checkpoint the stored session", "client_id", s.clientID, "error", err)
 		}
 		return err
 	}

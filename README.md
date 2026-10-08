@@ -409,7 +409,10 @@ What it costs and what it does not cover:
   it needs the offline queue (on by default), because the payload lives there; a
   message with no copy in the queue (retained, from a shared subscription, or
   with the queue off) and one whose copy has aged out of it are logged and not
-  resent; a broker killed outright records nothing; and a record is cut to fit
+  resent; a broker killed outright leaves what its connections last checkpointed
+  (`-session-checkpoint-interval`, one second): an unacknowledged message sent in
+  that last interval is not in the record, and one whose exchange finished in it
+  is sent again; and a record is cut to fit
   the NATS server's `max_payload` (1 MiB by default), newest in-flight entries
   first, which is about 15000 entries, so a client with a Receive Maximum beyond
   that and that many messages unacknowledged loses the newest, logged.

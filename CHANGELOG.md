@@ -19,6 +19,13 @@ honestly be reconstructed now.
   `-session-checkpoint-interval`, env `NATSMQTT5_SESSION_CHECKPOINT_INTERVAL` (negative turns it
   off). [MQTT-3.1.2-5], [MQTT-3.1.2-23], [MQTT-4.5.0-1], [MQTT-4.4.0-1]
   (`killed_broker_test.go`, with a real SIGKILL of `cmd/natsmqtt5`).
+- A session whose broker was killed outright now also keeps its in-flight state. The checkpoint
+  writes the unacknowledged messages and the QoS 2 identifiers received and not released, so the
+  broker that takes the session over resends the PUBLISH and PUBREL packets with their original
+  identifiers and DUP, and acknowledges a resent QoS 2 PUBLISH without forwarding it twice. The
+  record is written before the PUBREC and before the PUBCOMP of a QoS 2 PUBLISH the client sends,
+  so neither promise is older than the record. [MQTT-4.4.0-1], [MQTT-4.3.3-10], [MQTT-4.3.3-12]
+  (`killed_inflight_test.go`, with a real SIGKILL of `cmd/natsmqtt5`).
 - Subscribing again to a filter the session already holds no longer loses the messages published
   while the subscription is replaced [MQTT-3.8.4-4]. A repeated SUBSCRIBE on a non-shared filter
   keeps its NATS subscriptions and swaps only the options; a shared one hands the messages the old
