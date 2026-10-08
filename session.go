@@ -227,6 +227,10 @@ type session struct {
 	// have been accepted and not yet released, so a redelivered PUBLISH is
 	// acknowledged without being forwarded twice (MQTT-5.0 §4.3.3).
 	receivedQoS2 map[uint16]struct{}
+	// qos2Forwarding is those of receivedQoS2 whose message has not yet been
+	// forwarded. They are not written to the session record: a client whose
+	// broker died before forwarding must be able to send the PUBLISH again.
+	qos2Forwarding map[uint16]struct{}
 	// withdrawn holds the Packet Identifiers of in-flight messages the broker
 	// took back rather than resent, because the filter that earned them was
 	// denied on resume. The client was sent those messages and may still owe an
@@ -307,13 +311,14 @@ type session struct {
 
 func newSession(clientID string) *session {
 	return &session{
-		clientID:     clientID,
-		instance:     nuid.Next(),
-		subs:         make(map[string]*subscription),
-		inflight:     make(map[uint16]*outbound),
-		receivedQoS2: make(map[uint16]struct{}),
-		withdrawn:    make(map[uint16]withdrawal),
-		resent:       make(map[uint16]ackOwed),
+		clientID:       clientID,
+		instance:       nuid.Next(),
+		subs:           make(map[string]*subscription),
+		inflight:       make(map[uint16]*outbound),
+		receivedQoS2:   make(map[uint16]struct{}),
+		qos2Forwarding: make(map[uint16]struct{}),
+		withdrawn:      make(map[uint16]withdrawal),
+		resent:         make(map[uint16]ackOwed),
 	}
 }
 
@@ -810,7 +815,18 @@ func (s *session) markQoS2Received(id uint16) (duplicate bool) {
 	defer s.mu.Unlock()
 	_, duplicate = s.receivedQoS2[id]
 	s.receivedQoS2[id] = struct{}{}
+	if !duplicate {
+		s.qos2Forwarding[id] = struct{}{}
+	}
 	return duplicate
+}
+
+// qos2Forwarded says the message of a received QoS 2 PUBLISH has been
+// forwarded, so a record may hold its identifier [MQTT-4.3.3-10].
+func (s *session) qos2Forwarded(id uint16) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.qos2Forwarding, id)
 }
 
 // releaseQoS2 clears a Packet Identifier on PUBREL and reports whether it was
@@ -821,6 +837,7 @@ func (s *session) releaseQoS2(id uint16) bool {
 	defer s.mu.Unlock()
 	_, ok := s.receivedQoS2[id]
 	delete(s.receivedQoS2, id)
+	delete(s.qos2Forwarding, id)
 	return ok
 }
 
@@ -1031,36 +1048,19 @@ func (s *session) deliveredFromLocked(fromSeq uint64, exclude map[uint64]bool) (
 	return delivered, dropped
 }
 
-// unackedQueueSeqs is the queue sequences of the messages sent to the client
-// and not yet acknowledged.
-func (s *session) unackedQueueSeqs() []uint64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var out []uint64
-	for _, o := range s.inflight {
-		if o.queueSeq != 0 && !o.awaitingPubcomp {
-			out = append(out, o.queueSeq)
-		}
-	}
-	return out
-}
-
 // deliveredSince is the delivered ids a checkpoint writes with a replay from
-// fromSeq: those at or above it, except the unacknowledged messages, which the
-// replay must send again. A replay with no sequence starts at a time, and the
-// ids delivered since that time are the ones it must not repeat.
-func (s *session) deliveredSince(fromSeq uint64, since time.Time, unacked []uint64) (delivered []storedDelivered, dropped int) {
-	ex := make(map[uint64]bool, len(unacked))
-	for _, q := range unacked {
-		ex[q] = true
-	}
+// fromSeq: those at or above it. A replay with no sequence starts at a time,
+// and the ids delivered since that time are the ones it must not repeat. The
+// unacknowledged messages are among them: they are resent from the record's
+// in-flight list, not by the replay.
+func (s *session) deliveredSince(fromSeq uint64, since time.Time) (delivered []storedDelivered, dropped int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if fromSeq != 0 {
-		return s.deliveredFromLocked(fromSeq, ex)
+		return s.deliveredFromLocked(fromSeq, nil)
 	}
 	for id, m := range s.delivered {
-		if !m.at.Before(since) && !(m.seq != 0 && ex[m.seq]) {
+		if !m.at.Before(since) {
 			delivered = append(delivered, storedDelivered{ID: id, Seq: m.seq})
 		}
 	}
@@ -1333,7 +1333,9 @@ func (s *session) inflightState() (inflight []storedInflight, received []uint16,
 		inflight = append(inflight, st)
 	}
 	for id := range s.receivedQoS2 {
-		received = append(received, id)
+		if _, forwarding := s.qos2Forwarding[id]; !forwarding {
+			received = append(received, id)
+		}
 	}
 	s.mu.Unlock()
 	sort.Slice(received, func(i, j int) bool { return received[i] < received[j] })

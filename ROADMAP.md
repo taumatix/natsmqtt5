@@ -20,21 +20,8 @@ delivered a second time as a new Application Message.
 
 **Shape:** write the checkpoint when a QoS 2 exchange completes (PUBCOMP received) rather than on
 the tick, or on the first delivery after an idle interval, so the window closes for QoS 2 at the
-cost of one key-value write per completed exchange. Measure it against `DurablePublish` first.
+cost of one key-value write per completed exchange. The same write is already made for the QoS 2 PUBLISH a client sends.
 A test kills `cmd/natsmqtt5` between the PUBCOMP and the next tick.
-
-## In-flight state for a broker that is killed
-
-**Today:** the record's in-flight set and received QoS 2 identifiers are written when a connection
-ends (`releaseStoredSession`), so a broker stopped cleanly or a client that drops hands them over.
-A broker killed outright writes nothing: the next one resumes the session from the start of the
-queue and resends nothing it had in flight, and a QoS 2 PUBLISH the client resends is forwarded
-twice. [MQTT-4.4.0-1], [MQTT-4.3.3-10].
-
-**Shape:** write the in-flight state while the connection lives, rate-limited as the replay position
-is (`checkpoint.go`), or only when a QoS 2 identifier is received
-or a message has been in flight longer than a second. Needs a harness that ends a broker without its
-cleanup, which `leaveAsAKilledBrokerWould` only simulates.
 
 ## In-flight messages with no queue copy are not restored
 
