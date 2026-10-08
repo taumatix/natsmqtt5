@@ -137,6 +137,12 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 			var ce *ConnectError
 			if errors.As(err, &ce) {
 				code, reason = ce.Code, ce.Reason
+				if !isConnackError(code) {
+					// [MQTT-3.2.2-8]: only a Table 3-1 code may reach the wire.
+					c.logger.Warn("authenticator returned a reason code a CONNACK cannot carry; sending 0x80",
+						"code", code)
+					code = packet.UnspecifiedError
+				}
 			}
 			c.refuse(code, reason)
 			return fmt.Errorf("authentication refused for %q: %w", cp.ClientID, err)
@@ -591,4 +597,21 @@ func boolByte(b bool) byte {
 		return 1
 	}
 	return 0
+}
+
+// isConnackError reports whether code is one of the refusal codes Table 3-1 of
+// MQTT-5.0 lists for a CONNACK [MQTT-3.2.2-8].
+func isConnackError(code packet.ReasonCode) bool {
+	switch code {
+	case packet.UnspecifiedError, packet.MalformedPacket, packet.ProtocolError,
+		packet.ImplementationSpecificError, packet.UnsupportedProtocolVersion,
+		packet.ClientIdentifierNotValid, packet.BadUserNameOrPassword,
+		packet.NotAuthorized, packet.ServerUnavailable, packet.ServerBusy,
+		packet.Banned, packet.BadAuthenticationMethod, packet.TopicNameInvalid,
+		packet.PacketTooLarge, packet.QuotaExceeded, packet.PayloadFormatInvalid,
+		packet.RetainNotSupported, packet.QoSNotSupported, packet.UseAnotherServer,
+		packet.ServerMoved, packet.ConnectionRateExceeded:
+		return true
+	}
+	return false
 }
