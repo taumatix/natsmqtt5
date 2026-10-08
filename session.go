@@ -64,6 +64,10 @@ type outbound struct {
 	// went out. Packet Identifiers cannot do that job: they cycle through
 	// 1..65535 and wrap.
 	seq uint64
+	// queueSeq is the stream sequence of the message's copy in the offline
+	// queue, or 0 when it has none. It is what a session record keeps in place
+	// of the payload; see sessionRecord.Inflight.
+	queueSeq uint64
 	// quotaHeld records that this entry holds a slot in the current
 	// connection's send quota, so that its acknowledgement returns that slot
 	// and an acknowledgement for anything else does not.
@@ -886,4 +890,64 @@ func (s *session) commitRecord(gen uint64, rec *sessionRecord, rev uint64) {
 		return
 	}
 	s.rec, s.rev = rec, rev
+}
+
+// inflightState is what the session record keeps of the unacknowledged messages
+// and the received QoS 2 identifiers: the entries in the order they were sent,
+// and the identifiers in ascending order. unrecorded counts in-flight messages
+// left out because they have no copy in the offline queue to be read back, so a
+// restored session could not resend them.
+func (s *session) inflightState() (inflight []storedInflight, received []uint16, unrecorded int) {
+	s.mu.Lock()
+	entries := make([]*outbound, 0, len(s.inflight))
+	for _, o := range s.inflight {
+		entries = append(entries, o)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].seq < entries[j].seq })
+	for _, o := range entries {
+		st := storedInflight{ID: o.packetID, QoS: o.qos}
+		switch {
+		case o.awaitingPubcomp:
+			st.Rel = true
+		case o.queueSeq != 0:
+			st.Seq = o.queueSeq
+			st.Retain = o.publish.Retain
+			if p := o.publish.Properties; p != nil && len(p.SubscriptionIdentifiers) > 0 {
+				st.SubID = p.SubscriptionIdentifiers[0]
+			}
+		default:
+			unrecorded++
+			continue
+		}
+		inflight = append(inflight, st)
+	}
+	for id := range s.receivedQoS2 {
+		received = append(received, id)
+	}
+	s.mu.Unlock()
+	sort.Slice(received, func(i, j int) bool { return received[i] < received[j] })
+	return inflight, received, unrecorded
+}
+
+// restoreReceivedQoS2 puts back the identifiers of QoS 2 PUBLISH packets the
+// previous broker had received and not released.
+func (s *session) restoreReceivedQoS2(ids []uint16) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, id := range ids {
+		s.receivedQoS2[id] = struct{}{}
+	}
+}
+
+// restoreInflight puts back one unacknowledged message. sendSeq is advanced as
+// for a send, so the entries are resent in the order they are restored in.
+func (s *session) restoreInflight(o *outbound) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, dup := s.inflight[o.packetID]; dup {
+		return
+	}
+	s.sendSeq++
+	o.seq = s.sendSeq
+	s.inflight[o.packetID] = o
 }

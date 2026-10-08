@@ -67,11 +67,12 @@ type storedSubscription struct {
 // sessionRecord is the durable half of a session: what a broker that has never
 // seen this client needs in order to serve it (MQTT-5.0 §4.1).
 //
-// What is absent is as deliberate as what is present. In-flight QoS 1 and QoS 2
-// message state stays in the broker process, because resending it on reconnect
-// needs the offline message queue that ROADMAP.md still lists as missing;
-// persisting the identifiers without the messages would let the broker claim a
-// redelivery it cannot make. The Will Message is absent for a different reason:
+// What is absent is as deliberate as what is present. The payloads of in-flight
+// QoS 1 and QoS 2 messages are not in it: the record keeps each one's Packet
+// Identifier, QoS state and offline-queue sequence, and a restored session reads
+// the payload back from the queue (restore.go). A message with no queue copy is
+// not recorded, because an identifier without a message would promise a
+// redelivery the broker cannot make. The Will Message is absent for a different reason:
 // it belongs to the network connection rather than to the session
 // (MQTT-5.0 §3.1.2.5), and a broker reading a record cannot know whether the
 // connection that set the Will has ended or whether its owner is simply busy —
@@ -125,12 +126,47 @@ type sessionRecord struct {
 	AwayFromSeq uint64            `json:",omitempty"`
 	Delivered   []storedDelivered `json:",omitempty"`
 
-	// awayWas, awayFromSeqWas and deliveredWas are what this broker's claim
-	// found and cleared, for the handshake to replay from. They are never
-	// written.
-	awayWas        time.Time
-	awayFromSeqWas uint64
-	deliveredWas   []storedDelivered
+	// Inflight is the QoS 1 and QoS 2 messages sent to the client and not yet
+	// acknowledged when the session was released, in the order they were sent,
+	// and ReceivedQoS2 the Packet Identifiers of the client's QoS 2 PUBLISH
+	// packets received and not yet released. A claim resends the first and
+	// refuses to forward a resend of the second twice [MQTT-4.4.0-1],
+	// [MQTT-4.3.3-10]. Both are cleared by the claim, as AwayAt is, so a record
+	// read while a broker serves the session never describes a stale set.
+	//
+	// They are written only when the session is released, and so are bounded
+	// there (fitRecord): a broker that is killed outright records neither.
+	//
+	// Like AwayFromSeq they are additive: the record version stays 1, and a
+	// record without them restores an empty set, as it always did.
+	Inflight     []storedInflight `json:",omitempty"`
+	ReceivedQoS2 []uint16         `json:",omitempty"`
+
+	// awayWas, awayFromSeqWas, deliveredWas, inflightWas and receivedQoS2Was are
+	// what this broker's claim found and cleared, for the handshake to restore
+	// from. They are never written.
+	awayWas         time.Time
+	awayFromSeqWas  uint64
+	deliveredWas    []storedDelivered
+	inflightWas     []storedInflight
+	receivedQoS2Was []uint16
+}
+
+// storedInflight is one unacknowledged message of the client's session. The
+// payload is not kept: Seq names its copy in the offline queue stream.
+type storedInflight struct {
+	ID  uint16
+	QoS packet.QoS
+	// Rel is set once the PUBREL has gone out (QoS 2): the client owns the
+	// message and what is owed is the PUBREL, which needs no payload and no Seq.
+	Rel bool `json:",omitempty"`
+	// Seq is the stream sequence of the queue copy of the message, 0 with Rel.
+	Seq uint64 `json:",omitempty"`
+	// Retain and SubID are what the delivery to this client carried that the
+	// queue copy does not say: the RETAIN flag as the subscription asked for it,
+	// and the Subscription Identifier of the filter that earned the message.
+	Retain bool `json:",omitempty"`
+	SubID  int  `json:",omitempty"`
 }
 
 // storedDelivered is a delivered message's id and the queue sequence of its
@@ -330,6 +366,8 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 		rec.awayWas, rec.AwayAt = rec.AwayAt, time.Time{}
 		rec.awayFromSeqWas, rec.AwayFromSeq = rec.AwayFromSeq, 0
 		rec.deliveredWas, rec.Delivered = rec.Delivered, nil
+		rec.inflightWas, rec.Inflight = rec.Inflight, nil
+		rec.receivedQoS2Was, rec.ReceivedQoS2 = rec.ReceivedQoS2, nil
 		rev, err := s.kv.Update(ctx, key, encodeRecord(rec), entry.Revision())
 		if err != nil {
 			// Another broker claimed the same Client Identifier between the
@@ -407,6 +445,49 @@ func (s *sessionStore) release(ctx context.Context, rec *sessionRecord, rev uint
 		return rev, fmt.Errorf("%w: %v", errLostSession, err)
 	}
 	return newRev, nil
+}
+
+// valueLimit is the largest session record a release writes. A key-value value
+// travels as one NATS message, so the server's max_payload (1 MiB unless
+// configured) bounds it, and the room left over covers the headers a message
+// carries and the record outgrowing the estimate by a little.
+func (s *sessionStore) valueLimit() int {
+	max := int(s.nc.MaxPayload())
+	if max <= 0 {
+		max = defaultMaxPayload
+	}
+	return max - max/8
+}
+
+// defaultMaxPayload is the NATS server's default max_payload, assumed when the
+// server did not say.
+const defaultMaxPayload = 1 << 20
+
+// fitRecord cuts rec until its encoding is within limit bytes, and returns how
+// many in-flight entries and received QoS 2 identifiers it left out.
+//
+// Receive Maximum allows 65535 messages in flight, which can exceed a value, so
+// something has to give. The newest in-flight entries go first, because the
+// oldest are the ones a resend must put on the wire first [MQTT-4.6.0-5] and
+// the client holds the identifiers it was sent; then received identifiers, whose
+// loss lets a resent QoS 2 PUBLISH be forwarded a second time. Both are logged
+// by the caller. A record that does not fit with neither is left as it is, and
+// its release fails as an oversized record always did.
+func fitRecord(rec *sessionRecord, limit int) (cutInflight, cutQoS2 int) {
+	size := len(encodeRecord(rec))
+	for size > limit && len(rec.Inflight) > 0 {
+		keep := len(rec.Inflight) - max(1, len(rec.Inflight)/8)
+		cutInflight += len(rec.Inflight) - keep
+		rec.Inflight = rec.Inflight[:keep]
+		size = len(encodeRecord(rec))
+	}
+	for size > limit && len(rec.ReceivedQoS2) > 0 {
+		keep := len(rec.ReceivedQoS2) - max(1, len(rec.ReceivedQoS2)/8)
+		cutQoS2 += len(rec.ReceivedQoS2) - keep
+		rec.ReceivedQoS2 = rec.ReceivedQoS2[:keep]
+		size = len(encodeRecord(rec))
+	}
+	return cutInflight, cutQoS2
 }
 
 // neverExpires is the Session Expiry Interval meaning the session is kept until

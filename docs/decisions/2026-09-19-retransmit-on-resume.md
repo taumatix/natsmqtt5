@@ -135,12 +135,11 @@ receipt order, so `Ack` is not synchronous with the PUBACK reaching the broker.
 
 ## Trade-offs and risks
 
-- **Only a resume on the same broker process resends.** A session restored from the JetStream
-  record on another broker, or after a restart, has no in-flight set to resend — the record does
-  not carry one. So the guarantee this adds is real but narrower than [MQTT-4.4.0-1] taken
-  literally. The README and the roadmap say so, and
-  `TestPersistentSessionOnAnotherBrokerHasNothingToResend` pins the boundary so it cannot drift
-  into being assumed wider.
+- **Only a resume on the same broker process resends.** *(Superseded: a session restored from the
+  record now resends too, see the 2026-10-08 section of the changelog and `restore.go`. The record
+  keeps each message's Packet Identifier, QoS state and offline-queue sequence, and the payload is
+  read back from the queue.)* What stays narrower than [MQTT-4.4.0-1] taken literally is a message
+  with no queue copy, and a broker killed outright.
 - **A client that reconnects and never acknowledges holds send quota for the life of the
   session.** That is the same exposure a client which stops acknowledging mid-connection already
   has, bounded the same way, by Receive Maximum.

@@ -50,12 +50,17 @@ func TestARestoredSessionReplaysFromWhatItWasOwedNotFromTheDisconnect(t *testing
 
 	back := dialRaw(t, addrB)
 	require.True(t, back.connect(rawConnect("rewind-moving", 300)).SessionPresent)
-	// w/2 was in flight, which a restored session does not carry ("Retransmission
-	// that survives a broker restart" in ROADMAP.md); w/3 and w/4 were only
-	// waiting, and are what the record now brings back, once each.
+	// w/2 was in flight and is resent first, with its Packet Identifier and DUP
+	// 1 [MQTT-4.4.0-1]; w/3 and w/4 were only waiting, and are what the record's
+	// replay position brings back, once each.
+	resent := back.expectPublish()
+	assert.Equal(t, "w/2", resent.Topic)
+	assert.True(t, resent.Dup)
+	back.send(&packet.Puback{Ack: packet.Ack{PacketID: resent.PacketID}})
 	for _, want := range []string{"w/3", "w/4"} {
 		got := back.expectPublish()
 		assert.Equal(t, want, got.Topic)
+		assert.False(t, got.Dup)
 		back.send(&packet.Puback{Ack: packet.Ack{PacketID: got.PacketID}})
 	}
 	back.expectNothing()

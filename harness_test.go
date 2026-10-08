@@ -25,13 +25,22 @@ import (
 // startNATS runs an embedded NATS server with JetStream and returns its URL.
 func startNATS(t *testing.T) string {
 	t.Helper()
+	return startNATSWithMaxPayload(t, 0)
+}
+
+// startNATSWithMaxPayload is startNATS with the server's max_payload set, which
+// bounds the size of a session record: a key-value value travels as one message.
+// Zero keeps the server's default of 1 MiB.
+func startNATSWithMaxPayload(t *testing.T, maxPayload int32) string {
+	t.Helper()
 	opts := &natsserver.Options{
-		Host:      "127.0.0.1",
-		Port:      -1, // any free port
-		JetStream: true,
-		StoreDir:  t.TempDir(),
-		NoLog:     true,
-		NoSigs:    true,
+		Host:       "127.0.0.1",
+		Port:       -1, // any free port
+		JetStream:  true,
+		StoreDir:   t.TempDir(),
+		NoLog:      true,
+		NoSigs:     true,
+		MaxPayload: maxPayload,
 	}
 	srv, err := natsserver.NewServer(opts)
 	require.NoError(t, err)

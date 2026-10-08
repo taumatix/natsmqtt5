@@ -27,39 +27,36 @@ per behind client; the gain is that a kill costs a second of repeats rather than
 `TestASessionLeftAttachedByAKilledBrokerIsReplayedFromTheQueue` rewrites a record to simulate the
 kill; a real one needs a harness that ends a broker without its cleanup.
 
-## Retransmission that survives a broker restart
+## In-flight state for a broker that is killed
 
-**Today:** the resend on resume reaches as far as this broker's memory. A
-session restored from the JetStream record — after a restart, or on another
-broker — has an empty in-flight set, so its unacknowledged messages are lost
-even though its subscriptions come back. `TestPersistentSessionOnAnotherBroker
-HasNothingToResend` pins that boundary so it cannot quietly be assumed wider.
+**Today:** the record's in-flight set and received QoS 2 identifiers are written when a connection
+ends (`releaseStoredSession`), so a broker stopped cleanly or a client that drops hands them over.
+A broker killed outright writes nothing: the next one resumes the session from the start of the
+queue and resends nothing it had in flight, and a QoS 2 PUBLISH the client resends is forwarded
+twice. [MQTT-4.4.0-1], [MQTT-4.3.3-10].
 
-**Why it is not simply fixed:** the record is a JetStream KV value and the
-payloads do not belong in it. Persisting Packet Identifiers alone would record
-that a message was in flight without being able to resend it — a promise the
-broker cannot keep, which is why they were left out in the first place.
+**Shape:** write the in-flight state while the connection lives, rate-limited as the replay position
+is (see "A killed broker's session replays the whole queue"), or only when a QoS 2 identifier is received
+or a message has been in flight longer than a second. Needs a harness that ends a broker without its
+cleanup, which `leaveAsAKilledBrokerWould` only simulates.
 
-**What the record has now:** since the restored replay can rewind, the record holds the lowest queue
-sequence the last connection had not delivered and the ids delivered above it
-(`sessionRecord.AwayFromSeq`, `Delivered`, written on release). That is the queue position;
-it is not the in-flight set. A message sent and not acknowledged sits below that position, so a
-restored session neither replays nor resends it: the loss this entry is about, and the reason the
-position is a lower bound on what must be replayed rather than a complete account.
+## In-flight messages with no queue copy are not restored
 
-**Shape:** once the offline queue exists, the unacknowledged set is the durable
-consumer's ack-pending set and the payloads are already in the stream. What
-still has to go in the record is the Packet Identifier each pending message was
-sent under, so a resend after a restart reuses the original one
-[MQTT-4.4.0-1].
+**Today:** the record keeps a reference to the offline queue, so an unacknowledged message that has
+none is left out and logged: a retained message sent on subscribing, a message from a shared
+subscription's backlog (it is read from the queue stream but carries no queue sequence), and
+anything with the queue off. A restored session does not resend them. [MQTT-4.4.0-1].
 
-This only binds with `PersistentSessions`: without it a restart answers Session
-Present=0, which is honest. With it the CONNACK says Session Present=1 and
-nothing in flight is resent, which breaks [MQTT-4.4.0-1] and [MQTT-3.1.2-5]. The
-record also has to carry the inbound QoS 2 state, the Packet Identifiers received
-and not yet released. Without it a QoS 2 message the client resends after a
-failover is forwarded twice [MQTT-4.3.3-10]. That part is small once the record
-changes.
+**Shape:** carry the stream sequence on shared-subscription deliveries, and put a retained message's
+payload into the record when it is small, or its sequence in the retained stream. The queue-off case
+needs the payload in the record or a stream of its own, and is the heaviest.
+
+## The restore paths without a test over the wire
+
+**Today:** the restore is driven end to end for QoS 1, QoS 2 in both states, the inbound QoS 2
+identifier, expiry, a denied filter, no queue, and a record cut for size. Not driven: a queue copy
+that has aged out (`OfflineQueueMaxAge`) between the release and the resume, which is logged and
+the message dropped, and a filter unsubscribed before the release whose message is still owed.
 
 ## A retained message keeps its publisher's Topic Alias
 
@@ -319,7 +316,9 @@ the exchange can end — unsubscribe, disconnect, session expiry, takeover.
 The shared backlog changed this: a member now takes a message off the group's
 consumer and the message becomes that session's in-flight state, exactly the
 handover described above. What QoS 2 still needs is that state surviving a
-broker restart, which is "Retransmission that survives a broker restart".
+broker restart, which the session record now carries for QoS 1 and 2 on a non-shared subscription;
+the shared subscription's own in-flight messages are the entry "In-flight messages with no queue
+copy are not restored".
 
 ## WebSocket transport
 

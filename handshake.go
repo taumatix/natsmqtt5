@@ -194,6 +194,9 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 
 	if sess == nil {
 		sess = newSession(clientID)
+		if rec != nil && (len(rec.inflightWas) > 0 || len(rec.receivedQoS2Was) > 0) {
+			c.broker.restoreSessionState(ctx, sess, rec)
+		}
 		if !restoredAway.IsZero() {
 			sess.markAwayRestored(restoredAway, rec.awayFromSeqWas, rec.deliveredWas)
 		}
@@ -261,11 +264,10 @@ func (c *conn) checkClientID(clientID string) error {
 // empty for a durable record that holds no subscriptions, which reaches the
 // same branch and finds nothing to walk.
 //
-// Only the in-memory branch withdraws in-flight messages, and that is safe
-// because a non-empty stored implies negotiate found no session in memory: the
-// session it is working on was built by newSession moments earlier and its
-// in-flight set is empty. A future change that reconciles a record against a
-// live session breaks that, and has to withdraw on both branches.
+// Both branches withdraw the in-flight messages a denied filter earned. The
+// stored branch has an in-flight set to withdraw from because negotiate
+// restores the record's before this runs (restore.go); a non-empty stored still
+// implies negotiate found no session in memory, so the set is exactly that.
 func (c *conn) resumeSubscriptions(ctx context.Context, stored []storedSubscription) error {
 	if len(stored) == 0 {
 		// Order matters: the reduced set is what gets written, so a filter this
@@ -277,12 +279,13 @@ func (c *conn) resumeSubscriptions(ctx context.Context, stored []storedSubscript
 		return nil
 	}
 
-	dropped := false
+	var denied, surviving []string
 	for _, st := range stored {
 		if !c.mayResume(ctx, st.Filter, st.Opts.QoS) {
-			dropped = true
+			denied = append(denied, st.Filter)
 			continue
 		}
+		surviving = append(surviving, st.Filter)
 		sub, err := c.rebuild(st)
 		if err != nil {
 			// Every filter in the record was validated when the client first
@@ -316,7 +319,14 @@ func (c *conn) resumeSubscriptions(ctx context.Context, stored []storedSubscript
 		c.refuse(packet.ImplementationSpecificError, "the stored subscriptions could not be confirmed with NATS")
 		return fmt.Errorf("confirming the restored subscriptions for %q: %w", c.sess.clientID, err)
 	}
-	if dropped {
+	if len(denied) > 0 {
+		// The messages a denied filter earned are in the in-flight set the
+		// record restored, and the retransmission after the CONNACK would hand
+		// them to this connection [MQTT-4.4.0-1]; see reauthoriseLive.
+		if taken := c.sess.withdrawInflight(denied, surviving); len(taken) > 0 {
+			c.logger.Warn("withdrawing unacknowledged messages this connection may not receive",
+				"client_id", c.sess.clientID, "packet_ids", taken)
+		}
 		// Write the reduced set back, so a filter this connection may not have
 		// stops being carried forward to the next one.
 		c.broker.persistSession(c)

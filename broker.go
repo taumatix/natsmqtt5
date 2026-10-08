@@ -421,6 +421,23 @@ func (b *Broker) releaseStoredSession(c *conn) {
 			"a restored replay may repeat the rest", "client_id", s.clientID, "dropped", dropped)
 	}
 
+	// What the client has not acknowledged, and what it sent that is not yet
+	// released, so a broker that restores the session can resend and dedupe
+	// [MQTT-4.4.0-1], [MQTT-4.3.3-10].
+	var unrecorded int
+	rec.Inflight, rec.ReceivedQoS2, unrecorded = s.inflightState()
+	if unrecorded > 0 {
+		b.logger.Warn("unacknowledged messages with no copy in the offline queue are not kept in the "+
+			"session record, so a restored session will not resend them",
+			"client_id", s.clientID, "count", unrecorded)
+	}
+	if cutInflight, cutQoS2 := fitRecord(rec, b.store.valueLimit()); cutInflight+cutQoS2 > 0 {
+		b.logger.Warn("the session record is too large for one key-value value; "+
+			"the newest unacknowledged messages and received QoS 2 identifiers were left out",
+			"client_id", s.clientID, "inflight_left_out", cutInflight, "qos2_left_out", cutQoS2,
+			"value_limit", b.store.valueLimit())
+	}
+
 	newRev, err := b.store.release(ctx, rec, rev)
 	if err != nil {
 		// Losing the compare-and-swap here is the ordinary outcome of a client
