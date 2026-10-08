@@ -445,6 +445,18 @@ func (c *conn) writeReportingDiscard(p packet.Packet) (discarded bool, err error
 		return false, fmt.Errorf("encoding %s: %w", p.Type(), err)
 	}
 	if c.clientMaxPacketSize > 0 && uint32(len(raw)) > c.clientMaxPacketSize {
+		// A Reason String or User Property "MUST NOT" be sent if it would take
+		// the packet past the limit [MQTT-3.2.2-19], [MQTT-3.2.2-20],
+		// [MQTT-3.4.2-2], [MQTT-3.5.2-2], [MQTT-3.14.2-3]. The rest of the packet
+		// is still owed: a lost PUBACK or PUBREC leaves the client's exchange
+		// unfinished.
+		if bare, ok := withoutOptionalProperties(p); ok {
+			if bareRaw, err := packet.Encode(bare); err == nil && uint32(len(bareRaw)) <= c.clientMaxPacketSize {
+				p, raw = bare, bareRaw
+			}
+		}
+	}
+	if c.clientMaxPacketSize > 0 && uint32(len(raw)) > c.clientMaxPacketSize {
 		// [MQTT-3.1.2-24]: the server must not send it.
 		c.logger.Warn("discarding a packet larger than the client's Maximum Packet Size",
 			"type", p.Type().String(), "size", len(raw), "limit", c.clientMaxPacketSize)
@@ -462,6 +474,60 @@ func (c *conn) writeReportingDiscard(p packet.Packet) (discarded bool, err error
 		return false, fmt.Errorf("writing %s: %w", p.Type(), err)
 	}
 	return false, nil
+}
+
+// withoutOptionalProperties returns a copy of an acknowledgement-shaped packet
+// with its Reason String and User Properties removed, the two properties the
+// specification forbids sending when they would exceed the client's Maximum
+// Packet Size. ok is false for a packet that has nothing to drop.
+func withoutOptionalProperties(p packet.Packet) (packet.Packet, bool) {
+	strip := func(in *packet.Properties) (*packet.Properties, bool) {
+		if in == nil || (in.ReasonString == "" && len(in.User) == 0) {
+			return nil, false
+		}
+		out := *in
+		out.ReasonString, out.User = "", nil
+		return &out, true
+	}
+	switch v := p.(type) {
+	case *packet.Connack:
+		if props, ok := strip(v.Properties); ok {
+			out := *v
+			out.Properties = props
+			return &out, true
+		}
+	case *packet.Puback:
+		if props, ok := strip(v.Properties); ok {
+			out := *v
+			out.Properties = props
+			return &out, true
+		}
+	case *packet.Pubrec:
+		if props, ok := strip(v.Properties); ok {
+			out := *v
+			out.Properties = props
+			return &out, true
+		}
+	case *packet.Pubrel:
+		if props, ok := strip(v.Properties); ok {
+			out := *v
+			out.Properties = props
+			return &out, true
+		}
+	case *packet.Pubcomp:
+		if props, ok := strip(v.Properties); ok {
+			out := *v
+			out.Properties = props
+			return &out, true
+		}
+	case *packet.Disconnect:
+		if props, ok := strip(v.Properties); ok {
+			out := *v
+			out.Properties = props
+			return &out, true
+		}
+	}
+	return nil, false
 }
 
 // sendDisconnect sends a server DISCONNECT, best effort. It is a no-op before

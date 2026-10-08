@@ -13,6 +13,14 @@ honestly be reconstructed now.
 
 ### Fixed
 
+- **An acknowledgement over the client's Maximum Packet Size is sent without its Reason String.**
+  A CONNACK, PUBACK, PUBREC or DISCONNECT that would exceed the limit was discarded whole, so a
+  refused CONNECT, or a refused QoS 1 or 2 PUBLISH, got no answer at all and the client's exchange
+  never finished. The Reason String and User Properties are dropped first and the rest is sent;
+  only a packet that is still too large is discarded [MQTT-3.2.2-19], [MQTT-3.2.2-20],
+  [MQTT-3.4.2-2], [MQTT-3.5.2-2], [MQTT-3.14.2-3]. A CONNECT's Maximum Packet Size now also binds
+  the CONNACK that refuses it for an unsupported Authentication Method.
+
 - **A Response Topic with a wildcard is a Protocol Error.** The broker forwarded it unchecked. A
   PUBLISH carrying one now gets a DISCONNECT with 0x82 and the connection is closed, and a CONNECT
   whose Will carries one is refused with CONNACK 0x82 [MQTT-3.3.2-14], [MQTT-4.13.1-1].

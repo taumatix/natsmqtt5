@@ -85,6 +85,12 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 		props = &packet.Properties{}
 	}
 
+	// Before any refusal below, so a CONNACK that refuses the CONNECT respects
+	// the limit as well [MQTT-3.1.2-24].
+	if props.MaximumPacketSize != nil {
+		c.clientMaxPacketSize = *props.MaximumPacketSize
+	}
+
 	// The broker advertises no authentication method, so a client asking for
 	// enhanced authentication must be turned away with 0x8C rather than left
 	// waiting for an AUTH that will never come (MQTT-5.0 §4.12).
@@ -95,9 +101,6 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 	}
 
 	c.requestProblemInfo = props.RequestProblemInfo == nil || *props.RequestProblemInfo == 1
-	if props.MaximumPacketSize != nil {
-		c.clientMaxPacketSize = *props.MaximumPacketSize
-	}
 	c.clientReceiveMax = 65535
 	if props.ReceiveMaximum != nil {
 		c.clientReceiveMax = *props.ReceiveMaximum

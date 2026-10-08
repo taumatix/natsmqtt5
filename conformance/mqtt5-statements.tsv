@@ -81,8 +81,8 @@ MQTT-3.2.2-15	3.2.2.3.6 Maximum Packet Size	C	CLIENT-ONLY (UNCITED)
 MQTT-3.2.2-16	3.2.2.3.7 Assigned Client Identifier	S	UNCITED	a		auto-+nuid (handshake.go:113-120).
 MQTT-3.2.2-17	3.2.2.3.8 Topic Alias Maximum	C	CLIENT-ONLY (UNCITED)			
 MQTT-3.2.2-18	3.2.2.3.8 Topic Alias Maximum	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.2.2-19	3.2.2.3.9 Reason String	S	UNCITED	b		An over-size CONNACK is discarded whole instead of dropping the Reason String (conn.go:386-391); the client gets no CONNACK (probe: Maximum Packet Size 40 with an assigned id).
-MQTT-3.2.2-20	3.2.2.3.10 User Property	S	UNCITED	b		Same mechanism as 3.2.2-19 (conn.go:386-391).
+MQTT-3.2.2-19	3.2.2.3.9 Reason String	S	CITED-TESTED	fixed unreleased		conn.go oversize_ack_test.go:TestAnOversizeConnackLosesItsReasonStringAndIsStillSent
+MQTT-3.2.2-20	3.2.2.3.10 User Property	S	CITED-TESTED	fixed unreleased		conn.go (the broker sends no CONNACK User Property; the same strip drops one) oversize_ack_test.go:TestAnOversizeConnackLosesItsReasonStringAndIsStillSent
 MQTT-3.2.2-21	3.2.2.3.14 Server Keep Alive	C	CLIENT-ONLY (UNCITED)			
 MQTT-3.2.2-22	3.2.2.3.14 Server Keep Alive	S	UNCITED	a		Client Keep Alive used unless ServerKeepAlive set (handshake.go:42-49).
 MQTT-3.3.1-1	3.3.1.1 DUP	CS	CITED-TESTED			broker_test.go:548 retransmit_test.go:247
@@ -129,10 +129,10 @@ MQTT-3.3.4-8	3.3.4 PUBLISH Actions	C	CLIENT-ONLY (UNCITED)
 MQTT-3.3.4-9	3.3.4 PUBLISH Actions	S	UNCITED	a		Send quota channel sized to the client Receive Maximum (handshake.go:101-105, subscribe.go:399-403).
 MQTT-3.3.4-10	3.3.4 PUBLISH Actions	S	UNCITED	a		PUBLISH sends run on deliverLoop; acks/PINGRESP on the read loop (subscribe.go:341-383, conn.go:233).
 MQTT-3.4.2-1	3.4.2.1 PUBACK Reason Code	CS	UNCITED	a		PUBACK codes used: 0x00, 0x80, 0x83, 0x87, 0x90, all valid.
-MQTT-3.4.2-2	3.4.2.2.2 Reason String	CS	UNCITED	b		A PUBACK with a Reason String over the client limit is discarded whole (publish.go:137-157, conn.go:386-391), so the QoS 1 exchange never completes for the client.
+MQTT-3.4.2-2	3.4.2.2.2 Reason String	CS	CITED-TESTED	fixed unreleased		conn.go oversize_ack_test.go:TestAnOversizePubackLosesItsReasonStringAndIsStillSent
 MQTT-3.4.2-3	3.4.2.2.3 User Property	CS	UNCITED	a		The broker never puts User Properties on PUBACK.
 MQTT-3.5.2-1	3.5.2.1 PUBREC Reason Code	CS	UNCITED	a		PUBREC codes used: 0x00, 0x80, 0x83, 0x87, 0x90, all valid.
-MQTT-3.5.2-2	3.5.2.2.2 Reason String	CS	UNCITED	b		As 3.4.2-2 for PUBREC.
+MQTT-3.5.2-2	3.5.2.2.2 Reason String	CS	CITED-TESTED	fixed unreleased		conn.go oversize_ack_test.go:TestAnOversizePubrecLosesItsReasonStringAndIsStillSent
 MQTT-3.5.2-3	3.5.2.2.3 User Property	CS	UNCITED	a		No User Properties on PUBREC.
 MQTT-3.6.1-1	3.6.1 PUBREL Fixed Header	S	UNCITED	a		reservedFlags PUBREL=0x02 enforced in Read (packet/types.go:46-50, packet/packet.go:51-54).
 MQTT-3.6.2-1	3.6.2.1 PUBREL Reason Code	CS	UNCITED	a		PUBREL codes 0x00 and 0x92 (publish.go:186-189, 211).
@@ -177,7 +177,7 @@ MQTT-3.14.0-1	3.14 DISCONNECT – Disconnect notification	S	CITED-CODE			conn.go
 MQTT-3.14.1-1	3.14.1 DISCONNECT Fixed Header	CS	UNCITED	a		reservedFlags DISCONNECT=0 (packet/types.go:49).
 MQTT-3.14.2-1	3.14.2.1 Disconnect Reason Code	CS	UNCITED	a		Server DISCONNECT codes used (0x81,0x82,0x8B,0x8D,0x8E,0x94,0x95,0x9A,0x9B,0x87) are all DISCONNECT codes.
 MQTT-3.14.2-2	3.14.2.2.2 Session Expiry Interval	S	UNCITED	a		sendDisconnect only sets a Reason String (conn.go:412-417).
-MQTT-3.14.2-3	3.14.2.2.3 Reason String	CS	UNCITED	b		A DISCONNECT whose Reason String exceeds the client limit is discarded whole (conn.go:386-391); the connection still closes.
+MQTT-3.14.2-3	3.14.2.2.3 Reason String	CS	CITED-TESTED	fixed unreleased		conn.go oversize_ack_test.go:TestAnOversizeDisconnectLosesItsReasonStringAndIsStillSent
 MQTT-3.14.2-4	3.14.2.2.4 User Property	CS	UNCITED	a		No User Properties on broker DISCONNECT.
 MQTT-3.14.4-1	3.14.4 DISCONNECT Actions	CS	UNCITED	u		After a protocol-error DISCONNECT the socket stays open while finish() runs Will/store work (conn.go:131-133, 272-296), and deliverLoop can still write queued PUBLISHes until close(); looks like a race, not demonstrated.
 MQTT-3.14.4-2	3.14.4 DISCONNECT Actions	CS	UNCITED	a		serve defers close (conn.go:103).

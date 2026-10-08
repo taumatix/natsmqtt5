@@ -83,6 +83,9 @@ conforming client hits in ordinary use:
   PUBLISH and in a Will. It is a Protocol Error (data the protocol does not allow, in a packet that
   parses): DISCONNECT 0x82 and the connection closed, or CONNACK 0x82 for a Will. [MQTT-3.3.2-14],
   [MQTT-4.13.1-1].
+- **Fixed, unreleased.** A CONNACK, PUBACK, PUBREC or DISCONNECT over the client's Maximum Packet
+  Size was discarded whole. The Reason String and User Properties are now dropped first and the
+  packet sent. [MQTT-3.2.2-19], [MQTT-3.2.2-20], [MQTT-3.4.2-2], [MQTT-3.5.2-2], [MQTT-3.14.2-3].
 
 Features the specification defines and the broker does not offer (enhanced AUTH, server-to-client
 topic aliases, WebSocket, QoS 2 on shared subscriptions) are refused or left unadvertised the way
