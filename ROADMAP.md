@@ -33,16 +33,17 @@ failure). None has failed.
 **Shape:** a test hook (an unexported counter of live copies the session has seen) the tests wait
 on instead of the clock.
 
-## A live copy that arrives after the replay floor is read
+## A restored session's replay can skip a live copy that arrived late
 
-**Today:** `awayFloor` closes the connection and reads its owed sequences once. A live copy on a
-NATS dispatcher goroutine that is still between `isClosed` and the session's `detach` is noted by
-`noteOwedLocked` only if it runs before the floor is read; with several publishers a copy that lands
-after it is covered only by the time-based replay when no later message sets the floor higher.
-Unproven either way: no run has lost a message this way. [MQTT-4.4.0-1].
+**Today:** the in-memory resume now replays by time when the stored message at the replay floor is newer
+than the rewind point, so a live copy that lands after the floor is read is found (`late_live_copy_test.go`).
+A session restored from its record (another broker, or after a restart) still starts from the recorded
+position: `Delivered` is recorded for ids below a floor a late copy may sit under, and the restored replay
+does not start from its exact time. Unproven by a run; the same window as before, on the restore path.
+[MQTT-4.4.0-1].
 
-**Shape:** a test that publishes from several connections while the subscriber drops and resumes,
-with the sequence-based replay forced, to show whether the window exists before closing it.
+**Shape:** record `Delivered` only for ids at or above the floor, start the restored replay at its exact
+time, and test it with the late-copy hold of `late_live_copy_test.go` across a SIGKILL.
 
 # Tier 2: MUST statements on rare or optional paths
 
