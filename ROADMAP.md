@@ -73,14 +73,6 @@ client that small is rare.
 bytes losslessly, and decide whether a client under the remainder should be refused with a CONNACK
 that fits, or served on assumed defaults. Size S, and a decision.
 
-## An Authenticator's Reason Code is not checked
-
-**Today:** a Reason Code returned by an `Authenticator` is sent in the CONNACK as given
-(`handshake.go`), so an implementation can put a code the CONNACK does not allow on the wire.
-[MQTT-3.2.2-8].
-
-**Shape:** map a code that is not valid for CONNACK to 0x80 and log it. Size S.
-
 ## A late acknowledgement can get a client disconnected
 
 **Today:** `conn.resend` re-reads the live in-flight entry immediately before

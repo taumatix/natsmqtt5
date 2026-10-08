@@ -13,6 +13,11 @@ honestly be reconstructed now.
 
 ### Fixed
 
+- **An Authenticator's Reason Code is checked.** A `ConnectError` code was sent in the CONNACK as
+  given, so a success code, or one only DISCONNECT or SUBACK may carry, could reach the wire. A
+  code MQTT-5.0 Table 3-1 does not list for a CONNACK is logged and sent as 0x80 (Unspecified
+  error) [MQTT-3.2.2-8]. Codes the table lists are unchanged.
+
 - **Nothing follows a server DISCONNECT.** A PUBLISH queued for a client could still be written
   after the broker's DISCONNECT, because the delivery goroutine and the read loop write
   independently. Once the DISCONNECT is written, or decided against, every later write on that

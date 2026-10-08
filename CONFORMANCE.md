@@ -88,6 +88,9 @@ conforming client hits in ordinary use:
   packet sent. [MQTT-3.2.2-19], [MQTT-3.2.2-20], [MQTT-3.4.2-2], [MQTT-3.5.2-2], [MQTT-3.14.2-3].
 - **Fixed, unreleased.** A PUBLISH could be written after the broker's DISCONNECT, a race between
   the delivery goroutine and the read loop. [MQTT-3.14.4-1].
+- **Fixed, unreleased.** A Reason Code returned by an `Authenticator` was sent in the CONNACK
+  whatever it was, so a success or a DISCONNECT-only code could reach the wire. A code Table 3-1
+  does not list for a CONNACK is now logged and sent as 0x80. [MQTT-3.2.2-8].
 
 Features the specification defines and the broker does not offer (enhanced AUTH, server-to-client
 topic aliases, WebSocket, QoS 2 on shared subscriptions) are refused or left unadvertised the way

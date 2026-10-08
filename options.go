@@ -382,9 +382,11 @@ func (f AuthenticatorFunc) Authenticate(ctx context.Context, req *AuthRequest) (
 }
 
 // ConnectError carries the CONNACK Reason Code an Authenticator wants the
-// broker to send. Any code of 0x80 or greater from MQTT-5.0 Table 3-1 is
-// valid; common choices are BadUserNameOrPassword (0x86), NotAuthorized
-// (0x87), Banned (0x8A) and ClientIdentifierNotValid (0x85).
+// broker to send. Any refusal code MQTT-5.0 Table 3-1 lists for a CONNACK is
+// sent as given; common choices are BadUserNameOrPassword (0x86), NotAuthorized
+// (0x87), Banned (0x8A) and ClientIdentifierNotValid (0x85). A code the table
+// does not list, success codes included, is logged and sent as
+// UnspecifiedError (0x80) [MQTT-3.2.2-8].
 type ConnectError struct {
 	Code   packet.ReasonCode
 	Reason string

@@ -70,7 +70,7 @@ MQTT-3.2.2-4	3.2.2.1.1 Session Present	C	CLIENT-ONLY (UNCITED)
 MQTT-3.2.2-5	3.2.2.1.1 Session Present	C	CLIENT-ONLY (UNCITED)			
 MQTT-3.2.2-6	3.2.2.1.1 Session Present	S	CITED-CODE			packet/connack.go:44 packet/connack.go:7
 MQTT-3.2.2-7	3.2.2.2 Connect Reason Code	S	CITED-CODE			handshake.go:72
-MQTT-3.2.2-8	§3.2.2 (label appears only in Appendix B)	S	UNCITED	a		All built-in refusal codes are CONNACK codes; an Authenticator ConnectError.Code is passed through unvalidated (handshake.go:133-138).
+MQTT-3.2.2-8	§3.2.2 (label appears only in Appendix B)	S	CITED-TESTED	fixed unreleased		authenticator_code_test.go TestAnAuthenticatorCodeOutsideTable31IsSentAsUnspecifiedError TestAnAuthenticatorCodeFromTable31IsSentAsGiven handshake.go:isConnackError
 MQTT-3.2.2-9	3.2.2.3.4 Maximum QoS	S	CITED-CODE			handshake.go:553 options.go:168
 MQTT-3.2.2-10	3.2.2.3.4 Maximum QoS	S	CITED-TESTED			broker_test.go:864
 MQTT-3.2.2-11	3.2.2.3.4 Maximum QoS	C	CLIENT-ONLY (CITED-CODE)			publish.go:18
