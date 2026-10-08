@@ -130,24 +130,28 @@ is in use, once the partition entry above is done and a Will payload's
 visibility has an answer (an Authorizer check on the bucket, or a documented
 requirement). A default change needs a CHANGELOG entry that says so.
 
-## A PUBACK that means the message is safe
+## DurablePublish does not cover live delivery to subscribers on other brokers
 
-**Today:** the broker hands a QoS 1 message to its NATS connection and
-acknowledges immediately. nats.go flushes that write from another goroutine, so
-a broker killed in the window between the two loses a message it has told the
-client it has. The subscribe path does not have this problem: a SUBACK waits for
-the NATS server to confirm the subscription, because a client cannot detect a
-lost subscription the way it can retry a publish.
+`Options.DurablePublish` makes the PUBACK wait for the queue stream's copy and for a NATS flush of
+the live copy. The live copy itself is still core NATS: a subscriber connected to another broker
+whose NATS connection drops at the wrong moment misses it, and nothing re-sends it to a session
+that was connected (only to one that was away). Closing that needs a stream capturing the live
+subjects, which overlaps the retained stream's subjects (JetStream refuses overlap), so it needs
+either a subject layout change or per-subscription JetStream consumers. A decision with a
+compatibility cost.
 
-**Why it is not simply fixed:** flushing before every PUBACK costs a round trip
-to NATS per QoS 1 publish, which is the broker's throughput. Core NATS also has
-no acknowledgement of its own, so a flush proves the bytes left the broker, not
-that the server accepted them.
+## DurablePublish is untested when the flush itself fails
 
-**Shape:** publish QoS 1 and 2 through JetStream and acknowledge on the
-publish-ack, as an opt-in `Options.DurablePublish`. That buys a real
-end-to-end guarantee rather than a cheaper illusion, at a latency cost the
-deployment chooses.
+`TestDurablePublishAddsOneNATSRoundTripToThePUBACK` proves the flush is waited for, and the stream
+tests prove a queue failure is refused with 0x83. No test makes the flush fail after the queue
+stored the message (the NATS connection lost in that instant), so the 0x83 on that branch and the
+duplicate queue copy a client's retry then leaves are not driven over a socket. Needs a proxy that
+cuts the broker's NATS connection once the JetStream publish-ack has passed.
+
+## Will Messages are not covered by DurablePublish
+
+A Will published by `publishWillFor` goes through the queue's keep but is not flushed, and a Will
+has no client to refuse to. Whether a published Will should wait for the flush is undecided.
 
 # Tier 3: SHOULD statements
 
@@ -392,13 +396,6 @@ waiting messages the broker drops, as before. Back-pressure (blocking the subscr
 handler, which holds back only that client's subscriptions) would move the limit to nats.go's
 pending limits rather than remove it. QoS 0, and messages published straight onto NATS, are
 dropped the same way with the queue on.
-
-## The queue's cost per publish is unmeasured
-
-Every QoS 1 and 2 publish now waits for a JetStream store before its PUBACK, and the queue holds a
-day of that traffic by default. There is no benchmark of the throughput this costs, so the README
-can only say "one round trip". A benchmark against a file-backed embedded server, and a line in
-the README with the number, would let a deployment size it before upgrading.
 
 ## The slow-reader replay test only runs when asked
 

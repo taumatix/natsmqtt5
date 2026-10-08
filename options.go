@@ -188,6 +188,29 @@ type Options struct {
 	// accepts that a resumed session misses what was published while it was
 	// away. Setting it together with OfflineQueue is an error.
 	DisableOfflineQueue bool
+	// DurablePublish makes the PUBACK of a QoS 1 PUBLISH and the PUBREC of a QoS 2
+	// one mean that the message is safe, not only that the broker has it. It
+	// implies OfflineQueue (the broker fails to start without the queue) and is
+	// an error together with DisableOfflineQueue.
+	//
+	// Without it the broker already waits for JetStream to store the queue's
+	// copy, but then hands the live copy to its NATS connection and
+	// acknowledges at once; nats.go writes that from another goroutine, so a
+	// broker killed in the window loses a live copy it has told the client
+	// about. With it the broker also waits for the NATS server to confirm it
+	// has processed the live publish (a flush: a PING answered by a PONG) before
+	// it acknowledges. So an acknowledged message is (1) in the queue stream,
+	// to the stream's replication and storage, for OfflineQueueMaxAge, and
+	// (2) has reached the NATS server's routing. If either step fails or takes
+	// longer than five seconds the client gets PUBACK / PUBREC 0x83
+	// Implementation specific error and may send the message again.
+	//
+	// It does not make delivery to a subscriber exactly-once or guaranteed:
+	// live delivery is core NATS, at most once per hop, and a session whose
+	// client is away gets the queued copy on resume. It covers only QoS 1 and
+	// 2 publishes from clients, not Will Messages. Costs a NATS round trip per
+	// such publish on top of the queue's; see the README for measurements.
+	DurablePublish bool
 	// OfflineQueueMaxAge is how long a queued message is kept. Defaults to 24
 	// hours. A session away for longer loses what is older.
 	OfflineQueueMaxAge time.Duration
@@ -335,6 +358,15 @@ func (o Options) resolve() (*resolved, error) {
 		return nil, fmt.Errorf("%w: OfflineQueue and DisableOfflineQueue are both set", ErrInvalidOptions)
 	}
 	r.defaultQueue = !o.OfflineQueue && !o.DisableOfflineQueue && (!o.DisableRetained || o.PersistentSessions)
+	if o.DurablePublish {
+		// The guarantee rests on the queue's stream, so the queue is required,
+		// not merely defaulted: a broker that cannot set it up must not start
+		// and acknowledge publishes it cannot keep.
+		if o.DisableOfflineQueue {
+			return nil, fmt.Errorf("%w: DurablePublish and DisableOfflineQueue are both set", ErrInvalidOptions)
+		}
+		r.OfflineQueue, r.defaultQueue = true, false
+	}
 	return r, nil
 }
 
