@@ -1,11 +1,14 @@
 package natsmqtt5_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -187,35 +190,50 @@ func TestDurablePublishOptionsAreValidated(t *testing.T) {
 // each direction. The default (queue on) waits one JetStream round trip before
 // the PUBACK; DurablePublish adds the flush, a second one.
 func TestDurablePublishAddsOneNATSRoundTripToThePUBACK(t *testing.T) {
-	const delay = 50 * time.Millisecond
+	const delay = 10 * time.Millisecond
 	natsURL := startNATS(t)
-	proxy := slowProxy(t, natsURL, delay)
+	proxy, pings := slowProxy(t, natsURL, delay)
 
 	plain := startBroker(t, proxy)
 	durable := startBroker(t, proxy, func(o *natsmqtt5.Options) { o.DurablePublish = true })
 
-	fastest := func(addr, id string) time.Duration {
+	// A flush is a PING to NATS that is answered with a PONG, so it is counted
+	// in the bytes the broker sends rather than timed: the result does not
+	// depend on how fast the machine is. Anything else on the connection can
+	// only add PINGs, so the fewest seen over several PUBACKs is the cost of
+	// the PUBACK itself.
+	fewestPings := func(addr, id string) int {
 		c := dialRaw(t, addr)
 		c.connect(rawConnect(id, 0))
-		best := time.Hour
+		best := math.MaxInt
 		for i := 1; i <= 5; i++ {
-			start := time.Now()
+			before := pings.count()
 			rawPublishQoS(c, packet.QoS1, uint16(i), "dp/rtt", "x")
 			ack, ok := c.read().(*packet.Puback)
 			require.True(t, ok)
 			require.Equal(t, packet.Success, ack.ReasonCode)
-			best = min(best, time.Since(start))
+			best = min(best, pings.count()-before)
 		}
 		return best
 	}
-	withQueue, withFlush := fastest(plain, "rtt-plain"), fastest(durable, "rtt-durable")
-	t.Logf("PUBACK after %v with the queue, %v with DurablePublish (one-way delay %v)", withQueue, withFlush, delay)
-	assert.GreaterOrEqual(t, withFlush-withQueue, 3*delay/2, "the flush is a further round trip (2 x delay) to NATS")
+	withQueue, withFlush := fewestPings(plain, "rtt-plain"), fewestPings(durable, "rtt-durable")
+	t.Logf("PUBACK after %d PINGs to NATS with the queue, %d with DurablePublish", withQueue, withFlush)
+	assert.GreaterOrEqual(t, withFlush-withQueue, 1, "the flush is a further round trip (a PING answered by a PONG) to NATS")
 }
 
+// pingCounter counts the PINGs the broker sent through slowProxy.
+type pingCounter struct{ n atomic.Int64 }
+
+func (c *pingCounter) observe(chunk []byte) {
+	c.n.Add(int64(bytes.Count(chunk, []byte("PING\r\n"))))
+}
+
+func (c *pingCounter) count() int { return int(c.n.Load()) }
+
 // slowProxy forwards TCP to the NATS server at natsURL, holding each chunk back
-// by delay in each direction, and returns the URL to dial it at.
-func slowProxy(t *testing.T, natsURL string, delay time.Duration) string {
+// by delay in each direction, and returns the URL to dial it at together with
+// a count of the PINGs sent towards NATS.
+func slowProxy(t *testing.T, natsURL string, delay time.Duration) (string, *pingCounter) {
 	t.Helper()
 	u, err := nats.Connect(natsURL)
 	require.NoError(t, err)
@@ -224,6 +242,7 @@ func slowProxy(t *testing.T, natsURL string, delay time.Duration) string {
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+	pings := &pingCounter{}
 	var wg sync.WaitGroup
 	t.Cleanup(func() { _ = ln.Close(); wg.Wait() })
 	wg.Add(1)
@@ -240,12 +259,15 @@ func slowProxy(t *testing.T, natsURL string, delay time.Duration) string {
 				continue
 			}
 			t.Cleanup(func() { _ = in.Close(); _ = out.Close() })
-			pipe := func(dst, src net.Conn) {
+			pipe := func(dst, src net.Conn, toNATS bool) {
 				buf := make([]byte, 32*1024)
 				for {
 					n, err := src.Read(buf)
 					if n > 0 {
 						chunk := append([]byte(nil), buf[:n]...)
+						if toNATS {
+							pings.observe(chunk)
+						}
 						time.Sleep(delay)
 						if _, werr := dst.Write(chunk); werr != nil {
 							return
@@ -259,9 +281,9 @@ func slowProxy(t *testing.T, natsURL string, delay time.Duration) string {
 					}
 				}
 			}
-			go pipe(out, in)
-			go pipe(in, out)
+			go pipe(out, in, true)
+			go pipe(in, out, false)
 		}
 	}()
-	return "nats://" + ln.Addr().String()
+	return "nats://" + ln.Addr().String(), pings
 }
