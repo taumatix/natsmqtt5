@@ -333,14 +333,20 @@ func TestASessionMovingToAnotherBrokerGetsWhatWasPublishedWhileItWasAway(t *test
 	onB.expectNothing()
 }
 
-// The disconnect time is cleared when a broker claims the session. Left in the
-// record while that broker serves it, a later claim (after a broker killed
-// without releasing the session, say) would replay from the old disconnect and
-// deliver again what was delivered since. Observed in the stored record itself,
-// since killing a broker without its cleanup is not something the harness does.
+// The disconnect time does not outlive the connection that resumed from it.
+// Left in the record while a broker serves the session, a later claim (after a
+// broker killed without releasing the session, say) would replay from the old
+// disconnect and deliver again what was delivered since. The broker serving the
+// session replaces it with its own position within a checkpoint interval
+// (TestAKilledBrokersClientIsNotSentWhatItAlreadyGotAgain does it with a real
+// kill). Observed in the stored record itself.
 func TestAClaimedSessionsRecordForgetsTheOldAbsence(t *testing.T) {
 	natsURL := startNATS(t)
-	addrA, stopA := startStoppableBroker(t, natsURL, persistentWithQueue)
+	fast := func(o *natsmqtt5.Options) {
+		persistentWithQueue(o)
+		o.SessionCheckpointInterval = 100 * time.Millisecond
+	}
+	addrA, stopA := startStoppableBroker(t, natsURL, fast)
 	c := dialRaw(t, addrA)
 	c.connect(rawConnect("offline-once", 300))
 	c.subscribe("o/#", packet.QoS1)
@@ -362,10 +368,14 @@ func TestAClaimedSessionsRecordForgetsTheOldAbsence(t *testing.T) {
 		require.NoError(t, json.Unmarshal(entry.Value(), &rec))
 		return rec
 	}
-	require.NotEmpty(t, stored()["AwayAt"], "a released session must record when it was released")
+	released, _ := stored()["AwayAt"].(string)
+	require.NotEmpty(t, released, "a released session must record when it was released")
 
-	addrB := startBroker(t, natsURL, persistentWithQueue)
+	addrB := startBroker(t, natsURL, fast)
 	back := dialRaw(t, addrB)
 	require.True(t, back.connect(rawConnect("offline-once", 300)).SessionPresent)
-	assert.Empty(t, stored()["AwayAt"], "the claim left the old disconnect time in the record")
+	require.Eventually(t, func() bool {
+		at, _ := stored()["AwayAt"].(string)
+		return at != "" && at != released
+	}, 5*time.Second, 50*time.Millisecond, "the old disconnect time stayed in the record while the session was served")
 }

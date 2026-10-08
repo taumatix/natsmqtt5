@@ -257,6 +257,9 @@ func (c *conn) deliverQueued(id string, msg *nats.Msg) error {
 // before the live loop, which is what keeps queued messages ahead of live ones
 // [MQTT-4.6.0-5].
 func (c *conn) replayOffline() error {
+	// Whatever way this returns, the position the connection was resumed with has
+	// been taken, and the checkpoint may start replacing it.
+	defer c.markPositioned()
 	q := c.broker.queue
 	if q == nil {
 		return nil
@@ -266,7 +269,8 @@ func (c *conn) replayOffline() error {
 	if !ok {
 		return nil
 	}
-	c.resume = &a
+	c.resume.Store(&a)
+	c.markPositioned()
 	since := a.at.Add(-offlineRewind)
 	if a.restored {
 		// Restored from the session store with no replay sequence in the
@@ -293,12 +297,12 @@ func (c *conn) replayOffline() error {
 			deliverErr = c.deliverQueued(id, msg)
 		}
 		if deliverErr == nil && !c.isClosed() {
-			c.streamNext = queueSeq(msg) + 1
+			c.streamNext.Store(queueSeq(msg) + 1)
 		}
 	}
 	var err error
 	if a.fromSeq != 0 {
-		c.streamNext = a.fromSeq
+		c.streamNext.Store(a.fromSeq)
 		_, err = q.replaySeq(ctx, a.fromSeq, handle)
 	} else {
 		err = q.replay(ctx, since, handle)
@@ -311,7 +315,8 @@ func (c *conn) replayOffline() error {
 			"client_id", c.sess.clientID, "error", err)
 	}
 	if err == nil || !errors.Is(err, context.Canceled) {
-		c.resume, c.streamNext = nil, 0
+		c.resume.Store(nil)
+		c.streamNext.Store(0)
 	}
 	if n := len(c.replayed); n > 0 {
 		c.logger.Info("delivered messages queued while the client was away",

@@ -362,15 +362,43 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 		}
 
 		previousOwner := rec.Owner
-		// Attached with no release time: the owner never released it.
-		unreleased := rec.Attached && rec.AwayAt.IsZero() && previousOwner != s.owner && s.queueMaxAge > 0
+		// A record still Attached to another instance is either that broker's
+		// live session, which this claim is taking over, or one it left when it
+		// was killed. Only the second has a position worth replaying from, and
+		// only the owner's silence tells them apart.
+		attachedElsewhere := rec.Attached && previousOwner != s.owner
+		ownerDead := attachedElsewhere && !s.ownerAlive(ctx, previousOwner)
+		if attachedElsewhere && !ownerDead {
+			rec.AwayAt, rec.AwayFromSeq, rec.Delivered = time.Time{}, 0, nil
+		}
+		legacy := ownerDead && rec.AwayAt.IsZero() && s.queueMaxAge > 0
 		rec.Owner = s.owner
 		rec.Attached = true
 		rec.Identity, rec.Username = identity, username
 		rec.ExpiresAt = time.Time{}
-		rec.awayWas, rec.AwayAt = rec.AwayAt, time.Time{}
-		rec.awayFromSeqWas, rec.AwayFromSeq = rec.AwayFromSeq, 0
-		rec.deliveredWas, rec.Delivered = rec.Delivered, nil
+		// What the last connection left is what this one resumes from, and it
+		// stays in the record: a connection checkpoints its position as it
+		// advances (conn.checkpointLoop), and until the first checkpoint a broker
+		// killed outright leaves this one for the claim after it.
+		rec.awayWas = rec.AwayAt
+		rec.awayFromSeqWas = rec.AwayFromSeq
+		rec.deliveredWas = rec.Delivered
+		if legacy {
+			// Attached with no position at all: written by a broker that predates
+			// the checkpoint, or killed before its first write. Anything in the
+			// queue may be owed, so the replay starts at the oldest message the
+			// queue still holds, and may repeat what the dead connection
+			// delivered.
+			rec.awayWas = time.Now().Add(-s.queueMaxAge)
+		}
+		if rec.AwayAt.IsZero() {
+			// The position a connection with nothing to replay starts from: when it
+			// attached.
+			rec.AwayAt = time.Now()
+		}
+		if legacy {
+			rec.AwayAt = rec.awayWas
+		}
 		rec.inflightWas, rec.Inflight = rec.Inflight, nil
 		rec.receivedQoS2Was, rec.ReceivedQoS2 = rec.ReceivedQoS2, nil
 		rev, err := s.kv.Update(ctx, key, encodeRecord(rec), entry.Revision())
@@ -380,13 +408,6 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 			// and find out whether we are still in the running.
 			lastErr = err
 			continue
-		}
-		if unreleased && !s.ownerAlive(ctx, previousOwner) {
-			// The broker that held the session is gone and recorded nothing
-			// about where its client stood. Anything in the queue may be owed,
-			// so the replay starts at the oldest message the queue still holds,
-			// and may repeat what the dead connection delivered.
-			rec.awayWas = time.Now().Add(-s.queueMaxAge)
 		}
 		return rec, rev, true, nil
 	}
@@ -402,6 +423,9 @@ func (s *sessionStore) createFresh(ctx context.Context, key, clientID, identity,
 		Attached: true,
 		Identity: identity,
 		Username: username,
+		// Nothing was published for this session before it existed, so a broker
+		// killed straight away leaves a successor that replays from here.
+		AwayAt: time.Now(),
 	}
 	rev, err := s.kv.Create(ctx, key, encodeRecord(rec))
 	if err != nil {

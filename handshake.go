@@ -449,6 +449,8 @@ func (c *conn) dropQueued(surviving []string) {
 		case d := <-c.deliveries:
 			if topic.MatchAny(surviving, d.topic) {
 				c.deliveries <- d
+			} else {
+				c.pending.remove(d.seq)
 			}
 		default:
 			return

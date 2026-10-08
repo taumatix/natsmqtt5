@@ -12,6 +12,13 @@ honestly be reconstructed now.
 ## [Unreleased]
 
 ### Fixed
+- A session whose broker was killed outright (`kill -9`) was resumed from the start of the offline
+  queue, up to a day of repeats. A connected session now writes its replay position to its record
+  once a second while it moves, and the broker that takes the session over replays from it, so a
+  kill costs the last second. New option `Options.SessionCheckpointInterval`, flag
+  `-session-checkpoint-interval`, env `NATSMQTT5_SESSION_CHECKPOINT_INTERVAL` (negative turns it
+  off). [MQTT-3.1.2-5], [MQTT-3.1.2-23], [MQTT-4.5.0-1], [MQTT-4.4.0-1]
+  (`killed_broker_test.go`, with a real SIGKILL of `cmd/natsmqtt5`).
 - Subscribing again to a filter the session already holds no longer loses the messages published
   while the subscription is replaced [MQTT-3.8.4-4]. A repeated SUBSCRIBE on a non-shared filter
   keeps its NATS subscriptions and swaps only the options; a shared one hands the messages the old
