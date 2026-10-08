@@ -473,8 +473,8 @@ func (b *Broker) releaseStoredSession(c *conn) {
 	var unrecorded int
 	rec.Inflight, rec.ReceivedQoS2, unrecorded = s.inflightState()
 	if unrecorded > 0 {
-		b.logger.Warn("unacknowledged messages with no copy in the offline queue are not kept in the "+
-			"session record, so a restored session will not resend them",
+		b.logger.Warn("unacknowledged messages with no copy in the offline queue and a PUBLISH too large "+
+			"for the session record are not kept in it, so a restored session will not resend them",
 			"client_id", s.clientID, "count", unrecorded)
 	}
 	if cutInflight, cutQoS2 := fitRecord(rec, b.store.valueLimit()); cutInflight+cutQoS2 > 0 {

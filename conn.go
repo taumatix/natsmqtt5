@@ -214,7 +214,7 @@ func (c *conn) serve(ctx context.Context) {
 
 	c.loopStarted.Store(true)
 	go c.deliverLoop()
-	if iv := c.broker.opts.SessionCheckpointInterval; iv > 0 && c.broker.store != nil && c.broker.queue != nil {
+	if iv := c.broker.opts.SessionCheckpointInterval; iv > 0 && c.broker.store != nil {
 		go c.checkpointLoop(iv)
 	}
 

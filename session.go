@@ -1327,8 +1327,12 @@ func (s *session) inflightState() (inflight []storedInflight, received []uint16,
 				st.SubID = p.SubscriptionIdentifiers[0]
 			}
 		default:
-			unrecorded++
-			continue
+			raw, ok := storablePublish(o)
+			if !ok {
+				unrecorded++
+				continue
+			}
+			st.Pub, st.At, st.Exp = raw, o.arrived, o.expiry
 		}
 		inflight = append(inflight, st)
 	}
@@ -1340,6 +1344,22 @@ func (s *session) inflightState() (inflight []storedInflight, received []uint16,
 	s.mu.Unlock()
 	sort.Slice(received, func(i, j int) bool { return received[i] < received[j] })
 	return inflight, received, unrecorded
+}
+
+// storablePublish encodes the PUBLISH of an in-flight message that has no copy
+// in the offline queue, as it should be resent: the DUP flag is the resend's to
+// set. It reports false for a message too large to keep in a record.
+func storablePublish(o *outbound) ([]byte, bool) {
+	if o.publish == nil {
+		return nil, false
+	}
+	p := *o.publish
+	p.Dup = false
+	raw, err := packet.Encode(&p)
+	if err != nil || len(raw) > maxStoredPublish {
+		return nil, false
+	}
+	return raw, true
 }
 
 // restoreReceivedQoS2 puts back the identifiers of QoS 2 PUBLISH packets the

@@ -23,16 +23,15 @@ the tick, or on the first delivery after an idle interval, so the window closes 
 cost of one key-value write per completed exchange. The same write is already made for the QoS 2 PUBLISH a client sends.
 A test kills `cmd/natsmqtt5` between the PUBCOMP and the next tick.
 
-## In-flight messages with no queue copy are not restored
+## In-flight messages with no queue copy and a payload over 16 KiB are not restored
 
-**Today:** the record keeps a reference to the offline queue, so an unacknowledged message that has
-none is left out and logged: a retained message sent on subscribing, a message from a shared
-subscription's backlog (it is read from the queue stream but carries no queue sequence), and
-anything with the queue off. A restored session does not resend them. [MQTT-4.4.0-1].
+**Today:** an unacknowledged message with no offline-queue sequence (a retained message sent on
+subscribing, or any with the queue off) is kept in the session record as its encoded PUBLISH, up to
+16 KiB. A larger one is logged and not resent by a restored session. [MQTT-4.4.0-1].
 
-**Shape:** carry the stream sequence on shared-subscription deliveries, and put a retained message's
-payload into the record when it is small, or its sequence in the retained stream. The queue-off case
-needs the payload in the record or a stream of its own, and is the heaviest.
+**Shape:** keep the payload in a stream of its own (or the retained stream, by sequence) and the
+sequence in the record, so the record stays within `max_payload`. Needs a test with a 100 KiB
+retained payload and a SIGKILL.
 
 ## The restore paths without a test over the wire
 

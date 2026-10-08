@@ -1,6 +1,8 @@
 package natsmqtt5
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -33,8 +35,8 @@ import (
 //
 // What this cannot restore, each logged when it happens:
 //   - a message with no copy in the queue (the queue is off, or the message was
-//     retained, or came from a shared subscription's backlog), which was left out
-//     of the record when it was written;
+//     retained) whose PUBLISH was over maxStoredPublish, so it was left out of the
+//     record when it was written;
 //   - a message whose copy has since left the queue (OfflineQueueMaxAge, or the
 //     stream's limits);
 //   - anything of a broker that was killed rather than stopped, which wrote no
@@ -78,6 +80,9 @@ func (b *Broker) restoreEntry(ctx context.Context, clientID string, st storedInf
 		// Past the PUBREC: the client owns the message and the PUBREL is all
 		// that is owed [MQTT-4.3.3-8]. There is no payload to fetch.
 		return &outbound{packetID: st.ID, qos: packet.QoS2, awaitingPubcomp: true, publish: &packet.Publish{}}
+	}
+	if len(st.Pub) > 0 {
+		return restoreStoredPublish(st)
 	}
 	if b.queue == nil || st.Seq == 0 || st.QoS == packet.QoS0 {
 		return nil
@@ -129,6 +134,26 @@ func (b *Broker) restoreEntry(ctx context.Context, clientID string, st storedInf
 		queueSeq:   st.Seq,
 		ackSubject: st.Ack,
 	}
+}
+
+// restoreStoredPublish turns an entry that carries its own PUBLISH back into an
+// in-flight message.
+func restoreStoredPublish(st storedInflight) *outbound {
+	p, err := packet.Read(bufio.NewReader(bytes.NewReader(st.Pub)), 0)
+	pub, ok := p.(*packet.Publish)
+	if err != nil || !ok || pub.QoS == packet.QoS0 {
+		return nil
+	}
+	pub.PacketID, pub.QoS, pub.Dup = st.ID, st.QoS, false
+	arrived := st.At
+	if arrived.IsZero() {
+		arrived = time.Now()
+	}
+	o := &outbound{packetID: st.ID, qos: st.QoS, publish: pub, arrived: arrived, expiry: st.Exp}
+	if o.expiry == nil && pub.Properties != nil && pub.Properties.MessageExpiryInterval != nil {
+		o.expiry = packet.Uint32(*pub.Properties.MessageExpiryInterval)
+	}
+	return o
 }
 
 // message reads the queue copy at seq as a live message would look: the subject
