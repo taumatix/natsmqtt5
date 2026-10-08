@@ -135,6 +135,7 @@ func (c *conn) writeResend(o outbound, live bool) (spentQuota bool, err error) {
 			// Deleted rather than resent, and the exchange ends: the client
 			// will never acknowledge what it is not sent, so keeping it in
 			// flight would hold its identifier and quota slot for good.
+			c.sess.abandonResend(c, o.packetID)
 			c.sess.completeInflight(c, o.packetID)
 			return false, nil
 		}
@@ -144,11 +145,13 @@ func (c *conn) writeResend(o outbound, live bool) (spentQuota bool, err error) {
 		props.MessageExpiryInterval = packet.Uint32(remaining)
 		dup.Properties = &props
 	}
+	c.sess.markResentWritten(c, o.packetID)
 	sent, err := c.writePublish(&dup)
 	if err != nil {
 		return false, err
 	}
 	if !sent {
+		c.sess.abandonResend(c, o.packetID)
 		// Too large for this client to accept, so it will never be
 		// acknowledged. The server must "behave as if it had completed sending
 		// that Application Message" [MQTT-3.1.2-25]; keeping it in flight

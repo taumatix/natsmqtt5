@@ -126,7 +126,7 @@ MQTT-3.3.4-5	3.3.4 PUBLISH Actions	S	UNCITED	a		Each copy carries its own subscr
 MQTT-3.3.4-6	3.3.4 PUBLISH Actions	CS	CITED-TESTED	fixed unreleased		publish.go publish_subid_test.go:TestAClientPublishWithASubscriptionIdentifierIsAProtocolError
 MQTT-3.3.4-7	3.3.4 PUBLISH Actions	C	CLIENT-ONLY (UNCITED)			
 MQTT-3.3.4-8	3.3.4 PUBLISH Actions	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.3.4-9	3.3.4 PUBLISH Actions	S	UNCITED	a		Send quota channel sized to the client Receive Maximum (handshake.go:101-105, subscribe.go:399-403).
+MQTT-3.3.4-9	3.3.4 PUBLISH Actions	S	CITED-TESTED			resend_quota_test.go (an acknowledgement that overtakes a resend). Send quota channel sized to the client Receive Maximum (handshake.go:101-105, subscribe.go:399-403).
 MQTT-3.3.4-10	3.3.4 PUBLISH Actions	S	UNCITED	a		PUBLISH sends run on deliverLoop; acks/PINGRESP on the read loop (subscribe.go:341-383, conn.go:233).
 MQTT-3.4.2-1	3.4.2.1 PUBACK Reason Code	CS	UNCITED	a		PUBACK codes used: 0x00, 0x80, 0x83, 0x87, 0x90, all valid.
 MQTT-3.4.2-2	3.4.2.2.2 Reason String	CS	CITED-TESTED	fixed unreleased		conn.go oversize_ack_test.go:TestAnOversizePubackLosesItsReasonStringAndIsStillSent
