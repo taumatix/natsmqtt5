@@ -79,6 +79,10 @@ conforming client hits in ordinary use:
 - **Fixed, unreleased.** A PUBLISH from a client carrying a Subscription Identifier was accepted,
   acknowledged and forwarded. It is a Protocol Error: DISCONNECT 0x82 and the connection closed,
   nothing acknowledged or forwarded. [MQTT-3.3.4-6], [MQTT-4.13.1-1].
+- **Fixed, unreleased.** A Response Topic with a wildcard was forwarded to subscribers, in a
+  PUBLISH and in a Will. It is a Protocol Error (data the protocol does not allow, in a packet that
+  parses): DISCONNECT 0x82 and the connection closed, or CONNACK 0x82 for a Will. [MQTT-3.3.2-14],
+  [MQTT-4.13.1-1].
 
 Features the specification defines and the broker does not offer (enhanced AUTH, server-to-client
 topic aliases, WebSocket, QoS 2 on shared subscriptions) are refused or left unadvertised the way

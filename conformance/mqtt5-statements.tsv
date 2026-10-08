@@ -111,7 +111,7 @@ MQTT-3.3.2-10	3.3.2.3.4 Topic Alias	C	CLIENT-ONLY (UNCITED)
 MQTT-3.3.2-11	3.3.2.3.4 Topic Alias	S	CITED-TESTED	fixed unreleased		retain.go retained_alias_test.go:TestARetainedMessageServedToASubscriberCarriesNoTopicAlias
 MQTT-3.3.2-12	3.3.2.3.4 Topic Alias	S	CITED-CODE			publish.go:113
 MQTT-3.3.2-13	3.3.2.3.5 Response Topic	CS	UNCITED	a		Decoder validates Response Topic as UTF-8.
-MQTT-3.3.2-14	3.3.2.3.5 Response Topic	CS	UNCITED	b		A client-supplied Response Topic with wildcards is accepted and forwarded unchecked (message.go:140-142); low impact.
+MQTT-3.3.2-14	3.3.2.3.5 Response Topic	CS	CITED-TESTED	fixed unreleased		publish.go handshake.go response_topic_test.go:TestAResponseTopicWithWildcardsIsAProtocolError response_topic_test.go:TestAWillWithAResponseTopicWithWildcardsIsRefusedAtConnect
 MQTT-3.3.2-15	3.3.2.3.5 Response Topic	S	CITED-CODE			message.go:113
 MQTT-3.3.2-16	3.3.2.3.6 Correlation Data	S	CITED-CODE			message.go:113
 MQTT-3.3.2-17	3.3.2.3.7 User Property	S	CITED-CODE			message.go:113 packet/properties.go:89
@@ -245,7 +245,7 @@ MQTT-4.12.0-6	4.12 Enhanced authentication	S	ROADMAP	a	Enhanced authentication	T
 MQTT-4.12.0-7	4.12 Enhanced authentication	C	CLIENT-ONLY (UNCITED)			
 MQTT-4.12.1-1	4.12.1 Re-authentication	C	CLIENT-ONLY (UNCITED)			
 MQTT-4.12.1-2	4.12.1 Re-authentication	CS	ROADMAP	c	Enhanced authentication	Re-authentication not offered.
-MQTT-4.13.1-1	4.13.1 Malformed Packet and Protocol Errors	S	CITED-TESTED	fixed unreleased		conn.go:readError subscribe.go nolocal_shared_test.go:TestNoLocalOnASharedSubscriptionIsAProtocolErrorThatClosesTheConnection publish.go publish_subid_test.go:TestAClientPublishWithASubscriptionIdentifierIsAProtocolError Protocol Errors found after parsing now disconnect with 0x82 and close; a Response Topic with wildcards (MQTT-3.3.2-14) is still forwarded.
+MQTT-4.13.1-1	4.13.1 Malformed Packet and Protocol Errors	S	CITED-TESTED	fixed unreleased		conn.go:readError subscribe.go nolocal_shared_test.go:TestNoLocalOnASharedSubscriptionIsAProtocolErrorThatClosesTheConnection publish.go publish_subid_test.go:TestAClientPublishWithASubscriptionIdentifierIsAProtocolError response_topic_test.go:TestAResponseTopicWithWildcardsIsAProtocolError Every Protocol Error the review found after parsing now disconnects with 0x82 and closes.
 MQTT-4.13.2-1	4.13.2 Other errors	CS	UNCITED	a		refuse() and every sendDisconnect caller close (handshake.go:73-80, conn.go:102-133).
 MQTT-6.0.0-1	6 Using WebSocket as a network transport	CS	ROADMAP	c	WebSocket transport	No WebSocket transport.
 MQTT-6.0.0-2	6 Using WebSocket as a network transport	CS	ROADMAP	c	WebSocket transport	No WebSocket transport.

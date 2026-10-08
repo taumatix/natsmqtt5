@@ -13,6 +13,10 @@ honestly be reconstructed now.
 
 ### Fixed
 
+- **A Response Topic with a wildcard is a Protocol Error.** The broker forwarded it unchecked. A
+  PUBLISH carrying one now gets a DISCONNECT with 0x82 and the connection is closed, and a CONNECT
+  whose Will carries one is refused with CONNACK 0x82 [MQTT-3.3.2-14], [MQTT-4.13.1-1].
+
 - **A client PUBLISH with a Subscription Identifier is a Protocol Error.** The broker used to
   accept, acknowledge and forward it. It now sends a DISCONNECT with 0x82 and closes the
   connection, acknowledging and forwarding nothing [MQTT-3.3.4-6], [MQTT-4.13.1-1].
