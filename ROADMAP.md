@@ -40,7 +40,8 @@ than the rewind point, so a live copy that lands after the floor is read is foun
 A session restored from its record (another broker, or after a restart) still starts from the recorded
 position: `Delivered` is recorded for ids below a floor a late copy may sit under, and the restored replay
 does not start from its exact time. Unproven by a run; the same window as before, on the restore path.
-[MQTT-4.4.0-1].
+The in-memory fix is also bounded: the time replay starts at the rewind point (2 s), so a live copy
+delayed by more than that behind a later one is still not found. [MQTT-4.4.0-1].
 
 **Shape:** record `Delivered` only for ids at or above the floor, start the restored replay at its exact
 time, and test it with the late-copy hold of `late_live_copy_test.go` across a SIGKILL.
