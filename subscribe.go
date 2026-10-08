@@ -473,6 +473,7 @@ func (c *conn) deliverLoop() {
 			if d.id != "" && c.wasReplayed(d.id) {
 				// Its queued copy was replayed; this is the live copy arriving
 				// late, and QoS 2 must not deliver twice.
+				c.pending.remove(d.seq)
 				continue
 			}
 			if d.sub != nil && !d.sub.wanted() {
@@ -480,6 +481,7 @@ func (c *conn) deliverLoop() {
 				// or by Broker.Reauthorize. A server "MAY continue to deliver any
 				// existing messages buffered" after an UNSUBSCRIBE (MQTT-5.0
 				// §3.10.4); after a revoked permission it must not.
+				c.pending.remove(d.seq)
 				continue
 			}
 			err := c.deliverTracked(d)
@@ -539,6 +541,7 @@ func (c *conn) deliver(d *delivery) error {
 		return fmt.Errorf("no free Packet Identifier for %q", d.topic)
 	}
 	pub.PacketID = id
+	c.activity.Add(1)
 	c.sess.trackInflight(&outbound{packetID: id, qos: d.qos, publish: pub, quotaHeld: true,
 		arrived: d.arrived, expiry: d.expiry, queueSeq: max(d.seq, d.recordSeq), ackSubject: d.ackSubject})
 	d.held = d.ackSubject != ""

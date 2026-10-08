@@ -43,12 +43,17 @@ func (c *conn) enqueueQueued(d *delivery) {
 	c.catchMu.Lock()
 	defer c.catchMu.Unlock()
 	if !c.behind {
+		// Counted before it is queued, so a checkpoint never sees it in neither.
+		c.pending.add(d.seq)
 		select {
 		case c.deliveries <- d:
+			c.activity.Add(1)
 			return
 		case <-c.done:
+			c.pending.remove(d.seq)
 			return
 		default:
+			c.pending.remove(d.seq)
 		}
 		c.behind = true
 		c.logger.Info("client is not keeping up; catching up from the offline queue",
@@ -87,7 +92,7 @@ func (c *conn) catchUp() error {
 			c.catchMu.Unlock()
 			return nil
 		}
-		c.streamNext = from
+		c.streamNext.Store(from)
 		c.catchMu.Unlock()
 
 		delivered := c.sess.deliveredIDs()
@@ -105,7 +110,7 @@ func (c *conn) catchUp() error {
 			// Not once the connection has ended: deliver then returns without
 			// sending, and the message has not been handled.
 			if deliverErr == nil && !c.isClosed() {
-				c.streamNext = seq + 1
+				c.streamNext.Store(seq + 1)
 			}
 		})
 		cancel()
@@ -116,7 +121,7 @@ func (c *conn) catchUp() error {
 			return err
 		}
 		if err == nil {
-			c.streamNext = 0
+			c.streamNext.Store(0)
 		}
 	}
 }
@@ -150,7 +155,8 @@ func (c *conn) isClosed() bool {
 // noting its sequence while it is being sent: if the connection ends meanwhile,
 // the message may not have gone out.
 func (c *conn) deliverTracked(d *delivery) error {
-	c.inHand = d.seq
+	c.inHand.Store(d.seq)
+	c.pending.remove(d.seq)
 	err := c.deliver(d)
 	select {
 	case <-c.done:
@@ -158,7 +164,7 @@ func (c *conn) deliverTracked(d *delivery) error {
 		// waited for room. A replay sending it again is stopped by its id if it
 		// did go out.
 	default:
-		c.inHand = 0
+		c.inHand.Store(0)
 	}
 	return err
 }
@@ -184,18 +190,18 @@ func (c *conn) awayFloor() away {
 	c.close()
 	<-c.loopDone
 
-	if c.resume != nil && c.streamNext == 0 {
+	if r := c.resume.Load(); r != nil && c.streamNext.Load() == 0 {
 		// The resume replay never handled a message: what it was owed is still
 		// owed, from the time it was to start at.
-		return *c.resume
+		return *r
 	}
 	lowest := func(seq uint64) {
 		if seq != 0 && (a.fromSeq == 0 || seq < a.fromSeq) {
 			a.fromSeq = seq
 		}
 	}
-	lowest(c.inHand)
-	lowest(c.streamNext)
+	lowest(c.inHand.Load())
+	lowest(c.streamNext.Load())
 	c.catchMu.Lock()
 	lowest(c.fromSeq)
 	c.catchMu.Unlock()
@@ -225,9 +231,11 @@ func (c *conn) drainDeliveries(sent map[uint64]bool) error {
 		select {
 		case d := <-c.deliveries:
 			if d.id != "" && c.wasReplayed(d.id) {
+				c.pending.remove(d.seq)
 				continue
 			}
 			if d.sub != nil && !d.sub.wanted() {
+				c.pending.remove(d.seq)
 				continue
 			}
 			if d.seq != 0 {

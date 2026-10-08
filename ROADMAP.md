@@ -9,23 +9,19 @@ today and cites the statements it violates.
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
-## A killed broker's session replays the whole queue
+## A QoS 2 message delivered in the last second before a kill is delivered again
 
-**Today:** the queue is on by default whenever the broker uses JetStream, so a session with an
-expiry gets what was published while it was away [MQTT-3.1.2-23], [MQTT-4.5.0-1], and with
-`PersistentSessions` a session restored on another broker replays from the position its record
-holds. A broker killed outright records none: the record is `Attached` with no release, and the
-next claim (when the old owner no longer answers) replays everything the queue still holds for
-the session, up to `OfflineQueueMaxAge` (a day by default). Nothing is lost, but a client that was
-caught up gets a day of repeats, QoS 2 included, which [MQTT-4.3.3-2] does not allow.
+**Today:** a connected session checkpoints its replay position once per
+`Options.SessionCheckpointInterval` (one second), so a broker killed outright costs its client the
+messages sent since the last checkpoint, delivered again by the successor. A QoS 1 repeat is
+allowed by [MQTT-4.4.0-1] only as a resend of an unacknowledged PUBLISH, so a repeat of an
+acknowledged one is a deviation, and a QoS 2 message whose exchange completed in that window is
+delivered a second time as a new Application Message.
 
-**Shape:** bound the replay by what is known. A claim could write the time it was made into the
-record (`AttachedAt`), and a connection could write its replay position to the record as it
-advances (rate-limited, say once a second), so a dead broker's successor replays from the last
-position written and skips the ids delivered above it. The cost is one key-value write per second
-per behind client; the gain is that a kill costs a second of repeats rather than a day.
-`TestASessionLeftAttachedByAKilledBrokerIsReplayedFromTheQueue` rewrites a record to simulate the
-kill; a real one needs a harness that ends a broker without its cleanup.
+**Shape:** write the checkpoint when a QoS 2 exchange completes (PUBCOMP received) rather than on
+the tick, or on the first delivery after an idle interval, so the window closes for QoS 2 at the
+cost of one key-value write per completed exchange. Measure it against `DurablePublish` first.
+A test kills `cmd/natsmqtt5` between the PUBCOMP and the next tick.
 
 ## In-flight state for a broker that is killed
 
@@ -36,7 +32,7 @@ queue and resends nothing it had in flight, and a QoS 2 PUBLISH the client resen
 twice. [MQTT-4.4.0-1], [MQTT-4.3.3-10].
 
 **Shape:** write the in-flight state while the connection lives, rate-limited as the replay position
-is (see "A killed broker's session replays the whole queue"), or only when a QoS 2 identifier is received
+is (`checkpoint.go`), or only when a QoS 2 identifier is received
 or a message has been in flight longer than a second. Needs a harness that ends a broker without its
 cleanup, which `leaveAsAKilledBrokerWould` only simulates.
 
@@ -452,10 +448,6 @@ after) against the rule in [CONTRIBUTING.md](CONTRIBUTING.md): each statement a 
 an integration test over a real socket against a real NATS server. `spec_integration_test.go` closed
 most of them; these remain, each with why:
 
-- **A real kill.** The harness cannot end a broker without its cleanup, so the killed-broker
-  fallback ([MQTT-3.1.2-23], [MQTT-4.5.0-1]) is tested against a record rewritten to look like one
-  (`TestASessionLeftAttachedByAKilledBrokerIsReplayedFromTheQueue`). A test that runs the broker
-  as a subprocess and sends it SIGKILL would prove the record a real kill leaves.
 - **A delivered message above the replay's start, produced by the broker.** The guard against
   sending a QoS 2 message twice on a restored rewind [MQTT-4.3.3-2], [MQTT-4.3.3-6] is proved over
   the wire with a record written from the queue's real sequences and ids

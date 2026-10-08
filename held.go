@@ -46,9 +46,9 @@ func (b *Broker) settle(subject string, reply []byte) {
 
 // holdLoop tells JetStream, often enough to keep its AckWait from running out,
 // that the sessions on this broker are still holding their backlog messages.
-func (b *Broker) holdLoop() {
+func (b *Broker) holdLoop(every time.Duration) {
 	defer b.wg.Done()
-	t := time.NewTicker(sharedAckWait / 3)
+	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
 		select {

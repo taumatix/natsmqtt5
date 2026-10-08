@@ -121,10 +121,24 @@ type conn struct {
 	// handle, 0 for none. resume is the replay's start, kept until it has
 	// handled a message, so a connection that ends before that does not lose
 	// the replay it was owed.
-	inHand     uint64
-	streamNext uint64
-	resume     *away
-	loopDone   chan struct{}
+	//
+	// They are atomic because the session checkpoint (checkpoint.go) reads them
+	// while the connection lives.
+	inHand     atomic.Uint64
+	streamNext atomic.Uint64
+	resume     atomic.Pointer[away]
+	// pending is the queue sequences waiting in deliveries, for the checkpoint.
+	pending seqSet
+	// positioned is closed once the replay position the session was resumed with
+	// has been taken (replayOffline); the checkpoint waits for it, because
+	// writing the connection's own position sooner would overwrite the one it was
+	// resumed with.
+	positioned     chan struct{}
+	positionedOnce sync.Once
+	// activity counts deliveries enqueued and sent, so the checkpoint writes
+	// only when something moved.
+	activity atomic.Uint64
+	loopDone chan struct{}
 	// loopStarted is set by serve before it starts deliverLoop, which is the
 	// goroutine that closes loopDone.
 	loopStarted atomic.Bool
@@ -163,6 +177,7 @@ func newConn(b *Broker, nc net.Conn) *conn {
 		catchup:    make(chan struct{}, 1),
 		loopDone:   make(chan struct{}),
 		ended:      make(chan struct{}),
+		positioned: make(chan struct{}),
 		pulling:    make(map[*subscription]bool),
 		done:       make(chan struct{}),
 	}
@@ -197,6 +212,9 @@ func (c *conn) serve(ctx context.Context) {
 
 	c.loopStarted.Store(true)
 	go c.deliverLoop()
+	if iv := c.broker.opts.SessionCheckpointInterval; iv > 0 && c.broker.store != nil && c.broker.queue != nil {
+		go c.checkpointLoop(iv)
+	}
 
 	err = c.readLoop(ctx, keepAlive)
 	c.finish(err)

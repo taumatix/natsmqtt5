@@ -69,6 +69,13 @@ conforming client hits in ordinary use:
   time and lost what was waiting for a client that dropped while behind, and nothing was
   replayed for a session whose broker was killed. The record now holds the replay position.
   [MQTT-3.1.2-23], [MQTT-4.5.0-1].
+- **Fixed, unreleased.** A session whose broker was killed outright was resumed from the start of
+  the offline queue, which repeated up to a day of messages. A connected session now checkpoints
+  its replay position (`Options.SessionCheckpointInterval`, one second by default), so the
+  successor replays from it. Proved with a real SIGKILL of `cmd/natsmqtt5`
+  (`TestAKilledBrokersClientIsNotSentWhatItAlreadyGotAgain`,
+  `TestAKilledBrokersBehindClientGetsWhatItHadNotAcknowledged`). [MQTT-3.1.2-5], [MQTT-3.1.2-23],
+  [MQTT-4.5.0-1], [MQTT-4.4.0-1].
 - **Fixed, unreleased.** A detached session nobody resumed kept its NATS subscriptions for the life
   of the broker. A sweep now expires it once its Session Expiry Interval (capped by
   `MaxSessionExpiry`) has passed and never before. [MQTT-3.1.2-23]

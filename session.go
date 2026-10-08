@@ -1010,8 +1010,16 @@ func (s *session) awayState() (fromSeq uint64, delivered []storedDelivered, drop
 	if s.awayFromSeq == 0 {
 		return 0, nil, 0
 	}
+	delivered, dropped = s.deliveredFromLocked(s.awayFromSeq, nil)
+	return s.awayFromSeq, delivered, dropped
+}
+
+// deliveredFromLocked lists the delivered ids whose queue copy is at or above
+// fromSeq, lowest first and bounded by maxStoredDelivered, leaving out those
+// whose sequence is in exclude. s.mu is held.
+func (s *session) deliveredFromLocked(fromSeq uint64, exclude map[uint64]bool) (delivered []storedDelivered, dropped int) {
 	for id, m := range s.delivered {
-		if m.seq >= s.awayFromSeq {
+		if m.seq >= fromSeq && !exclude[m.seq] {
 			delivered = append(delivered, storedDelivered{ID: id, Seq: m.seq})
 		}
 	}
@@ -1020,7 +1028,48 @@ func (s *session) awayState() (fromSeq uint64, delivered []storedDelivered, drop
 		dropped = len(delivered) - maxStoredDelivered
 		delivered = delivered[:maxStoredDelivered]
 	}
-	return s.awayFromSeq, delivered, dropped
+	return delivered, dropped
+}
+
+// unackedQueueSeqs is the queue sequences of the messages sent to the client
+// and not yet acknowledged.
+func (s *session) unackedQueueSeqs() []uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []uint64
+	for _, o := range s.inflight {
+		if o.queueSeq != 0 && !o.awaitingPubcomp {
+			out = append(out, o.queueSeq)
+		}
+	}
+	return out
+}
+
+// deliveredSince is the delivered ids a checkpoint writes with a replay from
+// fromSeq: those at or above it, except the unacknowledged messages, which the
+// replay must send again. A replay with no sequence starts at a time, and the
+// ids delivered since that time are the ones it must not repeat.
+func (s *session) deliveredSince(fromSeq uint64, since time.Time, unacked []uint64) (delivered []storedDelivered, dropped int) {
+	ex := make(map[uint64]bool, len(unacked))
+	for _, q := range unacked {
+		ex[q] = true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if fromSeq != 0 {
+		return s.deliveredFromLocked(fromSeq, ex)
+	}
+	for id, m := range s.delivered {
+		if !m.at.Before(since) && !(m.seq != 0 && ex[m.seq]) {
+			delivered = append(delivered, storedDelivered{ID: id, Seq: m.seq})
+		}
+	}
+	sort.Slice(delivered, func(i, j int) bool { return delivered[i].ID < delivered[j].ID })
+	if len(delivered) > maxStoredDelivered {
+		dropped = len(delivered) - maxStoredDelivered
+		delivered = delivered[:maxStoredDelivered]
+	}
+	return delivered, dropped
 }
 
 // away is what takeAway hands the replay.

@@ -270,10 +270,18 @@ What it costs and what it does not cover yet:
   everything) replays from the release itself rather than a moment before it,
   because going back further could deliver a QoS 2 message twice; a message
   caught in the moments the connection went down can be lost that way. And a
-  broker killed outright never releases its sessions: the next broker to resume one sees it
-  attached to an owner that no longer answers and replays everything the queue
-  still holds for it, up to `OfflineQueueMaxAge`, which loses nothing and can
-  repeat what the dead connection had already delivered, QoS 2 included.
+  broker killed outright never releases its sessions, so a connected session
+  writes its replay position to its record while it moves, once per
+  `Options.SessionCheckpointInterval` (`-session-checkpoint-interval`,
+  `NATSMQTT5_SESSION_CHECKPOINT_INTERVAL`; one second by default, negative turns
+  it off). The next broker to resume the session sees it attached to an owner
+  that no longer answers and replays from the last position written, so a kill
+  costs the client the messages it was sent in that last interval, sent again,
+  and loses none; a QoS 2 message delivered in that window can be delivered a
+  second time ([ROADMAP.md](ROADMAP.md)). With the checkpoint off, or for a
+  record written before it existed, the replay is everything the queue still
+  holds, up to `OfflineQueueMaxAge`. The cost is one key-value write per
+  interval for each client that received or was sent something in it.
 - A message published straight onto NATS rather than through a broker is not
   queued ([ROADMAP.md](ROADMAP.md)).
 - A resume reads everything queued since the client left and matches it in the

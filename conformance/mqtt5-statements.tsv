@@ -17,7 +17,7 @@ MQTT-3.1.2-1	3.1.2.1 Protocol Name	C	CLIENT-ONLY (CITED-CODE)			packet/connect.g
 MQTT-3.1.2-2	3.1.2.2 Protocol Version	S	CITED-TESTED			packet/packet_test.go:319 handshake.go:54 packet/connect.go:50
 MQTT-3.1.2-3	3.1.2.3 Connect Flags	S	CITED-CODE			packet/connect.go:80
 MQTT-3.1.2-4	3.1.2.4 Clean Start	CS	CITED-TESTED			broker_test.go:560 persistent_test.go:281 sessionstore.go:283
-MQTT-3.1.2-5	3.1.2.4 Clean Start	S	CITED-TESTED			broker_test.go:514
+MQTT-3.1.2-5	3.1.2.4 Clean Start	S	CITED-TESTED			broker_test.go:514 killed_broker_test.go:TestAKilledBrokersClientIsNotSentWhatItAlreadyGotAgain
 MQTT-3.1.2-6	3.1.2.4 Clean Start	S	UNCITED	a		No stored session -> newSession, Session Present 0 (handshake.go:195-200, 228-231).
 MQTT-3.1.2-7	3.1.2.5 Will Flag	S	CITED-TESTED			will_durable_test.go willstore.go handshake.go (DurableWills keeps it across a broker's death)
 MQTT-3.1.2-8	3.1.2.5 Will Flag	S	CITED-TESTED			broker_test.go:424 conn.go will_durable_test.go willstore.go (the Will of a killed broker, with DurableWills)
@@ -35,7 +35,7 @@ MQTT-3.1.2-19	3.1.2.9 Password Flag	C	CLIENT-ONLY (UNCITED)
 MQTT-3.1.2-20	3.1.2.10 Keep Alive	C	CLIENT-ONLY (UNCITED)			
 MQTT-3.1.2-21	3.1.2.10 Keep Alive	C	CLIENT-ONLY (CITED-TESTED)			broker_test.go:487 options.go:180
 MQTT-3.1.2-22	3.1.2.10 Keep Alive	S	CITED-TESTED			broker_test.go:466 conn.go:137 handshake.go:17
-MQTT-3.1.2-23	3.1.2.11.2 Session Expiry Interval	CS	CITED-TESTED	b	Offline message queue: what it still loses	Pending QoS 1/2 messages are kept by the offline queue, on by default with JetStream since Unreleased (TestTheOfflineQueueIsOnByDefault). Still violated at the boundary of a restored replay; deliberately so with DisableOfflineQueue or without JetStream. A detached session is kept for its interval and dropped by a sweep after it (TestAnExpiredDetachedSessionLosesItsNATSSubscriptions_MQTT_3_1_2_23, TestAResumedSessionSurvivesTheSweepAndItsClockRestarts_MQTT_3_1_2_23).
+MQTT-3.1.2-23	3.1.2.11.2 Session Expiry Interval	CS	CITED-TESTED	b	Offline message queue: what it still loses	Pending QoS 1/2 messages are kept by the offline queue, on by default with JetStream since Unreleased (TestTheOfflineQueueIsOnByDefault). Still violated at the boundary of a restored replay; deliberately so with DisableOfflineQueue or without JetStream. A detached session is kept for its interval and dropped by a sweep after it (TestAnExpiredDetachedSessionLosesItsNATSSubscriptions_MQTT_3_1_2_23, TestAResumedSessionSurvivesTheSweepAndItsClockRestarts_MQTT_3_1_2_23). A session of a broker killed with SIGKILL is resumed from the last checkpoint (TestAKilledBrokersBehindClientGetsWhatItHadNotAcknowledged).
 MQTT-3.1.2-24	3.1.2.11.4 Maximum Packet Size	S	CITED-CODE			conn.go:387
 MQTT-3.1.2-25	3.1.2.11.4 Maximum Packet Size	S	CITED-TESTED			retransmit_test.go:368 conn.go:360 conn.go:372
 MQTT-3.1.2-26	3.1.2.11.5 Topic Alias Maximum	S	CITED-TESTED	fixed unreleased		retain.go retained_alias_test.go:TestARetainedMessageServedToASubscriberCarriesNoTopicAlias
@@ -211,7 +211,7 @@ MQTT-4.3.3-12	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		releaseQoS2 remov
 MQTT-4.3.3-13	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	c		Message expiry is not applied.
 MQTT-4.4.0-1	4.4 Message delivery retry	CS	CITED-TESTED	fixed unreleased		broker_test.go:548 displaced_ack_test.go:27 late_ack_test.go withdrawn_type_test.go handshake.go:381 publish.go:196 restore.go restore_inflight_test.go:TestMQTT4_4_0_1_QoS1UnacknowledgedAtReleaseIsResentByAnotherBroker restore_inflight_test.go:TestMQTT4_4_0_1_QoS1UnacknowledgedIsResentAfterTheBrokerRestarts restore_inflight_test.go:TestMQTT4_4_0_1_QoS2PubrelIsResentByAnotherBroker README.md ROADMAP.md. Not covered: messages with no queue copy, a killed broker.
 MQTT-4.4.0-2	4.4 Message delivery retry	CS	CITED-TESTED			retransmit_test.go:320 publish.go:205
-MQTT-4.5.0-1	4.5 Message receipt	S	CITED-TESTED	b	A connection that drops while behind loses what was waiting for it	A detached session gets its messages from the offline queue, and a shared subscription hands its QoS 1/2 messages only to connected members (shared.go, TestADisconnectedSharedMemberStopsTakingWork), both on by default with JetStream since Unreleased. A client that falls behind catches up from the stream (catchup.go). Still lost: what was waiting for a connection when it drops, beyond the 2 s resume rewind.
+MQTT-4.5.0-1	4.5 Message receipt	S	CITED-TESTED	b	A connection that drops while behind loses what was waiting for it	A detached session gets its messages from the offline queue, and a shared subscription hands its QoS 1/2 messages only to connected members (shared.go, TestADisconnectedSharedMemberStopsTakingWork), both on by default with JetStream since Unreleased. A client that falls behind catches up from the stream (catchup.go). Still lost: what was waiting for a connection when it drops, beyond the 2 s resume rewind. After a SIGKILL the successor loses nothing owed (TestAKilledBrokersClientIsNotSentWhatItAlreadyGotAgain).
 MQTT-4.5.0-2	4.5 Message receipt	C	CLIENT-ONLY (UNCITED)			
 MQTT-4.6.0-1	4.6 Message ordering	C	CLIENT-ONLY (UNCITED)			
 MQTT-4.6.0-2	4.6 Message ordering	C	CLIENT-ONLY (UNCITED)			

@@ -61,6 +61,10 @@ const (
 	// request. The broker returns the capped value in CONNACK, as
 	// MQTT-5.0 §3.2.2.3.2 provides for.
 	DefaultMaxSessionExpiry = time.Hour
+	// DefaultSessionCheckpointInterval is how often a broker with
+	// PersistentSessions writes where a connected client stands to the session
+	// record, when something has changed.
+	DefaultSessionCheckpointInterval = time.Second
 )
 
 // Options configures a Broker. The zero value is usable: it connects to
@@ -272,6 +276,17 @@ type Options struct {
 	// but before the sweep still gets Session Present 0. Defaults to
 	// DefaultSessionSweepInterval.
 	SessionSweepInterval time.Duration
+	// SessionCheckpointInterval is the longest a broker with PersistentSessions
+	// goes between writing where a connected client stands (the offline-queue
+	// position its replay would start from) to the session record, while that
+	// changes. It bounds what a broker killed outright costs its sessions: the
+	// broker that claims the record next replays from the last position written,
+	// so a client is sent again at most what it was sent in this long, instead
+	// of everything the queue holds (OfflineQueueMaxAge). The cost is one
+	// key-value write per interval for each connection whose position moved.
+	// Defaults to DefaultSessionCheckpointInterval; a negative value turns the
+	// checkpoint off, and a killed broker's sessions then replay the whole queue.
+	SessionCheckpointInterval time.Duration
 
 	// Logger receives broker events. Defaults to slog.Default().
 	Logger *slog.Logger
@@ -345,6 +360,9 @@ func (o Options) resolve() (*resolved, error) {
 	}
 	if r.SessionSweepInterval <= 0 {
 		r.SessionSweepInterval = DefaultSessionSweepInterval
+	}
+	if r.SessionCheckpointInterval == 0 {
+		r.SessionCheckpointInterval = DefaultSessionCheckpointInterval
 	}
 	r.maxSessionExpiry = o.MaxSessionExpiry
 	if r.maxSessionExpiry == 0 {
