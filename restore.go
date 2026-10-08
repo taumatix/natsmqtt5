@@ -51,6 +51,9 @@ func (b *Broker) restoreSessionState(ctx context.Context, s *session, rec *sessi
 	if len(rec.receivedQoS2Was) > 0 {
 		s.restoreReceivedQoS2(rec.receivedQoS2Was)
 	}
+	if len(rec.withdrawnWas) > 0 {
+		s.restoreWithdrawn(rec.withdrawnWas)
+	}
 	lost := 0
 	for _, st := range rec.inflightWas {
 		o := b.restoreEntry(ctx, s.clientID, st)

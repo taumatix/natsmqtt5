@@ -1459,6 +1459,10 @@ func (s *session) snapshot(gen uint64) (*sessionRecord, uint64) {
 	cp := *s.rec
 	cp.Subscriptions = subs
 	cp.ExpirySeconds = s.expirySeconds
+	// Every write of the record carries the withdrawn set, so the one persistSession
+	// makes after a withdrawal on resume (and the checkpoint after it) reaches a
+	// successor of a broker that is killed outright.
+	cp.Withdrawn = s.withdrawnLocked()
 	return &cp, s.rev
 }
 
@@ -1540,6 +1544,40 @@ func (s *session) inflightState(blobs *sessionStore) (inflight []storedInflight,
 	s.mu.Unlock()
 	sort.Slice(received, func(i, j int) bool { return received[i] < received[j] })
 	return inflight, received, unrecorded, pending
+}
+
+// withdrawnLocked is the withdrawn identifiers for the session record, in
+// identifier order. Called with s.mu held.
+func (s *session) withdrawnLocked() []storedWithdrawn {
+	var out []storedWithdrawn
+	for id, w := range s.withdrawn {
+		out = append(out, storedWithdrawn{ID: id, Owed: w.owed, Age: s.attaches - w.madeAt})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// restoreWithdrawn puts back the withdrawn identifiers a claim found. The
+// session is new, so its attach count is set to a base that leaves room for
+// each entry's age; the connection that restores them then attaches, as for a
+// session that never left memory. The send-quota slot a withdrawal held died
+// with its connection (MQTT-5.0 §4.9), so none is restored.
+func (s *session) restoreWithdrawn(ws []storedWithdrawn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	const base = 2
+	if s.attaches < base {
+		s.attaches = base
+	}
+	for _, w := range ws {
+		if w.Age >= base {
+			continue
+		}
+		if _, inflight := s.inflight[w.ID]; inflight {
+			continue
+		}
+		s.withdrawn[w.ID] = withdrawal{madeAt: s.attaches - w.Age, owed: w.Owed}
+	}
 }
 
 // blobsStale reports whether a payload this session keeps in the payload bucket

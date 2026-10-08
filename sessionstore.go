@@ -152,6 +152,13 @@ type sessionRecord struct {
 	Inflight     []storedInflight `json:",omitempty"`
 	ReceivedQoS2 []uint16         `json:",omitempty"`
 
+	// Withdrawn is the identifiers of messages the broker took back on resume
+	// (a filter denied) and whose acknowledgement the client may still send. A
+	// claim restores them so that acknowledgement is ignored rather than
+	// answered with 0x82, and the identifier is not handed to a new message
+	// first. Cleared by the claim, and additive like Inflight.
+	Withdrawn []storedWithdrawn `json:",omitempty"`
+
 	// awayWas, awayFromSeqWas, deliveredWas, inflightWas and receivedQoS2Was are
 	// what this broker's claim found and cleared, for the handshake to restore
 	// from. They are never written.
@@ -161,6 +168,17 @@ type sessionRecord struct {
 	deliveredWas    []storedDelivered
 	inflightWas     []storedInflight
 	receivedQoS2Was []uint16
+	withdrawnWas    []storedWithdrawn
+}
+
+// storedWithdrawn is one withdrawn identifier of the client's session: the
+// acknowledgement it is owed, and Age, the connections attached since it was
+// withdrawn, which is how the two-connections rule carries across a restart
+// (session.forgetStaleWithdrawals).
+type storedWithdrawn struct {
+	ID   uint16
+	Owed packet.Type
+	Age  uint64 `json:",omitempty"`
 }
 
 // storedInflight is one unacknowledged message of the client's session. The
@@ -447,6 +465,7 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 		}
 		rec.inflightWas, rec.Inflight = rec.Inflight, nil
 		rec.receivedQoS2Was, rec.ReceivedQoS2 = rec.ReceivedQoS2, nil
+		rec.withdrawnWas, rec.Withdrawn = rec.Withdrawn, nil
 		rev, err := s.kv.Update(ctx, key, encodeRecord(rec), entry.Revision())
 		if err != nil {
 			// Another broker claimed the same Client Identifier between the
