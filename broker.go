@@ -343,8 +343,10 @@ func (b *Broker) stopReauthorize() {
 
 func (b *Broker) closeSessionStore() {
 	if b.store != nil {
+		// b.store is not cleared: a late NATS callback still reads it to
+		// persist a copy, and finds a store whose writes now fail and are
+		// logged, where a cleared field would be a data race.
 		b.store.close()
-		b.store = nil
 	}
 }
 
