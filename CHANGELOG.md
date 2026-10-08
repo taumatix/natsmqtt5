@@ -11,6 +11,14 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed, unreleased.** A client whose Maximum Packet Size was under 24 bytes (the success CONNACK
+  stating the broker's limits) got no CONNACK at all and waited for one. The CONNACK now leaves out what
+  is optional until it fits, in order: the availability flags that state their default, Topic Alias
+  Maximum (then 0 for that connection), Maximum Packet Size, Receive Maximum. A client that sends no
+  Client Identifier and cannot fit the one the broker assigns is refused with 0x85 in a CONNACK that
+  does fit. Under 5 bytes nothing fits, and the CONNACK is discarded as before. CONNACKs that already
+  fit are unchanged. [MQTT-3.1.2-24], [MQTT-3.2.2-16], [MQTT-3.3.2-12].
+
 - **Fixed, unreleased.** With `PersistentSessions`, a session restored after a broker restart forgot the
   identifiers of messages withdrawn on resume (a filter denied): the client's acknowledgement of one was
   answered with `0x82 Protocol Error` and the identifier could be handed to a new message first. The

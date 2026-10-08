@@ -82,6 +82,11 @@ type conn struct {
 	// clientMaxPacketSize is the client's Maximum Packet Size, or 0 for no
 	// limit. A packet over it is discarded rather than sent [MQTT-3.1.2-25].
 	clientMaxPacketSize uint32
+	// topicAliasMax is the Topic Alias Maximum this connection was told, which
+	// is the broker's unless the CONNACK had to leave it out to fit the client's
+	// Maximum Packet Size (fitConnack): then the client was told nothing, which
+	// is 0 [MQTT-3.3.2-12].
+	topicAliasMax uint16
 	// clientReceiveMax bounds our in-flight QoS 1 and QoS 2 publications
 	// towards the client (MQTT-5.0 §4.9).
 	clientReceiveMax uint16

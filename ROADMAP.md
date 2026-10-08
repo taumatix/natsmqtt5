@@ -46,19 +46,6 @@ copies it happened to hear, closes both; that needs a per-session cursor in the 
 
 # Tier 2: MUST statements on rare or optional paths
 
-## A success CONNACK is larger than a very small Maximum Packet Size
-
-**Today:** the CONNACK the broker sends on success states its own limits (Receive Maximum, Maximum
-Packet Size, Topic Alias Maximum, and four availability flags), about 24 bytes before an Assigned Client
-Identifier and about 54 with the 27-byte one the broker makes (counted by hand). A client whose Maximum Packet Size is under
-that gets no CONNACK, because none of those properties is a Reason String or User Property and
-dropping them would let the client assume limits the broker does not keep [MQTT-3.1.2-24]. A
-client that small is rare.
-
-**Shape:** drop the availability flags that restate their default (all four are 1), which saves 8
-bytes losslessly, and decide whether a client under the remainder should be refused with a CONNACK
-that fits, or served on assumed defaults. Size S, and a decision.
-
 ## Self-fencing is proven for a silent link, not for an isolated NATS server
 
 **Today:** a broker that cannot reach NATS for twice `WillCheckInterval` closes
