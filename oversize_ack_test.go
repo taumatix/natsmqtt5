@@ -110,3 +110,32 @@ func TestAPubackThatFitsKeepsItsReasonString(t *testing.T) {
 	assert.Equal(t, packet.TopicNameInvalid, ack.ReasonCode)
 	assert.NotEmpty(t, ack.Properties.ReasonString)
 }
+
+// "The Server MUST NOT send ... User Properties in the CONNACK ... if [that]
+// would increase the size of the CONNACK beyond the Maximum Packet Size
+// specified by the Client" [MQTT-3.2.2-20]. The broker puts none in any CONNACK,
+// success or refusal, so no CONNACK can exceed the limit by them: the smallest
+// success CONNACK a client can still receive, and a refusal, carry none.
+func TestAConnackNeverCarriesUserProperties_MQTT_3_2_2_20(t *testing.T) {
+	addr := startBroker(t, startNATS(t))
+
+	ok := dialRaw(t, addr)
+	ok.send(rawConnect("connack-ok", 0))
+	connack, isConnack := ok.read().(*packet.Connack)
+	if !isConnack {
+		t.FailNow()
+	}
+	assert.Equal(t, packet.Success, connack.ReasonCode)
+	assert.Empty(t, connack.Properties.User, "a success CONNACK has no User Property")
+
+	refused := dialRaw(t, addr)
+	cp := rawConnect("connack-refused", 0)
+	cp.Properties.AuthenticationMethod = "SCRAM"
+	refused.send(cp)
+	connack, isConnack = refused.read().(*packet.Connack)
+	if !isConnack {
+		t.FailNow()
+	}
+	assert.Equal(t, packet.ReasonCode(0x8C), connack.ReasonCode)
+	assert.Empty(t, connack.Properties.User, "a refusing CONNACK has no User Property")
+}

@@ -429,3 +429,22 @@ func TestARestoredRewindWithoutTheDeliveredIDWouldRedeliverIt(t *testing.T) {
 	assert.Equal(t, "g/1", again.Topic)
 	assert.Equal(t, packet.QoS2, again.QoS)
 }
+
+// "Byte 1 is the 'Connect Acknowledge Flags'. Bits 7-1 are reserved and MUST be
+// set to 0" [MQTT-3.2.2-1]: asserted on the raw CONNACK bytes, for a clean start,
+// a resumed session and a refusal.
+func TestConnackAcknowledgeFlagsReservedBitsAreZero_MQTT_3_2_2_1(t *testing.T) {
+	addr := startBroker(t, startNATS(t))
+
+	sessionPresentOnConnect(t, addr, "flags-1", true, 300)
+	_, present := sessionPresentOnConnect(t, addr, "flags-1", false, 300)
+	assert.True(t, present, "the second CONNECT resumes the first's session")
+
+	refused := dialRaw(t, addr)
+	cp := rawConnect("flags-refused", 0)
+	cp.Properties.AuthenticationMethod = "SCRAM"
+	refused.send(cp)
+	first, body := refused.readRawPacket()
+	require.Equal(t, byte(0x20), first)
+	assert.Zero(t, body[0], "a refusal: reserved bits 0 and Session Present 0 [MQTT-3.2.2-6]")
+}

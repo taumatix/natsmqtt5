@@ -1,253 +1,253 @@
 id	section	binds	class	verdict	roadmap	evidence
-MQTT-1.5.4-1	1.5.4 UTF-8 Encoded String	CS	CITED-TESTED			packet/codec_test.go:56 packet/codec.go:114 packet/codec.go:142
-MQTT-1.5.4-2	1.5.4 UTF-8 Encoded String	CS	CITED-TESTED			packet/codec_test.go:56 packet/codec.go:114 packet/codec.go:147
-MQTT-1.5.4-3	1.5.4 UTF-8 Encoded String	CS	UNCITED	a		Decoded strings are kept byte-for-byte; nothing strips U+FEFF (packet/codec.go:115-125).
-MQTT-1.5.5-1	1.5.5 Variable Byte Integer	CS	CITED-TESTED			packet/codec_test.go:39 packet/codec.go:76
-MQTT-1.5.7-1	1.5.7 UTF-8 String Pair	CS	UNCITED	a		stringPair reads both halves through the validating string() (packet/codec.go:127-137).
-MQTT-2.1.3-1	2.1.3 Flags	CS	CITED-TESTED			packet/packet_test.go:106 packet/packet.go:52
-MQTT-2.2.1-2	2.2.1 Packet Identifier	CS	UNCITED	a		Packet Identifier written only for QoS > 0 (packet/publish.go:79-81).
-MQTT-2.2.1-3	2.2.1 Packet Identifier	C	CLIENT-ONLY (UNCITED)			
-MQTT-2.2.1-4	2.2.1 Packet Identifier	S	UNCITED	a		nextID skips identifiers in flight or withdrawn, never 0 (session.go:273-288). A withdrawn identifier is forgotten on the second resumption: withdrawn_expiry_test.go. The withdrawn set travels in the session record, so both hold across a broker restart or kill: withdrawn_restart_test.go.
-MQTT-2.2.1-5	2.2.1 Packet Identifier	CS	UNCITED	a		Every PUBACK/PUBREC/PUBREL/PUBCOMP echoes the incoming id (publish.go:95-97,186-211,223).
-MQTT-2.2.1-6	2.2.1 Packet Identifier	S	UNCITED	a		SUBACK/UNSUBACK carry p.PacketID (subscribe.go:60, 263).
-MQTT-2.2.2-1	2.2.2.1 Property Length	CS	UNCITED	a		Properties.encode writes a zero Property Length when empty (packet/ack.go:86-90 relies on it).
-MQTT-3.1.0-1	3.1 CONNECT – Connection Request	C	CLIENT-ONLY (CITED-CODE)			handshake.go:33
-MQTT-3.1.0-2	3.1 CONNECT – Connection Request	S	CITED-CODE			conn.go:216
-MQTT-3.1.2-1	3.1.2.1 Protocol Name	C	CLIENT-ONLY (CITED-CODE)			packet/connect.go:65 packet/connect.go:8
-MQTT-3.1.2-2	3.1.2.2 Protocol Version	S	CITED-TESTED			packet/packet_test.go:319 handshake.go:54 packet/connect.go:50
-MQTT-3.1.2-3	3.1.2.3 Connect Flags	S	CITED-CODE			packet/connect.go:80
-MQTT-3.1.2-4	3.1.2.4 Clean Start	CS	CITED-TESTED			broker_test.go:560 persistent_test.go:281 sessionstore.go:283
-MQTT-3.1.2-5	3.1.2.4 Clean Start	S	CITED-TESTED			broker_test.go:514 killed_broker_test.go:TestAKilledBrokersClientIsNotSentWhatItAlreadyGotAgain
-MQTT-3.1.2-6	3.1.2.4 Clean Start	S	UNCITED	a		No stored session -> newSession, Session Present 0 (handshake.go:195-200, 228-231).
-MQTT-3.1.2-7	3.1.2.5 Will Flag	S	CITED-TESTED			will_durable_test.go willstore.go handshake.go (DurableWills keeps it across a broker's death)
-MQTT-3.1.2-8	3.1.2.5 Will Flag	S	CITED-TESTED			broker_test.go:424 conn.go will_durable_test.go willstore.go (the Will of a killed broker, with DurableWills) will_ownership_test.go nats_partition_test.go
-MQTT-3.1.2-9	3.1.2.5 Will Flag	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.1.2-10	3.1.2.5 Will Flag	S	CITED-TESTED			will_durable_test.go willstore.go conn.go (removed by CAS once published or on DISCONNECT 0x00) will_ownership_test.go
-MQTT-3.1.2-11	3.1.2.6 Will QoS	C	CLIENT-ONLY (CITED-CODE)			packet/connect.go:92
-MQTT-3.1.2-12	3.1.2.6 Will QoS	C	CLIENT-ONLY (CITED-CODE)			packet/connect.go:167 packet/connect.go:98
-MQTT-3.1.2-13	3.1.2.7 Will Retain	C	CLIENT-ONLY (CITED-CODE)			packet/connect.go:95
-MQTT-3.1.2-14	3.1.2.7 Will Retain	S	UNCITED	a		Will published with Retain copied from the Will (publish.go:285-298).
-MQTT-3.1.2-15	3.1.2.7 Will Retain	S	UNCITED	a		Retained Will goes to the retained store before fan-out (publish.go:292-298).
-MQTT-3.1.2-16	3.1.2.8 User Name Flag	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.1.2-17	3.1.2.8 User Name Flag	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.1.2-18	3.1.2.9 Password Flag	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.1.2-19	3.1.2.9 Password Flag	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.1.2-20	3.1.2.10 Keep Alive	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.1.2-21	3.1.2.10 Keep Alive	C	CLIENT-ONLY (CITED-TESTED)			broker_test.go:487 options.go:180
-MQTT-3.1.2-22	3.1.2.10 Keep Alive	S	CITED-TESTED			broker_test.go:466 conn.go:137 handshake.go:17
-MQTT-3.1.2-23	3.1.2.11.2 Session Expiry Interval	CS	CITED-TESTED	b	Offline message queue: what it still loses	Pending QoS 1/2 messages are kept by the offline queue, on by default with JetStream since Unreleased (TestTheOfflineQueueIsOnByDefault). Still violated at the boundary of a restored replay; deliberately so with DisableOfflineQueue or without JetStream. A detached session is kept for its interval and dropped by a sweep after it (TestAnExpiredDetachedSessionLosesItsNATSSubscriptions_MQTT_3_1_2_23, TestAResumedSessionSurvivesTheSweepAndItsClockRestarts_MQTT_3_1_2_23). A session of a broker killed with SIGKILL is resumed from the last checkpoint (TestAKilledBrokersBehindClientGetsWhatItHadNotAcknowledged).
-MQTT-3.1.2-24	3.1.2.11.4 Maximum Packet Size	S	CITED-TESTED			conn.go:387 small_connack_test.go:TestMQTT_3_1_2_24_ASuccessConnackFitsASmallMaximumPacketSize small_connack_test.go:TestMQTT_3_1_2_25_ANoConnackFitsBelowFiveBytes
-MQTT-3.1.2-25	3.1.2.11.4 Maximum Packet Size	S	CITED-TESTED			retransmit_test.go:368 conn.go:360 conn.go:372
-MQTT-3.1.2-26	3.1.2.11.5 Topic Alias Maximum	S	CITED-TESTED	fixed unreleased		retain.go retained_alias_test.go:TestARetainedMessageServedToASubscriberCarriesNoTopicAlias
-MQTT-3.1.2-27	3.1.2.11.5 Topic Alias Maximum	S	CITED-TESTED	fixed unreleased		retain.go retained_alias_test.go:TestARetainedMessageServedToASubscriberCarriesNoTopicAlias
-MQTT-3.1.2-28	3.1.2.11.6 Request Response Information	S	UNCITED	a		Response Information is never sent (handshake.go:538-566).
-MQTT-3.1.2-29	3.1.2.11.7 Request Problem Information	S	CITED-CODE			conn.go:414 conn.go:68
-MQTT-3.1.2-30	3.1.2.11.9 Authentication Method	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.1.3-1	3.1.3 CONNECT Payload	C	CLIENT-ONLY (CITED-CODE)			packet/connect.go:119
-MQTT-3.1.3-2	3.1.3.1 Client Identifier (ClientID)	CS	UNCITED	a		Sessions keyed by Client Identifier (broker.go:313-331, sessionstore.go:225).
-MQTT-3.1.3-3	3.1.3.1 Client Identifier (ClientID)	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.1.3-4	3.1.3.1 Client Identifier (ClientID)	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.1.3-5	3.1.3.1 Client Identifier (ClientID)	S	UNCITED	a		Only limit is 128 bytes with PersistentSessions (sessionstore.go:26, handshake.go:244-253).
-MQTT-3.1.3-6	3.1.3.1 Client Identifier (ClientID)	S	CITED-TESTED			broker_test.go:626 example_test.go:51 handshake.go:115 README.md:171
-MQTT-3.1.3-7	3.1.3.1 Client Identifier (ClientID)	S	CITED-TESTED			broker_test.go:626 handshake.go:117 options.go:316
-MQTT-3.1.3-8	3.1.3.1 Client Identifier (ClientID)	S	UNCITED	a		checkClientID refuses with 0x85 and closes (handshake.go:244-253, 73-80).
-MQTT-3.1.3-9	3.1.3.2.2 Will Delay Interval	S	CITED-TESTED			will_durable_test.go conn.go willstore.go will_ownership_test.go
-MQTT-3.1.3-10	3.1.3.2.8 User Property	S	UNCITED	a		willProperties copies the User slice in order (publish.go:320-332).
-MQTT-3.1.3-11	3.1.3.3 Will Topic	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.1.3-12	3.1.3.5 User Name	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.1.4-1	3.1.4 CONNECT Actions	S	UNCITED	a		Decoder validates; rejectHandshake/refuse answers and closes (handshake.go:26-28, 55-80).
-MQTT-3.1.4-2	3.1.4 CONNECT Actions	S	UNCITED	a		Authenticator failure refuses and closes (handshake.go:123-140).
-MQTT-3.1.4-3	3.1.4 CONNECT Actions	S	CITED-TESTED			broker_test.go:580 persistent_test.go:187 broker.go:308 broker.go:420 README.md:300
-MQTT-3.1.4-4	3.1.4 CONNECT Actions	S	UNCITED	a		Clean Start handled in takeOverSession and store claim (broker.go:322-330, sessionstore.go:283-296).
-MQTT-3.1.4-5	3.1.4 CONNECT Actions	S	UNCITED	a		CONNACK 0x00 on success (handshake.go:228-233).
-MQTT-3.1.4-6	3.1.4 CONNECT Actions	S	UNCITED	a		A refused CONNECT closes the socket before anything else is read (handshake.go:73-80).
-MQTT-3.2.0-1	3.2 CONNACK – Connect acknowledgement	S	UNCITED	a		Delivery goroutine starts after the handshake; DISCONNECT gated on connected (conn.go:115-129, 408-410).
-MQTT-3.2.0-2	3.2 CONNACK – Connect acknowledgement	S	UNCITED	a		One write of a Connack per handshake path (handshake.go:228-233; refuse paths return).
-MQTT-3.2.2-1	3.2.2.1 Connect Acknowledge Flags	S	CITED-CODE			packet/connack.go:21
-MQTT-3.2.2-2	3.2.2.1.1 Session Present	S	UNCITED	a		Clean Start 1 -> resumed=false (broker.go:322-330; sessionstore.go:283-296 returns present=false).
-MQTT-3.2.2-3	3.2.2.1.1 Session Present	S	CITED-TESTED			broker_test.go:514 sessionstore.go:242
-MQTT-3.2.2-4	3.2.2.1.1 Session Present	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.2.2-5	3.2.2.1.1 Session Present	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.2.2-6	3.2.2.1.1 Session Present	S	CITED-CODE			packet/connack.go:44 packet/connack.go:7
-MQTT-3.2.2-7	3.2.2.2 Connect Reason Code	S	CITED-CODE			handshake.go:72
-MQTT-3.2.2-8	§3.2.2 (label appears only in Appendix B)	S	CITED-TESTED	fixed unreleased		authenticator_code_test.go TestAnAuthenticatorCodeOutsideTable31IsSentAsUnspecifiedError TestAnAuthenticatorCodeFromTable31IsSentAsGiven handshake.go:isConnackError
-MQTT-3.2.2-9	3.2.2.3.4 Maximum QoS	S	CITED-CODE			handshake.go:553 options.go:168
-MQTT-3.2.2-10	3.2.2.3.4 Maximum QoS	S	CITED-TESTED			broker_test.go:864
-MQTT-3.2.2-11	3.2.2.3.4 Maximum QoS	C	CLIENT-ONLY (CITED-CODE)			publish.go:18
-MQTT-3.2.2-12	3.2.2.3.4 Maximum QoS	S	CITED-TESTED			will_authz_test.go:27 handshake.go:479 handshake.go:502
-MQTT-3.2.2-13	3.2.2.3.5 Retain Available	S	CITED-TESTED			broker_test.go:850 will_authz_test.go:27 handshake.go:485 handshake.go:502
-MQTT-3.2.2-14	3.2.2.3.5 Retain Available	C	CLIENT-ONLY (CITED-CODE)			publish.go:25
-MQTT-3.2.2-15	3.2.2.3.6 Maximum Packet Size	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.2.2-16	3.2.2.3.7 Assigned Client Identifier	S	CITED-TESTED			auto-+nuid (handshake.go). Never dropped to fit a small Maximum Packet Size; refused with 0x85 when it cannot fit: small_connack_test.go:TestMQTT_3_2_2_16_AnAssignedClientIdentifierIsNeverDroppedToFit
-MQTT-3.2.2-17	3.2.2.3.8 Topic Alias Maximum	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.2.2-18	3.2.2.3.8 Topic Alias Maximum	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.2.2-19	3.2.2.3.9 Reason String	S	CITED-TESTED	fixed unreleased		conn.go oversize_ack_test.go:TestAnOversizeConnackLosesItsReasonStringAndIsStillSent
-MQTT-3.2.2-20	3.2.2.3.10 User Property	S	CITED-TESTED	fixed unreleased		conn.go (the broker sends no CONNACK User Property; the same strip drops one) oversize_ack_test.go:TestAnOversizeConnackLosesItsReasonStringAndIsStillSent
-MQTT-3.2.2-21	3.2.2.3.14 Server Keep Alive	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.2.2-22	3.2.2.3.14 Server Keep Alive	S	UNCITED	a		Client Keep Alive used unless ServerKeepAlive set (handshake.go:42-49).
-MQTT-3.3.1-1	3.3.1.1 DUP	CS	CITED-TESTED			broker_test.go:548 retransmit_test.go:247
-MQTT-3.3.1-2	3.3.1.1 DUP	CS	CITED-CODE			packet/publish.go:34 packet/publish.go:5
-MQTT-3.3.1-3	3.3.1.1 DUP	S	CITED-CODE			packet/publish.go:7 retransmit.go:111
-MQTT-3.3.1-4	3.3.1.2 QoS	CS	CITED-CODE			packet/packet.go:7 packet/publish.go:31
-MQTT-3.3.1-5	3.3.1.3 RETAIN	S	CITED-CODE			retain.go:45 retain.go:81
-MQTT-3.3.1-6	3.3.1.3 RETAIN	S	CITED-TESTED			broker_test.go:217 retain.go:176 retain.go:220
-MQTT-3.3.1-7	3.3.1.3 RETAIN	S	CITED-CODE			retain.go:176
-MQTT-3.3.1-8	3.3.1.3 RETAIN	S	UNCITED	fixed v0.9.1		"handlePublish touches the store only when p.Retain (publish.go:66-71), but a RETAIN=0 PUBLISH to the topic ""$retained/x"" maps to subject <prefix>.$retained.x, which the retained stream captures, so it replaces the retained message for ""x"" (retain.go:119-123; probe, 3 runs in 3). The Authorizer sees ""$retained/x"", not ""x""." reserved_test.go
-MQTT-3.3.1-9	3.3.1.3 RETAIN	S	CITED-TESTED			broker_test.go:242
-MQTT-3.3.1-10	3.3.1.3 RETAIN	S	CITED-TESTED			broker_test.go:229 subscribe.go:454 subscribe.go:77
-MQTT-3.3.1-11	3.3.1.3 RETAIN	S	UNCITED	a		RetainSendNever returns early (subscribe.go:443).
-MQTT-3.3.1-12	3.3.1.3 RETAIN	S	CITED-TESTED			broker_test.go:258 packet/subscribe.go:30 subscribe.go:299
-MQTT-3.3.1-13	3.3.1.3 RETAIN	S	CITED-TESTED			broker_test.go:258 packet/subscribe.go:30 subscribe.go:299
-MQTT-3.3.2-1	3.3.2.1 Topic Name	CS	UNCITED	a		Decoder reads the Topic Name first as a validated string (packet/publish.go:38).
-MQTT-3.3.2-2	3.3.2.1 Topic Name	CS	CITED-CODE			topic/subject.go:24 topic/topic.go:42
-MQTT-3.3.2-3	3.3.2.1 Topic Name	S	UNCITED	a		Every delivery re-matched against the MQTT filter (subscribe.go:278).
-MQTT-3.3.2-4	3.3.2.3.2 Payload Format Indicator	S	CITED-TESTED			broker_test.go:123 message.go:113
-MQTT-3.3.2-5	3.3.2.3.3 Message Expiry Interval`	S	CITED-TESTED	fixed unreleased		expiry.go expiry_test.go (TestExpiry*: live, offline replay, restored session, catch-up, shared backlog, retained, resend)
-MQTT-3.3.2-6	3.3.2.3.3 Message Expiry Interval`	S	CITED-TESTED	fixed unreleased		expiry.go expiry_test.go (TestExpiry*: live, offline replay, restored session, catch-up, shared backlog, retained, resend)
-MQTT-3.3.2-7	3.3.2.3.4 Topic Alias	CS	CITED-CODE			conn.go:72
-MQTT-3.3.2-8	3.3.2.3.4 Topic Alias	CS	CITED-CODE			packet/properties.go:329
-MQTT-3.3.2-9	3.3.2.3.4 Topic Alias	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.3.2-10	3.3.2.3.4 Topic Alias	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.3.2-11	3.3.2.3.4 Topic Alias	S	CITED-TESTED	fixed unreleased		retain.go retained_alias_test.go:TestARetainedMessageServedToASubscriberCarriesNoTopicAlias
-MQTT-3.3.2-12	3.3.2.3.4 Topic Alias	S	CITED-TESTED			publish.go:113 small_connack_test.go:TestMQTT_3_3_2_12_ATopicAliasMaximumLeftOutOfTheConnackIsZero
-MQTT-3.3.2-13	3.3.2.3.5 Response Topic	CS	UNCITED	a		Decoder validates Response Topic as UTF-8.
-MQTT-3.3.2-14	3.3.2.3.5 Response Topic	CS	CITED-TESTED	fixed unreleased		publish.go handshake.go response_topic_test.go:TestAResponseTopicWithWildcardsIsAProtocolError response_topic_test.go:TestAWillWithAResponseTopicWithWildcardsIsRefusedAtConnect
-MQTT-3.3.2-15	3.3.2.3.5 Response Topic	S	CITED-CODE			message.go:113
-MQTT-3.3.2-16	3.3.2.3.6 Correlation Data	S	CITED-CODE			message.go:113
-MQTT-3.3.2-17	3.3.2.3.7 User Property	S	CITED-CODE			message.go:113 packet/properties.go:89
-MQTT-3.3.2-18	3.3.2.3.7 User Property	S	CITED-TESTED			broker_test.go:163 packet/properties.go:89
-MQTT-3.3.2-19	3.3.2.3.9 Content Type	CS	UNCITED	a		Decoder validates Content Type as UTF-8.
-MQTT-3.3.2-20	3.3.2.3.9 Content Type	S	CITED-CODE			message.go:113
-MQTT-3.3.4-1	3.3.4 PUBLISH Actions	CS	UNCITED	a		QoS 0/1/2 answered with nothing/PUBACK/PUBREC (publish.go:91-98).
-MQTT-3.3.4-2	3.3.4 PUBLISH Actions	S	UNCITED	a		One NATS subscription per filter, so each overlapping subscription gets its own copy at its own granted QoS (subscribe.go:188-231, 289-318).
-MQTT-3.3.4-3	3.3.4 PUBLISH Actions	S	CITED-TESTED			broker_test.go:172
-MQTT-3.3.4-4	3.3.4 PUBLISH Actions	S	UNCITED	c		The broker always sends one copy per subscription, never a merged copy.
-MQTT-3.3.4-5	3.3.4 PUBLISH Actions	S	UNCITED	a		Each copy carries its own subscription id (subscribe.go:303-305).
-MQTT-3.3.4-6	3.3.4 PUBLISH Actions	CS	CITED-TESTED	fixed unreleased		publish.go publish_subid_test.go:TestAClientPublishWithASubscriptionIdentifierIsAProtocolError
-MQTT-3.3.4-7	3.3.4 PUBLISH Actions	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.3.4-8	3.3.4 PUBLISH Actions	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.3.4-9	3.3.4 PUBLISH Actions	S	CITED-TESTED			resend_quota_test.go (an acknowledgement that overtakes a resend). Send quota channel sized to the client Receive Maximum (handshake.go:101-105, subscribe.go:399-403).
-MQTT-3.3.4-10	3.3.4 PUBLISH Actions	S	UNCITED	a		PUBLISH sends run on deliverLoop; acks/PINGRESP on the read loop (subscribe.go:341-383, conn.go:233).
-MQTT-3.4.2-1	3.4.2.1 PUBACK Reason Code	CS	UNCITED	a		PUBACK codes used: 0x00, 0x80, 0x83, 0x87, 0x90, all valid.
-MQTT-3.4.2-2	3.4.2.2.2 Reason String	CS	CITED-TESTED	fixed unreleased		conn.go oversize_ack_test.go:TestAnOversizePubackLosesItsReasonStringAndIsStillSent
-MQTT-3.4.2-3	3.4.2.2.3 User Property	CS	UNCITED	a		The broker never puts User Properties on PUBACK.
-MQTT-3.5.2-1	3.5.2.1 PUBREC Reason Code	CS	UNCITED	a		PUBREC codes used: 0x00, 0x80, 0x83, 0x87, 0x90, all valid.
-MQTT-3.5.2-2	3.5.2.2.2 Reason String	CS	CITED-TESTED	fixed unreleased		conn.go oversize_ack_test.go:TestAnOversizePubrecLosesItsReasonStringAndIsStillSent
-MQTT-3.5.2-3	3.5.2.2.3 User Property	CS	UNCITED	a		No User Properties on PUBREC.
-MQTT-3.6.1-1	3.6.1 PUBREL Fixed Header	S	UNCITED	a		reservedFlags PUBREL=0x02 enforced in Read (packet/types.go:46-50, packet/packet.go:51-54).
-MQTT-3.6.2-1	3.6.2.1 PUBREL Reason Code	CS	UNCITED	a		PUBREL codes 0x00 and 0x92 (publish.go:186-189, 211).
-MQTT-3.6.2-2	3.6.2.2.2 Reason String	CS	UNCITED	a		No properties on broker PUBREL.
-MQTT-3.6.2-3	3.6.2.2.3 User Property	CS	UNCITED	a		No properties on broker PUBREL.
-MQTT-3.7.2-1	3.7.2.1 PUBCOMP Reason Code	CS	UNCITED	a		PUBCOMP codes 0x00 and 0x92 (publish.go:216-224).
-MQTT-3.7.2-2	3.7.2.2.2 Reason String	CS	UNCITED	a		No properties on broker PUBCOMP.
-MQTT-3.7.2-3	3.7.2.2.3 User Property	CS	UNCITED	a		No properties on broker PUBCOMP.
-MQTT-3.8.1-1	3.8.1 SUBSCRIBE Fixed Header	S	CITED-TESTED			packet/packet_test.go:94
-MQTT-3.8.3-1	3.8.3 SUBSCRIBE Payload	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.8.3-2	3.8.3 SUBSCRIBE Payload	C	CLIENT-ONLY (CITED-CODE)			packet/subscribe.go:84 packet/subscribe.go:86
-MQTT-3.8.3-3	3.8.3.1 Subscription Options	S	CITED-TESTED			broker_test.go:280 message.go:29 subscribe.go:294
-MQTT-3.8.3-4	3.8.3.1 Subscription Options	C	CLIENT-ONLY (CITED-CODE)			packet/subscribe.go:27 subscribe.go:89
-MQTT-3.8.3-5	3.8.3.1 Subscription Options	S	CITED-CODE			packet/subscribe.go:66
-MQTT-3.8.4-1	3.8.4 SUBSCRIBE Actions	S	UNCITED	a		handleSubscribe always writes a SUBACK (subscribe.go:60).
-MQTT-3.8.4-2	3.8.4 SUBSCRIBE Actions	S	UNCITED	a		SUBACK uses p.PacketID (subscribe.go:60).
-MQTT-3.8.4-3	3.8.4 SUBSCRIBE Actions	S	CITED-CODE			subscribe.go:154
-MQTT-3.8.4-4	3.8.4 SUBSCRIBE Actions	S	CITED-TESTED			broker_test.go:242 subscribe_replace_test.go:122
-MQTT-3.8.4-5	3.8.4 SUBSCRIBE Actions	S	UNCITED	a		Filters handled one by one, one SUBACK (subscribe.go:27-60).
-MQTT-3.8.4-6	3.8.4 SUBSCRIBE Actions	S	CITED-CODE			packet/suback.go:4 subscribe.go:15
-MQTT-3.8.4-7	3.8.4 SUBSCRIBE Actions	S	CITED-TESTED			broker_test.go:334 session.go:26 subscribe.go:114 README.md:356 ROADMAP.md:218
-MQTT-3.8.4-8	3.8.4 SUBSCRIBE Actions	S	CITED-TESTED			broker_test.go:43 subscribe.go:313
-MQTT-3.9.2-1	3.9.2.1.2 Reason String	S	UNCITED	a		SUBACK carries no Reason String.
-MQTT-3.9.2-2	3.9.2.1.3 User Property	S	UNCITED	a		SUBACK carries no User Properties.
-MQTT-3.9.3-1	3.9.3 SUBACK Payload	S	UNCITED	a		codes[i] follows the filter order (subscribe.go:24-32).
-MQTT-3.9.3-2	3.9.3 SUBACK Payload	S	CITED-TESTED	fixed unreleased		subscribe.go nolocal_shared_test.go:TestNoLocalOnASharedSubscriptionIsAProtocolErrorThatClosesTheConnection
-MQTT-3.10.1-1	3.10.1 UNSUBSCRIBE Fixed Header	S	UNCITED	a		reservedFlags UNSUBSCRIBE=0x02 (packet/types.go:48).
-MQTT-3.10.3-1	3.10.3 UNSUBSCRIBE Payload	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.10.3-2	3.10.3 UNSUBSCRIBE Payload	C	CLIENT-ONLY (CITED-CODE)			packet/subscribe.go:152 packet/subscribe.go:154
-MQTT-3.10.4-1	3.10.4 UNSUBSCRIBE Actions	S	UNCITED	a		Exact filter key lookup (subscribe.go:245, session.go:530-553).
-MQTT-3.10.4-2	3.10.4 UNSUBSCRIBE Actions	S	UNCITED	a		NATS subscriptions torn down and sub.live cleared (subscribe.go:256, 369-375).
-MQTT-3.10.4-3	3.10.4 UNSUBSCRIBE Actions	S	UNCITED	a		In-flight entries stay in the session until acknowledged (session.go inflight untouched by unsubscribe).
-MQTT-3.10.4-4	3.10.4 UNSUBSCRIBE Actions	S	UNCITED	a		UNSUBACK always written (subscribe.go:263).
-MQTT-3.10.4-5	3.10.4 UNSUBSCRIBE Actions	S	UNCITED	a		Same id, and 0x11 when nothing was removed (subscribe.go:251-263).
-MQTT-3.10.4-6	3.10.4 UNSUBSCRIBE Actions	S	UNCITED	a		One loop, one UNSUBACK (subscribe.go:241-264).
-MQTT-3.11.2-1	3.11.2.1.2 Reason String	S	UNCITED	a		UNSUBACK carries no Reason String.
-MQTT-3.11.2-2	3.11.2.1.3 User Property	S	UNCITED	a		UNSUBACK carries no User Properties.
-MQTT-3.11.3-1	3.11.3 UNSUBACK Payload	S	CITED-CODE			packet/suback.go:14 subscribe.go:252
-MQTT-3.11.3-2	3.11.3 UNSUBACK Payload	S	UNCITED	a		Codes 0x00 and 0x11 only.
-MQTT-3.12.4-1	3.12.4 PINGREQ Actions	S	UNCITED	a		PINGREQ -> PINGRESP (conn.go:233-234).
-MQTT-3.14.0-1	3.14 DISCONNECT – Disconnect notification	S	CITED-CODE			conn.go:407 conn.go:85
-MQTT-3.14.1-1	3.14.1 DISCONNECT Fixed Header	CS	UNCITED	a		reservedFlags DISCONNECT=0 (packet/types.go:49).
-MQTT-3.14.2-1	3.14.2.1 Disconnect Reason Code	CS	UNCITED	a		Server DISCONNECT codes used (0x81,0x82,0x8B,0x8D,0x8E,0x94,0x95,0x9A,0x9B,0x87) are all DISCONNECT codes.
-MQTT-3.14.2-2	3.14.2.2.2 Session Expiry Interval	S	UNCITED	a		sendDisconnect only sets a Reason String (conn.go:412-417).
-MQTT-3.14.2-3	3.14.2.2.3 Reason String	CS	CITED-TESTED	fixed unreleased		conn.go oversize_ack_test.go:TestAnOversizeDisconnectLosesItsReasonStringAndIsStillSent
-MQTT-3.14.2-4	3.14.2.2.4 User Property	CS	UNCITED	a		No User Properties on broker DISCONNECT.
-MQTT-3.14.4-1	3.14.4 DISCONNECT Actions	CS	CITED-TESTED	fixed unreleased		conn.go:writePacket after_disconnect_test.go:TestNothingFollowsAServerDisconnectOnTheWire
-MQTT-3.14.4-2	3.14.4 DISCONNECT Actions	CS	UNCITED	a		serve defers close (conn.go:103).
-MQTT-3.14.4-3	3.14.4 DISCONNECT Actions	S	UNCITED	a		Normal DISCONNECT drops the Will (conn.go:276-279).
-MQTT-3.15.1-1	3.15.1 AUTH Fixed Header	CS	UNCITED	a		reservedFlags AUTH=0 (packet/types.go:49).
-MQTT-3.15.2-1	3.15.2.1 Authenticate Reason Code	CS	ROADMAP	c	Enhanced authentication	The broker never sends AUTH (enhanced authentication refused with 0x8C).
-MQTT-3.15.2-2	3.15.2.2.4 Reason String	CS	ROADMAP	c	Enhanced authentication	As 3.15.2-1.
-MQTT-3.15.2-3	3.15.2.2.5 User Property	CS	ROADMAP	c	Enhanced authentication	As 3.15.2-1.
-MQTT-4.1.0-1	4.1.1 Storing Session State	CS	CITED-TESTED	b	Without the queue, a client that falls behind still loses QoS 1 and 2	With the offline queue (the default with JetStream) a connected client that falls behind catches up from the stream (catchup.go, TestAClientThatFallsBehindLosesNothing) since Unreleased. Without the queue, QoS 1/2 messages past 2048 waiting are still dropped.
-MQTT-4.1.0-2	4.1.1 Storing Session State	S	ROADMAP	b	Expiring a detached session that is never resumed	In-memory sessions are discarded only lazily on reconnect (session.go, broker.go); an expired session still holds its NATS subscriptions. Since Unreleased that no longer costs a shared subscription its QoS 1/2 messages (they go only to connected members), but its QoS 0 share still reaches the expired member.
-MQTT-4.2.0-1	§4.2.0 (label appears only in Appendix B)	CS	UNCITED	a		Same statement as 4.2-1 under its Appendix B label.
-MQTT-4.2-1	4.2 Network Connections	CS	UNCITED	a		TCP and TLS listeners (broker.go:139-156).
-MQTT-4.3.1-1	4.3.1 QoS 0: At most once delivery	CS	UNCITED	a		Encoder clears DUP at QoS 0 (packet/publish.go:69).
-MQTT-4.3.2-1	4.3.2 QoS 1: At least once delivery	CS	UNCITED	a		nextID per message (subscribe.go:412-417).
-MQTT-4.3.2-2	4.3.2 QoS 1: At least once delivery	CS	UNCITED	a		New sends have Dup=false (subscribe.go:386-392).
-MQTT-4.3.2-3	4.3.2 QoS 1: At least once delivery	CS	UNCITED	a		trackInflight until PUBACK (subscribe.go:418, publish.go:162-179).
-MQTT-4.3.2-4	4.3.2 QoS 1: At least once delivery	CS	UNCITED	a		"PUBACK after the message is handed to NATS (publish.go:86-95). See ROADMAP ""A PUBACK that means the message is safe"" for durability."
-MQTT-4.3.2-5	4.3.2 QoS 1: At least once delivery	CS	UNCITED	a		No QoS 1 dedupe state is kept, so a reused id is a new message.
-MQTT-4.3.3-1	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		nextID (subscribe.go:412).
-MQTT-4.3.3-2	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		QoS 2, DUP 0 on first send (subscribe.go:386-392).
-MQTT-4.3.3-3	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		In flight until PUBREC (publish.go:183-212).
-MQTT-4.3.3-4	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		PUBREL with the same id on PUBREC < 0x80 (publish.go:210-211).
-MQTT-4.3.3-5	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		awaitPubcomp keeps it in flight (publish.go:210, session.go:350).
-MQTT-4.3.3-6	4.3.3 QoS 2: Exactly once delivery	CS	CITED-TESTED	fixed unreleased		retransmit.go subscribe.go:deliver publish.go:handlePubrec killed_qos2_outbound_test.go:TestAKilledBrokersQoS2MessageAfterPubrelIsNotPublishedAgain (SIGKILL).
-MQTT-4.3.3-7	4.3.3 QoS 2: Exactly once delivery	CS	CITED-TESTED	fixed unreleased		retransmit.go expiry_test.go TestExpiryDoesNotDropAQoS2PublishThatWasAlreadySent
-MQTT-4.3.3-8	4.3.3 QoS 2: Exactly once delivery	CS	CITED-TESTED			reauthorise_test.go:212 retransmit_test.go:180 retransmit.go:82 session.go:414
-MQTT-4.3.3-9	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		releaseQoS2 on an error PUBREC (publish.go:155).
-MQTT-4.3.3-10	4.3.3 QoS 2: Exactly once delivery	CS	CITED-TESTED	fixed unreleased		publish.go session.go restore.go restore_inflight_test.go:TestMQTT4_3_3_10_ResentInboundQoS2IsForwardedOnceAcrossBrokers restore_inflight_test.go:TestMQTT4_3_3_10_ResentInboundQoS2IsForwardedOnceAfterARestart. The received ids are in the session record; killed_inflight_test.go:TestAKilledBrokersReceivedQoS2MessageIsNotForwardedAgainOnAResend qos2_unforwarded_internal_test.go (SIGKILL).
-MQTT-4.3.3-11	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	a		PUBREL -> PUBCOMP, 0x92 if unknown (publish.go:216-224).
-MQTT-4.3.3-12	4.3.3 QoS 2: Exactly once delivery	CS	CITED-TESTED	fixed unreleased		publish.go checkpoint.go killed_inflight_test.go:TestAKilledBrokersCompletedQoS2IdentifierIsANewMessageAgain (SIGKILL).
-MQTT-4.3.3-13	4.3.3 QoS 2: Exactly once delivery	CS	UNCITED	c		Message expiry is not applied.
-MQTT-4.4.0-1	4.4 Message delivery retry	CS	CITED-TESTED	fixed unreleased		broker_test.go:548 displaced_ack_test.go:27 late_ack_test.go withdrawn_type_test.go withdrawn_restart_test.go:TestAWithdrawnIdentifierSurvivesABrokerRestart_MQTT_4_4_0_1_MQTT_2_2_1_4 handshake.go:381 publish.go:196 restore.go restore_inflight_test.go:TestMQTT4_4_0_1_QoS1UnacknowledgedAtReleaseIsResentByAnotherBroker restore_inflight_test.go:TestMQTT4_4_0_1_QoS1UnacknowledgedIsResentAfterTheBrokerRestarts restore_inflight_test.go:TestMQTT4_4_0_1_QoS2PubrelIsResentByAnotherBroker README.md ROADMAP.md killed_inflight_test.go:TestAKilledBrokersUnacknowledgedQoS1MessageIsResentWithItsOriginalID killed_inflight_test.go:TestAKilledBrokersQoS2MessageAwaitingPubcompIsContinuedWithPubrel (SIGKILL). restore_nocopy_test.go:TestAKilledBrokersRetainedMessageInFlightIsResent restore_nocopy_test.go:TestARetainedMessageInFlightIsResentByAnotherBroker restore_nocopy_test.go:TestWithoutTheOfflineQueueARestoredSessionResendsFromTheRecord restore_nocopy_test.go:TestASharedSubscriptionsMessageInFlightIsResentByAnotherBroker. restore_paths_test.go:TestAnInflightMessageWhoseQueueCopyAgedOutIsDroppedOnResume restore_paths_test.go:TestAnInflightMessageOfAnUnsubscribedFilterIsStillResentOnResume. oversize_inflight_test.go:TestAKilledBrokersOversizeRetainedMessageInFlightIsResent (SIGKILL) oversize_inflight_test.go:TestAKilledBrokersOversizeQoS2RetainedMessageInFlightIsResent (SIGKILL) restore_nocopy_test.go:TestWithoutTheOfflineQueueAPayloadTooLargeForTheRecordIsStillResent. late_live_copy_test.go:TestALiveCopyThatArrivesAfterTheConnectionEndedIsStillSentOnResume. late_live_copy_delay_test.go:TestALiveCopyDelayedPastTheRewindIsStillSentOnResume late_live_copy_delay_test.go:TestALiveCopyDelayedPastTheRewindIsStillSentToASessionRestoredElsewhere late_live_copy_delay_test.go:TestALiveCopyThatRacesTheConnectionsEndIsNeverLost. Not covered: PUBLISH over seven eighths of max_payload; a late live copy that arrives after another broker claimed the record.
-MQTT-4.4.0-2	4.4 Message delivery retry	CS	CITED-TESTED			retransmit_test.go:320 publish.go:205
-MQTT-4.5.0-1	4.5 Message receipt	S	CITED-TESTED	b	A connection that drops while behind loses what was waiting for it	A detached session gets its messages from the offline queue, and a shared subscription hands its QoS 1/2 messages only to connected members (shared.go, TestADisconnectedSharedMemberStopsTakingWork), both on by default with JetStream since Unreleased. A client that falls behind catches up from the stream (catchup.go). Still lost: what was waiting for a connection when it drops, beyond the 2 s resume rewind. After a SIGKILL the successor loses nothing owed (TestAKilledBrokersClientIsNotSentWhatItAlreadyGotAgain).
-MQTT-4.5.0-2	4.5 Message receipt	C	CLIENT-ONLY (UNCITED)			
-MQTT-4.6.0-1	4.6 Message ordering	C	CLIENT-ONLY (UNCITED)			
-MQTT-4.6.0-2	4.6 Message ordering	C	CLIENT-ONLY (UNCITED)			
-MQTT-4.6.0-3	4.6 Message ordering	C	CLIENT-ONLY (UNCITED)			
-MQTT-4.6.0-4	4.6 Message ordering	C	CLIENT-ONLY (UNCITED)			
-MQTT-4.6.0-5	4.6 Message ordering	S	CITED-TESTED			reauthorise_test.go:142 retransmit_test.go:252 offline.go:160 retransmit.go:26
-MQTT-4.6.0-6	4.6 Message ordering	S	CITED-TESTED			retransmit_test.go:93 retransmit.go:28
-MQTT-4.7.0-1	4.7.1 Topic wildcards	CS	CITED-CODE			topic/topic.go:36
-MQTT-4.7.1-1	4.7.1.2 Multi-level wildcard	CS	CITED-CODE			topic/topic.go:113 topic/topic.go:115
-MQTT-4.7.1-2	4.7.1.3 Single-level wildcard	CS	CITED-CODE			topic/topic.go:107 topic/topic.go:109
-MQTT-4.7.2-1	4.7.2 Topics beginning with $	S	CITED-TESTED			broker_test.go:105 topic/topic_test.go:48 offline.go:25 topic/topic.go:164
-MQTT-4.7.3-1	4.7.3 Topic semantic and usage	CS	CITED-CODE			topic/topic.go:67 topic/topic.go:69
-MQTT-4.7.3-2	4.7.3 Topic semantic and usage	CS	CITED-CODE			topic/topic.go:75 topic/topic.go:77
-MQTT-4.7.3-3	4.7.3 Topic semantic and usage	CS	CITED-CODE			topic/topic.go:29 topic/topic.go:72
-MQTT-4.7.3-4	4.7.3 Topic semantic and usage	S	UNCITED	a		Byte-exact matching and a reversible subject mapping (topic/topic.go:166-203, topic/subject.go). Topics containing whitespace, * or > are refused rather than altered (topic/topic.go:79-93).
-MQTT-4.8.2-1	4.8.2 Shared Subscriptions	CS	CITED-TESTED			topic/topic_test.go:83 topic/topic.go:130 topic/topic.go:142
-MQTT-4.8.2-2	4.8.2 Shared Subscriptions	CS	CITED-TESTED			topic/topic_test.go:83 topic/topic.go:102 topic/topic.go:130
-MQTT-4.8.2-3	4.8.2 Shared Subscriptions	S	UNCITED	a		minQoS against the member's granted QoS (subscribe.go:314).
-MQTT-4.8.2-4	4.8.2 Shared Subscriptions	S	ROADMAP	c	QoS 2 on shared subscriptions	QoS 2 on shared subscriptions is granted as QoS 1 (subscribe.go:121-123).
-MQTT-4.8.2-5	4.8.2 Shared Subscriptions	S	ROADMAP	c	QoS 2 on shared subscriptions	As 4.8.2-4.
-MQTT-4.8.2-6	4.8.2 Shared Subscriptions	S	CITED-CODE			publish.go:182
-MQTT-4.9.0-1	4.9 Flow Control	CS	UNCITED	a		Quota channel capacity = client Receive Maximum, default 65535 (handshake.go:101-105).
-MQTT-4.9.0-2	4.9 Flow Control	CS	CITED-TESTED			retransmit_test.go:139
-MQTT-4.9.0-3	4.9 Flow Control	CS	UNCITED	a		Quota wait is on deliverLoop only (subscribe.go:399-403).
-MQTT-4.12.0-1	4.12 Enhanced authentication	S	ROADMAP	a	Enhanced authentication	Authentication Method -> CONNACK 0x8C and close (handshake.go:91-95).
-MQTT-4.12.0-2	4.12 Enhanced authentication	S	ROADMAP	c	Enhanced authentication	Enhanced authentication not offered.
-MQTT-4.12.0-3	4.12 Enhanced authentication	C	CLIENT-ONLY (UNCITED)			
-MQTT-4.12.0-4	4.12 Enhanced authentication	S	ROADMAP	c	Enhanced authentication	Enhanced authentication not offered.
-MQTT-4.12.0-5	4.12 Enhanced authentication	CS	ROADMAP	c	Enhanced authentication	Enhanced authentication not offered.
-MQTT-4.12.0-6	4.12 Enhanced authentication	S	ROADMAP	a	Enhanced authentication	The broker never sends AUTH or an Authentication Method; an AUTH from the client gets DISCONNECT 0x82 (conn.go:237-241).
-MQTT-4.12.0-7	4.12 Enhanced authentication	C	CLIENT-ONLY (UNCITED)			
-MQTT-4.12.1-1	4.12.1 Re-authentication	C	CLIENT-ONLY (UNCITED)			
-MQTT-4.12.1-2	4.12.1 Re-authentication	CS	ROADMAP	c	Enhanced authentication	Re-authentication not offered.
-MQTT-4.13.1-1	4.13.1 Malformed Packet and Protocol Errors	S	CITED-TESTED	fixed unreleased		conn.go:readError subscribe.go nolocal_shared_test.go:TestNoLocalOnASharedSubscriptionIsAProtocolErrorThatClosesTheConnection publish.go publish_subid_test.go:TestAClientPublishWithASubscriptionIdentifierIsAProtocolError response_topic_test.go:TestAResponseTopicWithWildcardsIsAProtocolError Every Protocol Error the review found after parsing now disconnects with 0x82 and closes.
-MQTT-4.13.2-1	4.13.2 Other errors	CS	UNCITED	a		refuse() and every sendDisconnect caller close (handshake.go:73-80, conn.go:102-133).
-MQTT-6.0.0-1	6 Using WebSocket as a network transport	CS	ROADMAP	c	WebSocket transport	No WebSocket transport.
-MQTT-6.0.0-2	6 Using WebSocket as a network transport	CS	ROADMAP	c	WebSocket transport	No WebSocket transport.
-MQTT-6.0.0-3	6 Using WebSocket as a network transport	C	CLIENT-ONLY (UNCITED)			
-MQTT-6.0.0-4	6 Using WebSocket as a network transport	S	ROADMAP	c	WebSocket transport	No WebSocket transport.
+MQTT-1.5.4-1	1.5.4 UTF-8 Encoded String	CS	TESTED	met		TestConformance_MQTT_4_13_1_1_MalformedPacketsAndProtocolErrorsCloseTheConnection TestUTF8String_MQTT_1_5_4_1 TestStringValidation
+MQTT-1.5.4-2	1.5.4 UTF-8 Encoded String	CS	TESTED	met		TestUTF8String_MQTT_1_5_4_2 TestStringValidation
+MQTT-1.5.4-3	1.5.4 UTF-8 Encoded String	CS	TESTED	met		TestUTF8String_MQTT_1_5_4_3
+MQTT-1.5.5-1	1.5.5 Variable Byte Integer	CS	TESTED	met		TestConformance_MQTT_4_13_1_1_MalformedPacketsAndProtocolErrorsCloseTheConnection TestVariableByteInteger_MQTT_1_5_5_1 TestVarByteIntRejectsBadEncodings
+MQTT-1.5.7-1	1.5.7 UTF-8 String Pair	CS	TESTED	met		TestUTF8StringPair_MQTT_1_5_7_1
+MQTT-2.1.3-1	2.1.3 Flags	CS	TESTED	met		TestFixedHeaderFlags_MQTT_2_1_3_1 TestFixedHeaderReservedFlags
+MQTT-2.2.1-2	2.2.1 Packet Identifier	CS	TESTED	met		TestPacketIdentifier_MQTT_2_2_1_2
+MQTT-2.2.1-3	2.2.1 Packet Identifier	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-2.2.1-4	2.2.1 Packet Identifier	S	TESTED	met		TestAWithdrawnIdentifierSurvivesABrokerRestart_MQTT_4_4_0_1_MQTT_2_2_1_4 TestAWithdrawnPacketIdentifierIsReusableAfterTheSecondResumption_MQTT_2_2_1_4 TestPacketIdentifier_MQTT_2_2_1_4
+MQTT-2.2.1-5	2.2.1 Packet Identifier	CS	TESTED	met		TestPacketIdentifier_MQTT_2_2_1_5
+MQTT-2.2.1-6	2.2.1 Packet Identifier	S	TESTED	met		TestPacketIdentifier_MQTT_2_2_1_6
+MQTT-2.2.2-1	2.2.2.1 Property Length	CS	TESTED	met		TestPacketIdentifier_MQTT_2_2_1_6 TestPropertyLength_MQTT_2_2_2_1
+MQTT-3.1.0-1	3.1 CONNECT – Connection Request	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.0-2	3.1 CONNECT – Connection Request	S	TESTED	met		TestConformance_MQTT_4_13_1_1_MalformedPacketsAndProtocolErrorsCloseTheConnection TestConnect_MQTT_3_1_0_2
+MQTT-3.1.2-1	3.1.2.1 Protocol Name	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.2-2	3.1.2.2 Protocol Version	S	TESTED	met		TestConnect_MQTT_3_1_2_2 TestConnectWrongProtocolVersion
+MQTT-3.1.2-3	3.1.2.3 Connect Flags	S	TESTED	met		TestConnect_MQTT_3_1_2_3
+MQTT-3.1.2-4	3.1.2.4 Clean Start	CS	TESTED	met		TestCleanStartDiscardsTheStoredSession TestPersistentSessionIsDiscardedByCleanStart
+MQTT-3.1.2-5	3.1.2.4 Clean Start	S	TESTED	met		TestAKilledBrokersClientIsNotSentWhatItAlreadyGotAgain TestSessionResumesSubscriptions TestWithoutJetStreamSessionPresentIsTruthful
+MQTT-3.1.2-6	3.1.2.4 Clean Start	S	TESTED	met		TestCleanStart_MQTT_3_1_2_6
+MQTT-3.1.2-7	3.1.2.5 Will Flag	S	TESTED	met		TestMQTT_3_1_2_8_KillNineOfTheBrokerBinaryPublishesItsWill
+MQTT-3.1.2-8	3.1.2.5 Will Flag	S	TESTED	met		TestMQTT_3_1_2_8_ABrokerCutOffFromNATSClosesItsClientsBeforeTheirWillIsPublished TestMQTT_3_1_2_8_ACleanStartTakeoverPublishesTheOldWillOnly TestMQTT_3_1_2_8_ANewConnectionWithoutAWillCancelsTheOldOne TestMQTT_3_1_2_8_CleanStartAfterAKillEndsTheSessionAndPublishes TestMQTT_3_1_2_8_KillNineOfTheBrokerBinaryPublishesItsWill (+5 more)
+MQTT-3.1.2-9	3.1.2.5 Will Flag	C	TESTED	met		TestMQTT_3_1_2_10_NormalDisconnectLeavesNothingForASurvivor
+MQTT-3.1.2-10	3.1.2.5 Will Flag	S	TESTED	met		TestMQTT_3_1_2_10_AReplacedWillLeavesNoStoredRecordBehind TestMQTT_3_1_2_10_NormalDisconnectLeavesNothingForASurvivor TestMQTT_3_1_2_10_WillIsPublishedOnceAcrossBrokers
+MQTT-3.1.2-11	3.1.2.6 Will QoS	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.2-12	3.1.2.6 Will QoS	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.2-13	3.1.2.7 Will Retain	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.2-14	3.1.2.7 Will Retain	S	TESTED	met		TestWillRetain_MQTT_3_1_2_14
+MQTT-3.1.2-15	3.1.2.7 Will Retain	S	TESTED	met		TestWillRetain_MQTT_3_1_2_15
+MQTT-3.1.2-16	3.1.2.8 User Name Flag	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.2-17	3.1.2.8 User Name Flag	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.2-18	3.1.2.9 Password Flag	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.2-19	3.1.2.9 Password Flag	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.2-20	3.1.2.10 Keep Alive	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.2-21	3.1.2.10 Keep Alive	C	TESTED	met		TestKeepAliveTimeoutDisconnectsASilentClient
+MQTT-3.1.2-22	3.1.2.10 Keep Alive	S	TESTED	met		TestConnack_MQTT_3_2_2_22 TestKeepAliveTimeoutDisconnectsASilentClient
+MQTT-3.1.2-23	3.1.2.11.2 Session Expiry Interval	CS	TESTED	met		TestAResumedSessionSurvivesTheSweepAndItsClockRestarts_MQTT_3_1_2_23 TestAnExpiredDetachedSessionLosesItsNATSSubscriptions_MQTT_3_1_2_23 TestAnExpiredSessionIsNotDeliveredToAfterTheSweep_MQTT_3_1_2_23 TestTheSweepDoesNotTouchAConnectedSessionOrAZeroIntervalOne_MQTT_3_1_2_23 TestTheSweepExpiresAtTheCappedIntervalNotTheRequestedOne_MQTT_3_1_2_23 (+6 more)
+MQTT-3.1.2-24	3.1.2.11.4 Maximum Packet Size	S	TESTED	met		TestMQTT_3_1_2_24_ASuccessConnackFitsASmallMaximumPacketSize TestMQTT_3_1_2_25_ANoConnackFitsBelowFiveBytes TestAConnackThatCannotFitIsStillNotSent
+MQTT-3.1.2-25	3.1.2.11.4 Maximum Packet Size	S	TESTED	met		TestMQTT_3_1_2_24_ASuccessConnackFitsASmallMaximumPacketSize TestMQTT_3_1_2_25_ANoConnackFitsBelowFiveBytes TestAResendTooLargeForTheClientDoesNotStallTheConnection
+MQTT-3.1.2-26	3.1.2.11.5 Topic Alias Maximum	S	TESTED	met		TestARetainedMessageServedToASubscriberCarriesNoTopicAlias
+MQTT-3.1.2-27	3.1.2.11.5 Topic Alias Maximum	S	TESTED	met		TestARetainedMessageServedToASubscriberCarriesNoTopicAlias
+MQTT-3.1.2-28	3.1.2.11.6 Request Response Information	S	TESTED	met		TestRequestResponseInformation_MQTT_3_1_2_28
+MQTT-3.1.2-29	3.1.2.11.7 Request Problem Information	S	TESTED	met		TestRequestProblemInformation_MQTT_3_1_2_29
+MQTT-3.1.2-30	3.1.2.11.9 Authentication Method	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.3-1	3.1.3 CONNECT Payload	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.3-2	3.1.3.1 Client Identifier (ClientID)	CS	TESTED	met		TestClientID_MQTT_3_1_3_2
+MQTT-3.1.3-3	3.1.3.1 Client Identifier (ClientID)	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.3-4	3.1.3.1 Client Identifier (ClientID)	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.3-5	3.1.3.1 Client Identifier (ClientID)	S	TESTED	met		TestClientID_MQTT_3_1_3_5
+MQTT-3.1.3-6	3.1.3.1 Client Identifier (ClientID)	S	TESTED	met		TestAssignedClientIdentifier
+MQTT-3.1.3-7	3.1.3.1 Client Identifier (ClientID)	S	TESTED	met		TestAssignedClientIdentifier
+MQTT-3.1.3-8	3.1.3.1 Client Identifier (ClientID)	S	TESTED	met		TestClientID_MQTT_3_1_3_8
+MQTT-3.1.3-9	3.1.3.2.2 Will Delay Interval	S	TESTED	met		TestMQTT_3_1_2_8_TheOldConnectionsEndLeavesTheNewConnectionsWill TestMQTT_3_1_3_9_ABriefPauseOfNATSClosesNothingAndPublishesNothing TestMQTT_3_1_3_9_ReconnectCancelsTheWillOfAKilledBroker
+MQTT-3.1.3-10	3.1.3.2.8 User Property	S	TESTED	met		TestWillProperties_MQTT_3_1_3_10
+MQTT-3.1.3-11	3.1.3.3 Will Topic	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.3-12	3.1.3.5 User Name	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.4-1	3.1.4 CONNECT Actions	S	TESTED	met		TestConnectActions_MQTT_3_1_4_1
+MQTT-3.1.4-2	3.1.4 CONNECT Actions	S	TESTED	met		TestConnectActions_MQTT_3_1_4_2
+MQTT-3.1.4-3	3.1.4 CONNECT Actions	S	TESTED	met		TestAStaleWriteOfTheSessionRecordIsNotATakeover TestATakeoverInTheMiddleOfAStoredRecordResumeKeepsTheSessionsSubscriptions TestArrearsFollowASessionTakenOverByALiveConnection TestPersistentCleanStartOnAnotherBrokerDisplacesTheOldConnection TestPersistentSessionMovesToAnotherLiveBroker (+2 more)
+MQTT-3.1.4-4	3.1.4 CONNECT Actions	S	TESTED	met		TestConnectActions_MQTT_3_1_4_4
+MQTT-3.1.4-5	3.1.4 CONNECT Actions	S	TESTED	met		TestConnectActions_MQTT_3_1_4_5
+MQTT-3.1.4-6	3.1.4 CONNECT Actions	S	TESTED	met		TestConnectActions_MQTT_3_1_4_6
+MQTT-3.2.0-1	3.2 CONNACK – Connect acknowledgement	S	TESTED	met		TestConnack_MQTT_3_2_0_1
+MQTT-3.2.0-2	3.2 CONNACK – Connect acknowledgement	S	TESTED	met		TestConnack_MQTT_3_2_0_2 TestConnect_MQTT_3_1_0_2
+MQTT-3.2.2-1	3.2.2.1 Connect Acknowledge Flags	S	TESTED	met		TestConnackAcknowledgeFlagsReservedBitsAreZero_MQTT_3_2_2_1
+MQTT-3.2.2-2	3.2.2.1.1 Session Present	S	TESTED	met		TestConnectActions_MQTT_3_1_4_4 TestWithoutJetStreamSessionPresentIsTruthful
+MQTT-3.2.2-3	3.2.2.1.1 Session Present	S	TESTED	met		TestAResumedSessionSurvivesTheSweepAndItsClockRestarts_MQTT_3_1_2_23 TestAnExpiredDetachedSessionLosesItsNATSSubscriptions_MQTT_3_1_2_23 TestASessionRecordWithoutTheReplayPositionIsResumedFromItsReleaseTime TestATakeoverInTheMiddleOfAStoredRecordResumeKeepsTheSessionsSubscriptions TestAnExpiredSharedMemberComesBackWithoutASession (+3 more)
+MQTT-3.2.2-4	3.2.2.1.1 Session Present	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.2.2-5	3.2.2.1.1 Session Present	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.2.2-6	3.2.2.1.1 Session Present	S	TESTED	met		TestConformance_MQTT_4_12_0_1_AnUnsupportedAuthenticationMethodIsRefusedAndClosed TestConnackAcknowledgeFlagsReservedBitsAreZero_MQTT_3_2_2_1 TestConnack_MQTT_3_2_2_6
+MQTT-3.2.2-7	3.2.2.2 Connect Reason Code	S	TESTED	met		TestMQTT_3_2_2_16_AnAssignedClientIdentifierIsNeverDroppedToFit TestAnAuthenticatorCodeOutsideTable31IsSentAsUnspecifiedError TestAnOversizeConnackLosesItsReasonStringAndIsStillSent
+MQTT-3.2.2-8	§3.2.2 (label appears only in Appendix B)	S	TESTED	met		TestRestrictedBrokerRefusesAWillOnADollarTopic_MQTT_5_0_4_7_2
+MQTT-3.2.2-9	3.2.2.3.4 Maximum QoS	S	TESTED	met		TestConnack_MQTT_3_2_2_9
+MQTT-3.2.2-10	3.2.2.3.4 Maximum QoS	S	TESTED	met		TestMaximumQoSIsAdvertisedAndEnforced
+MQTT-3.2.2-11	3.2.2.3.4 Maximum QoS	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.2.2-12	3.2.2.3.4 Maximum QoS	S	TESTED	met		TestConnack_MQTT_3_2_2_12
+MQTT-3.2.2-13	3.2.2.3.5 Retain Available	S	TESTED	met		TestConnack_MQTT_3_2_2_13 TestRetainedMessagesCanBeDisabled
+MQTT-3.2.2-14	3.2.2.3.5 Retain Available	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.2.2-15	3.2.2.3.6 Maximum Packet Size	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.2.2-16	3.2.2.3.7 Assigned Client Identifier	S	TESTED	met		TestConnack_MQTT_3_2_2_16 TestMQTT_3_1_2_24_ASuccessConnackFitsASmallMaximumPacketSize TestMQTT_3_2_2_16_AnAssignedClientIdentifierIsNeverDroppedToFit
+MQTT-3.2.2-17	3.2.2.3.8 Topic Alias Maximum	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.2.2-18	3.2.2.3.8 Topic Alias Maximum	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.2.2-19	3.2.2.3.9 Reason String	S	TESTED	met		TestAnOversizeConnackLosesItsReasonStringAndIsStillSent
+MQTT-3.2.2-20	3.2.2.3.10 User Property	S	TESTED	met		TestAConnackNeverCarriesUserProperties_MQTT_3_2_2_20
+MQTT-3.2.2-21	3.2.2.3.14 Server Keep Alive	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.2.2-22	3.2.2.3.14 Server Keep Alive	S	TESTED	met		TestConnack_MQTT_3_2_2_22
+MQTT-3.3.1-1	3.3.1.1 DUP	CS	TESTED	met		TestAnAckThatLandsWhileAResendIsBeingWrittenDoesNotDisconnectTheClient_MQTT_4_4_0_1 TestMQTT_3_3_4_9_AnAckThatOvertookAResendDoesNotFreeTheCopysSlot TestPublish_MQTT_3_3_1_1 TestAConnectionDroppedDuringTheResumeReplayStillGetsTheRest TestAKilledBrokersQoS2PublishSentJustBeforeTheKillIsResentNotRepeated (+8 more)
+MQTT-3.3.1-2	3.3.1.1 DUP	CS	TESTED	met		TestConformance_MQTT_4_13_1_1_MalformedPacketsAndProtocolErrorsCloseTheConnection TestPublish_MQTT_3_3_1_2
+MQTT-3.3.1-3	3.3.1.1 DUP	S	TESTED	met		TestPublish_MQTT_3_3_1_3
+MQTT-3.3.1-4	3.3.1.2 QoS	CS	TESTED	met		TestConformance_MQTT_4_13_1_1_MalformedPacketsAndProtocolErrorsCloseTheConnection TestPublish_MQTT_3_3_1_4
+MQTT-3.3.1-5	3.3.1.3 RETAIN	S	TESTED	met		TestPublish_MQTT_3_3_1_5
+MQTT-3.3.1-6	3.3.1.3 RETAIN	S	TESTED	met		TestPublish_MQTT_3_3_1_6_and_7 TestRetainedMessages
+MQTT-3.3.1-7	3.3.1.3 RETAIN	S	TESTED	met		TestPublish_MQTT_3_3_1_6_and_7
+MQTT-3.3.1-8	3.3.1.3 RETAIN	S	TESTED	met		TestPublish_MQTT_3_3_1_8 TestARetainedMessageServedToASubscriberCarriesNoTopicAlias
+MQTT-3.3.1-9	3.3.1.3 RETAIN	S	TESTED	met		TestPublish_MQTT_3_3_1_9 TestRetainedMessages
+MQTT-3.3.1-10	3.3.1.3 RETAIN	S	TESTED	met		TestPublish_MQTT_3_3_1_10 TestRetainedMessages
+MQTT-3.3.1-11	3.3.1.3 RETAIN	S	TESTED	met		TestPublish_MQTT_3_3_1_11
+MQTT-3.3.1-12	3.3.1.3 RETAIN	S	TESTED	met		TestPublish_MQTT_3_3_1_12_and_13 TestRetainAsPublished
+MQTT-3.3.1-13	3.3.1.3 RETAIN	S	TESTED	met		TestPublish_MQTT_3_3_1_12_and_13 TestRetainAsPublished
+MQTT-3.3.2-1	3.3.2.1 Topic Name	CS	TESTED	met		TestPublish_MQTT_3_3_2_1
+MQTT-3.3.2-2	3.3.2.1 Topic Name	CS	TESTED	met		TestPublish_MQTT_3_3_2_2
+MQTT-3.3.2-3	3.3.2.1 Topic Name	S	TESTED	met		TestPublish_MQTT_3_3_2_3
+MQTT-3.3.2-4	3.3.2.3.2 Payload Format Indicator	S	TESTED	met		TestPublish_MQTT_3_3_2_4_15_16_17_18_20 TestPropertiesSurviveTheRoundTrip
+MQTT-3.3.2-5	3.3.2.3.3 Message Expiry Interval`	S	TESTED	met		TestExpiryCatchUpDecrementsAndDeletes TestExpiryLivePathDecrementsAndDeletesWhileWaitingForSendQuota TestExpiryOfflineQueueReplayDecrementsAndDeletes TestExpiryResendCarriesTheRemainingIntervalAndDropsAnExpiredQoS1 TestExpiryRetainedMessagesCountFromStorage (+2 more)
+MQTT-3.3.2-6	3.3.2.3.3 Message Expiry Interval`	S	TESTED	met		TestExpiryCatchUpDecrementsAndDeletes TestExpiryLivePathDecrementsAndDeletesWhileWaitingForSendQuota TestExpiryOfflineQueueReplayDecrementsAndDeletes TestExpiryResendCarriesTheRemainingIntervalAndDropsAnExpiredQoS1 TestExpiryRetainedMessagesCountFromStorage (+2 more)
+MQTT-3.3.2-7	3.3.2.3.4 Topic Alias	CS	TESTED	met		TestPublish_MQTT_3_3_2_7
+MQTT-3.3.2-8	3.3.2.3.4 Topic Alias	CS	TESTED	met		TestPublish_MQTT_3_3_2_8
+MQTT-3.3.2-9	3.3.2.3.4 Topic Alias	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.3.2-10	3.3.2.3.4 Topic Alias	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.3.2-11	3.3.2.3.4 Topic Alias	S	TESTED	met		TestARetainedMessageServedToASubscriberCarriesNoTopicAlias
+MQTT-3.3.2-12	3.3.2.3.4 Topic Alias	S	TESTED	met		TestMQTT_3_1_2_24_ASuccessConnackFitsASmallMaximumPacketSize TestMQTT_3_3_2_12_ATopicAliasMaximumLeftOutOfTheConnackIsZero TestPublish_MQTT_3_3_2_12
+MQTT-3.3.2-13	3.3.2.3.5 Response Topic	CS	TESTED	met		TestPublish_MQTT_3_3_2_13_and_19
+MQTT-3.3.2-14	3.3.2.3.5 Response Topic	CS	TESTED	met		TestAResponseTopicWithWildcardsIsAProtocolError
+MQTT-3.3.2-15	3.3.2.3.5 Response Topic	S	TESTED	met		TestPublish_MQTT_3_3_2_4_15_16_17_18_20 TestAResponseTopicWithWildcardsIsAProtocolError
+MQTT-3.3.2-16	3.3.2.3.6 Correlation Data	S	TESTED	met		TestPublish_MQTT_3_3_2_4_15_16_17_18_20
+MQTT-3.3.2-17	3.3.2.3.7 User Property	S	TESTED	met		TestPublish_MQTT_3_3_2_4_15_16_17_18_20
+MQTT-3.3.2-18	3.3.2.3.7 User Property	S	TESTED	met		TestPublish_MQTT_3_3_2_4_15_16_17_18_20 TestPropertiesSurviveTheRoundTrip
+MQTT-3.3.2-19	3.3.2.3.9 Content Type	CS	TESTED	met		TestPublish_MQTT_3_3_2_13_and_19
+MQTT-3.3.2-20	3.3.2.3.9 Content Type	S	TESTED	met		TestPublish_MQTT_3_3_2_4_15_16_17_18_20
+MQTT-3.3.4-1	3.3.4 PUBLISH Actions	CS	TESTED	met		TestPublish_MQTT_3_3_4_1
+MQTT-3.3.4-2	3.3.4 PUBLISH Actions	S	TESTED	met		TestPublish_MQTT_3_3_4_2
+MQTT-3.3.4-3	3.3.4 PUBLISH Actions	S	TESTED	met		TestPublish_MQTT_3_3_4_3_and_5 TestSubscriptionIdentifierIsEchoed
+MQTT-3.3.4-4	3.3.4 PUBLISH Actions	S	NOT-APPLICABLE	n/a		vacuous: the broker never sends one merged copy of overlapping subscriptions; each copy carries its own identifier (3.3.4-3_and_5 shows exactly one id per copy) | tests: TestPublish_MQTT_3_3_4_3_and_5
+MQTT-3.3.4-5	3.3.4 PUBLISH Actions	S	TESTED	met		TestPublish_MQTT_3_3_4_3_and_5
+MQTT-3.3.4-6	3.3.4 PUBLISH Actions	CS	TESTED	met		TestAClientPublishWithASubscriptionIdentifierIsAProtocolError
+MQTT-3.3.4-7	3.3.4 PUBLISH Actions	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.3.4-8	3.3.4 PUBLISH Actions	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.3.4-9	3.3.4 PUBLISH Actions	S	TESTED	met		TestMQTT_3_3_4_9_AnAckThatOvertookAResendDoesNotFreeTheCopysSlot TestPublish_MQTT_3_3_4_9
+MQTT-3.3.4-10	3.3.4 PUBLISH Actions	S	TESTED	met		TestPublish_MQTT_3_3_4_10
+MQTT-3.4.2-1	3.4.2.1 PUBACK Reason Code	CS	TESTED	met		TestPuback_MQTT_3_4_2_1_and_Pubrec_MQTT_3_5_2_1
+MQTT-3.4.2-2	3.4.2.2.2 Reason String	CS	TESTED	met		TestPuback_MQTT_3_4_2_3 TestAnOversizePubackLosesItsReasonStringAndIsStillSent
+MQTT-3.4.2-3	3.4.2.2.3 User Property	CS	TESTED	met		TestPuback_MQTT_3_4_2_3
+MQTT-3.5.2-1	3.5.2.1 PUBREC Reason Code	CS	TESTED	met		TestPuback_MQTT_3_4_2_1_and_Pubrec_MQTT_3_5_2_1
+MQTT-3.5.2-2	3.5.2.2.2 Reason String	CS	TESTED	met		TestAnOversizePubrecLosesItsReasonStringAndIsStillSent
+MQTT-3.5.2-3	3.5.2.2.3 User Property	CS	TESTED	met		TestPubrec_MQTT_3_5_2_3
+MQTT-3.6.1-1	3.6.1 PUBREL Fixed Header	S	TESTED	met		TestConformance_MQTT_4_13_1_1_MalformedPacketsAndProtocolErrorsCloseTheConnection TestReservedFlags_MQTT_3_6_1_1_3_8_1_1_3_10_1_1
+MQTT-3.6.2-1	3.6.2.1 PUBREL Reason Code	CS	TESTED	met		TestPubrel_MQTT_3_6_2_1
+MQTT-3.6.2-2	3.6.2.2.2 Reason String	CS	TESTED	met		TestPubrel_MQTT_3_6_2_2_and_3
+MQTT-3.6.2-3	3.6.2.2.3 User Property	CS	TESTED	met		TestPubrel_MQTT_3_6_2_2_and_3
+MQTT-3.7.2-1	3.7.2.1 PUBCOMP Reason Code	CS	TESTED	met		TestPubcomp_MQTT_3_7_2_1
+MQTT-3.7.2-2	3.7.2.2.2 Reason String	CS	TESTED	met		TestPubcomp_MQTT_3_7_2_2_and_3
+MQTT-3.7.2-3	3.7.2.2.3 User Property	CS	TESTED	met		TestPubcomp_MQTT_3_7_2_2_and_3
+MQTT-3.8.1-1	3.8.1 SUBSCRIBE Fixed Header	S	TESTED	met		TestConformance_MQTT_4_13_1_1_MalformedPacketsAndProtocolErrorsCloseTheConnection TestReservedFlags_MQTT_3_6_1_1_3_8_1_1_3_10_1_1 TestSubscribeMatchesSpecExample
+MQTT-3.8.3-1	3.8.3 SUBSCRIBE Payload	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.8.3-2	3.8.3 SUBSCRIBE Payload	C	TESTED	met		TestConformance_MQTT_4_13_1_1_MalformedPacketsAndProtocolErrorsCloseTheConnection
+MQTT-3.8.3-3	3.8.3.1 Subscription Options	S	TESTED	met		TestSubscribe_MQTT_3_8_3_3 TestNoLocal
+MQTT-3.8.3-4	3.8.3.1 Subscription Options	C	TESTED	met		TestNoLocalOnASharedSubscriptionIsAProtocolErrorThatClosesTheConnection
+MQTT-3.8.3-5	3.8.3.1 Subscription Options	S	TESTED	met		TestSubscribe_MQTT_3_8_3_5
+MQTT-3.8.4-1	3.8.4 SUBSCRIBE Actions	S	TESTED	met		TestSubscribe_MQTT_3_8_4_1_and_2
+MQTT-3.8.4-2	3.8.4 SUBSCRIBE Actions	S	TESTED	met		TestSubscribe_MQTT_3_8_4_1_and_2
+MQTT-3.8.4-3	3.8.4 SUBSCRIBE Actions	S	TESTED	met		TestSubscribe_MQTT_3_8_4_3 TestSubscribe_MQTT_3_8_4_3_ReplacementOptionsGovern
+MQTT-3.8.4-4	3.8.4 SUBSCRIBE Actions	S	TESTED	met		TestSubscribe_MQTT_3_8_4_4 TestSubscribe_MQTT_3_8_4_4_SharedBacklogLosesNothing TestSubscribe_MQTT_3_8_4_4_SharedLoses_Nothing TestRetainedMessages
+MQTT-3.8.4-5	3.8.4 SUBSCRIBE Actions	S	TESTED	met		TestSubscribe_MQTT_3_8_4_5_and_6_and_Suback_MQTT_3_9_3_1_and_2
+MQTT-3.8.4-6	3.8.4 SUBSCRIBE Actions	S	TESTED	met		TestSubscribe_MQTT_3_8_4_5_and_6_and_Suback_MQTT_3_9_3_1_and_2
+MQTT-3.8.4-7	3.8.4 SUBSCRIBE Actions	S	TESTED	met		TestSubscribe_MQTT_3_8_4_7 TestSharedSubscriptionDowngradesQoS2
+MQTT-3.8.4-8	3.8.4 SUBSCRIBE Actions	S	TESTED	met		TestSubscribe_MQTT_3_8_4_3_ReplacementOptionsGovern TestSubscribe_MQTT_3_8_4_8 TestDeliveredQoSIsTheMinimumOfPublishedAndGranted
+MQTT-3.9.2-1	3.9.2.1.2 Reason String	S	TESTED	met		TestSuback_MQTT_3_9_2_1_and_2
+MQTT-3.9.2-2	3.9.2.1.3 User Property	S	TESTED	met		TestSuback_MQTT_3_9_2_1_and_2
+MQTT-3.9.3-1	3.9.3 SUBACK Payload	S	TESTED	met		TestSubscribe_MQTT_3_8_4_5_and_6_and_Suback_MQTT_3_9_3_1_and_2
+MQTT-3.9.3-2	3.9.3 SUBACK Payload	S	TESTED	met		TestSubscribe_MQTT_3_8_4_5_and_6_and_Suback_MQTT_3_9_3_1_and_2 TestNoLocalOnASharedSubscriptionIsAProtocolErrorThatClosesTheConnection
+MQTT-3.10.1-1	3.10.1 UNSUBSCRIBE Fixed Header	S	TESTED	met		TestConformance_MQTT_4_13_1_1_MalformedPacketsAndProtocolErrorsCloseTheConnection TestReservedFlags_MQTT_3_6_1_1_3_8_1_1_3_10_1_1
+MQTT-3.10.3-1	3.10.3 UNSUBSCRIBE Payload	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.10.3-2	3.10.3 UNSUBSCRIBE Payload	C	TESTED	met		TestConformance_MQTT_4_13_1_1_MalformedPacketsAndProtocolErrorsCloseTheConnection
+MQTT-3.10.4-1	3.10.4 UNSUBSCRIBE Actions	S	TESTED	met		TestUnsubscribe_MQTT_3_10_4_1
+MQTT-3.10.4-2	3.10.4 UNSUBSCRIBE Actions	S	TESTED	met		TestUnsubscribe_MQTT_3_10_4_2
+MQTT-3.10.4-3	3.10.4 UNSUBSCRIBE Actions	S	TESTED	met		TestUnsubscribe_MQTT_3_10_4_3
+MQTT-3.10.4-4	3.10.4 UNSUBSCRIBE Actions	S	TESTED	met		TestUnsubscribe_MQTT_3_10_4_4_and_5
+MQTT-3.10.4-5	3.10.4 UNSUBSCRIBE Actions	S	TESTED	met		TestUnsubscribe_MQTT_3_10_4_4_and_5
+MQTT-3.10.4-6	3.10.4 UNSUBSCRIBE Actions	S	TESTED	met		TestUnsubscribe_MQTT_3_10_4_6
+MQTT-3.11.2-1	3.11.2.1.2 Reason String	S	TESTED	met		TestConformance_MQTT_3_11_2_1_UnsubackOmitsReasonStringBeyondMaximumPacketSize TestUnsuback_MQTT_3_11_2_1
+MQTT-3.11.2-2	3.11.2.1.3 User Property	S	TESTED	met		TestConformance_MQTT_3_11_2_2_UnsubackOmitsUserPropertyBeyondMaximumPacketSize
+MQTT-3.11.3-1	3.11.3 UNSUBACK Payload	S	TESTED	met		TestConformance_MQTT_3_11_3_1_UnsubackCodesFollowTheFilterOrder
+MQTT-3.11.3-2	3.11.3 UNSUBACK Payload	S	TESTED	met		TestConformance_MQTT_3_11_3_2_UnsubackUsesOnlyUnsubscribeReasonCodes
+MQTT-3.12.4-1	3.12.4 PINGREQ Actions	S	TESTED	met		TestConformance_MQTT_3_12_4_1_PingreqIsAnsweredWithPingresp
+MQTT-3.14.0-1	3.14 DISCONNECT – Disconnect notification	S	TESTED	met		TestConformance_MQTT_3_14_0_1_NoDisconnectBeforeASuccessfulConnack
+MQTT-3.14.1-1	3.14.1 DISCONNECT Fixed Header	CS	TESTED	met		TestConformance_MQTT_3_14_1_1_DisconnectWithReservedBitsIsMalformed
+MQTT-3.14.2-1	3.14.2.1 Disconnect Reason Code	CS	TESTED	met		TestConformance_MQTT_3_14_2_ServerDisconnectsUseDisconnectCodesAndNoSessionExpiry
+MQTT-3.14.2-2	3.14.2.2.2 Session Expiry Interval	S	TESTED	met		TestConformance_MQTT_3_14_2_ServerDisconnectsUseDisconnectCodesAndNoSessionExpiry
+MQTT-3.14.2-3	3.14.2.2.3 Reason String	CS	TESTED	met		TestAnOversizeDisconnectLosesItsReasonStringAndIsStillSent
+MQTT-3.14.2-4	3.14.2.2.4 User Property	CS	TESTED	met		TestConformance_MQTT_3_14_2_4_DisconnectOmitsUserPropertyBeyondMaximumPacketSize
+MQTT-3.14.4-1	3.14.4 DISCONNECT Actions	CS	TESTED	met		TestNothingFollowsAServerDisconnectOnTheWire
+MQTT-3.14.4-2	3.14.4 DISCONNECT Actions	CS	TESTED	met		TestConformance_MQTT_3_14_2_ServerDisconnectsUseDisconnectCodesAndNoSessionExpiry
+MQTT-3.14.4-3	3.14.4 DISCONNECT Actions	S	TESTED	met		TestConformance_MQTT_3_14_4_3_NormalDisconnectDiscardsTheWill TestAnOversizeDisconnectLosesItsReasonStringAndIsStillSent TestNothingFollowsAServerDisconnectOnTheWire
+MQTT-3.15.1-1	3.15.1 AUTH Fixed Header	CS	TESTED	met		TestConformance_MQTT_3_15_1_1_AuthWithReservedBitsClosesTheConnection
+MQTT-3.15.2-1	3.15.2.1 Authenticate Reason Code	CS	NOT-APPLICABLE	n/a	Enhanced authentication (AUTH packets)	enhanced authentication is refused (0x8C); the broker never sends an AUTH packet
+MQTT-3.15.2-2	3.15.2.2.4 Reason String	CS	NOT-APPLICABLE	n/a	Enhanced authentication (AUTH packets)	enhanced authentication is refused; the broker never sends an AUTH packet
+MQTT-3.15.2-3	3.15.2.2.5 User Property	CS	NOT-APPLICABLE	n/a	Enhanced authentication (AUTH packets)	enhanced authentication is refused; the broker never sends an AUTH packet
+MQTT-4.1.0-1	4.1.1 Storing Session State	CS	TESTED	met		TestConformance_MQTT_4_1_0_1_SessionStateSurvivesWhileConnected TestConformance_MQTT_4_2_1_TCPCarriesAnOrderedLosslessStream
+MQTT-4.1.0-2	4.1.1 Storing Session State	S	TESTED	met		TestConformance_MQTT_4_1_0_2_AnExpiredSharedMemberStopsReceivingItsShare TestConformance_MQTT_4_1_0_2_SessionStateIsDiscardedWhenTheExpiryIntervalPasses TestAnExpiredSharedMemberComesBackWithoutASession
+MQTT-4.2.0-1	§4.2.0 (label appears only in Appendix B)	CS	TESTED	met		TestConformance_MQTT_4_1_0_1_SessionStateSurvivesWhileConnected TestConformance_MQTT_4_2_1_TCPCarriesAnOrderedLosslessStream
+MQTT-4.2-1	4.2 Network Connections	CS	TESTED	met		TestConformance_MQTT_4_2_1_TCPCarriesAnOrderedLosslessStream
+MQTT-4.3.1-1	4.3.1 QoS 0: At most once delivery	CS	TESTED	met		TestConformance_MQTT_4_3_1_1_QoS0DeliveryHasDupZero
+MQTT-4.3.2-1	4.3.2 QoS 1: At least once delivery	CS	TESTED	met		TestConformance_MQTT_4_3_2_1_QoS1DeliveriesGetUnusedIdentifiersAndDupZero
+MQTT-4.3.2-2	4.3.2 QoS 1: At least once delivery	CS	TESTED	met		TestConformance_MQTT_4_3_2_1_QoS1DeliveriesGetUnusedIdentifiersAndDupZero TestDurablePublishQoS1AckMeansStoredAndDeliveredOnce
+MQTT-4.3.2-3	4.3.2 QoS 1: At least once delivery	CS	TESTED	met		TestConformance_MQTT_4_3_2_3_QoS1StaysUnacknowledgedUntilPuback
+MQTT-4.3.2-4	4.3.2 QoS 1: At least once delivery	CS	TESTED	met		TestConformance_MQTT_4_3_2_4_QoS1IsAcknowledgedAndAReusedIdentifierIsANewMessage
+MQTT-4.3.2-5	4.3.2 QoS 1: At least once delivery	CS	TESTED	met		TestConformance_MQTT_4_3_2_4_QoS1IsAcknowledgedAndAReusedIdentifierIsANewMessage
+MQTT-4.3.3-1	4.3.3 QoS 2: Exactly once delivery	CS	TESTED	met		TestConformance_MQTT_4_3_3_1_QoS2DeliveriesGetUnusedIdentifiers
+MQTT-4.3.3-2	4.3.3 QoS 2: Exactly once delivery	CS	TESTED	met		TestConformance_MQTT_4_3_3_2_QoS2SenderSequence TestALateCopyBelowTheDeliveredWindowIsNotNoted TestDurablePublishQoS2RecIsAcknowledgedAfterStorageAndDeliveredOnce
+MQTT-4.3.3-3	4.3.3 QoS 2: Exactly once delivery	CS	TESTED	met		TestConformance_MQTT_4_3_3_3_QoS2StaysUnacknowledgedUntilPubrec
+MQTT-4.3.3-4	4.3.3 QoS 2: Exactly once delivery	CS	TESTED	met		TestConformance_MQTT_4_3_3_2_QoS2SenderSequence
+MQTT-4.3.3-5	4.3.3 QoS 2: Exactly once delivery	CS	TESTED	met		TestConformance_MQTT_4_3_3_5_PubrelStaysUnacknowledgedUntilPubcomp
+MQTT-4.3.3-6	4.3.3 QoS 2: Exactly once delivery	CS	TESTED	met		TestConformance_MQTT_4_3_3_2_QoS2SenderSequence TestAKilledBrokersQoS2MessageAfterPubrelIsNotPublishedAgain TestAKilledBrokersQoS2MessageCompletedJustBeforeTheKillIsNotDeliveredAgain TestAReplayDoesNotRepeatAQoS2MessageThatWasPastPubrec
+MQTT-4.3.3-7	4.3.3 QoS 2: Exactly once delivery	CS	TESTED	met		TestExpiryDoesNotDropAQoS2PublishThatWasAlreadySent
+MQTT-4.3.3-8	4.3.3 QoS 2: Exactly once delivery	CS	TESTED	met		TestAWithdrawnFilterStillOwesItsPubrel TestMQTT4_4_0_1_QoS2PubrelIsResentByAnotherBroker TestUnacknowledgedPubrelIsResentOnResume
+MQTT-4.3.3-9	4.3.3 QoS 2: Exactly once delivery	CS	TESTED	met		TestConformance_MQTT_4_3_3_9_AnIdentifierRefusedWithAnErrorPubrecIsFreeAgain
+MQTT-4.3.3-10	4.3.3 QoS 2: Exactly once delivery	CS	TESTED	met		TestConformance_MQTT_4_3_3_10_AResentQoS2PublishIsAcknowledgedAndForwardedOnce TestAKilledBrokersReceivedQoS2MessageIsNotForwardedAgainOnAResend TestAReceivedQoS2IdentifierIsStoredOnlyOnceItsMessageIsForwarded TestMQTT4_3_3_10_ResentInboundQoS2IsForwardedOnceAcrossBrokers
+MQTT-4.3.3-11	4.3.3 QoS 2: Exactly once delivery	CS	TESTED	met		TestConformance_MQTT_4_3_3_11_PubrelIsAnsweredWithPubcompAndTheIdentifierIsFreed
+MQTT-4.3.3-12	4.3.3 QoS 2: Exactly once delivery	CS	TESTED	met		TestConformance_MQTT_4_3_3_11_PubrelIsAnsweredWithPubcompAndTheIdentifierIsFreed TestAKilledBrokersCompletedQoS2IdentifierIsANewMessageAgain
+MQTT-4.3.3-13	4.3.3 QoS 2: Exactly once delivery	CS	TESTED	met		TestConformance_MQTT_4_3_3_13_AnExpiredQoS2MessageStillCompletesItsHandshake
+MQTT-4.4.0-1	4.4 Message delivery retry	CS	TESTED	met		TestAWithdrawnIdentifierOnlyAcceptsTheAcknowledgementItIsOwed_MQTT_4_4_0_1 TestAWithdrawnIdentifierSurvivesABrokerRestart_MQTT_4_4_0_1_MQTT_2_2_1_4 TestAnAckThatLandsWhileAResendIsBeingWrittenDoesNotDisconnectTheClient_MQTT_4_4_0_1 TestAConnectionDroppedDuringTheResumeReplayStillGetsTheRest TestADisplacedConnectionsAckOfAResentMessageDoesNotCostItsSuccessor (+43 more)
+MQTT-4.4.0-2	4.4 Message delivery retry	CS	TESTED	met		TestARefusedMessageIsNotResent
+MQTT-4.5.0-1	4.5 Message receipt	S	TESTED	met		TestADisconnectedSharedMemberStopsTakingWork TestAKilledBrokersBehindClientGetsWhatItHadNotAcknowledged TestAKilledBrokersClientIsNotSentWhatItAlreadyGotAgain TestASessionRecordWithoutTheReplayPositionIsResumedFromItsReleaseTime TestTheOfflineQueueIsOnByDefault
+MQTT-4.5.0-2	4.5 Message receipt	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-4.6.0-1	4.6 Message ordering	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-4.6.0-2	4.6 Message ordering	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-4.6.0-3	4.6 Message ordering	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-4.6.0-4	4.6 Message ordering	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-4.6.0-5	4.6 Message ordering	S	TESTED	met		TestARecordTooLargeForAValueKeepsTheOldestInflightMessages TestArrearsComeBeforeMessagesPublishedSince TestResendsKeepTheOriginalOrder TestUnacknowledgedReturnsTheOrderMessagesWereSentIn TestWithdrawnFilterTakesItsUnacknowledgedMessagesWithIt (+1 more)
+MQTT-4.6.0-6	4.6 Message ordering	S	TESTED	met		TestAClientThatFallsBehindLosesNothing TestCatchingUpWithSeveralPublishersDeliversEachOnce TestResendsKeepTheOriginalOrder
+MQTT-4.7.0-1	4.7.1 Topic wildcards	CS	TESTED	met		TestConformance_MQTT_4_7_0_1_WildcardsAreRefusedInATopicName
+MQTT-4.7.1-1	4.7.1.2 Multi-level wildcard	CS	TESTED	met		TestConformance_MQTT_4_7_1_1_MultiLevelWildcardPlacement
+MQTT-4.7.1-2	4.7.1.3 Single-level wildcard	CS	TESTED	met		TestConformance_MQTT_4_7_1_2_SingleLevelWildcardPlacement
+MQTT-4.7.2-1	4.7.2 Topics beginning with $	S	TESTED	met		TestConformance_MQTT_4_7_2_1_PlusDoesNotMatchADollarTopic TestPublish_MQTT_3_3_2_3 TestRestrictedBrokerRefusesSubscriptionsOnDollarTopics_MQTT_5_0_4_7_2 TestMatchUsesSpecExamples TestWildcardDoesNotMatchDollarTopics
+MQTT-4.7.3-1	4.7.3 Topic semantic and usage	CS	TESTED	met		TestConformance_MQTT_4_7_3_1_EmptyTopicsAreRefused
+MQTT-4.7.3-2	4.7.3 Topic semantic and usage	CS	TESTED	met		TestConformance_MQTT_4_7_3_2_NullCharacterIsRefused
+MQTT-4.7.3-3	4.7.3 Topic semantic and usage	CS	NOT-APPLICABLE	n/a		"MUST NOT encode to more than 65,535 bytes" cannot be violated by a request: the UTF-8 length prefix is two bytes, so a longer string is unrepresentable on the wire
+MQTT-4.7.3-4	4.7.3 Topic semantic and usage	S	TESTED	met		TestConformance_MQTT_4_7_3_4_TopicsAreMatchedByteForByte
+MQTT-4.8.2-1	4.8.2 Shared Subscriptions	CS	TESTED	met		TestConformance_MQTT_4_8_2_1_SharedSubscriptionFilterSyntax TestSplitShared
+MQTT-4.8.2-2	4.8.2 Shared Subscriptions	CS	TESTED	met		TestConformance_MQTT_4_8_2_1_SharedSubscriptionFilterSyntax TestSplitShared
+MQTT-4.8.2-3	4.8.2 Shared Subscriptions	S	TESTED	met		TestConformance_MQTT_4_8_2_3_DeliveryRespectsTheGrantedQoS
+MQTT-4.8.2-4	4.8.2 Shared Subscriptions	S	NOT-APPLICABLE	n/a	QoS 2 on shared subscriptions	vacuous: shared subscriptions are granted at most QoS 1, so no QoS 2 delivery to a shared member exists (premise pinned by TestConformance_MQTT_4_8_2_4_SharedSubscriptionsAreGrantedAtMostQoS1). Revisit if shared QoS 2 is ever granted | tests: TestConformance_MQTT_4_8_2_4_SharedSubscriptionsAreGrantedAtMostQoS1
+MQTT-4.8.2-5	4.8.2 Shared Subscriptions	S	NOT-APPLICABLE	n/a		vacuous, same reason as 4.8.2-4 | tests: TestConformance_MQTT_4_8_2_4_SharedSubscriptionsAreGrantedAtMostQoS1
+MQTT-4.8.2-6	4.8.2 Shared Subscriptions	S	TESTED	met		TestAnAcknowledgedSharedMessageIsNotHandedBack
+MQTT-4.9.0-1	4.9 Flow Control	CS	TESTED	met		TestConformance_MQTT_4_9_0_1_InitialSendQuotaIsNonZeroAndWithinReceiveMaximum
+MQTT-4.9.0-2	4.9 Flow Control	CS	TESTED	met		TestResendsRespectASmallerReceiveMaximum
+MQTT-4.9.0-3	4.9 Flow Control	CS	TESTED	met		TestConformance_MQTT_4_9_0_3_PacketsAreStillProcessedWhileTheQuotaIsZero
+MQTT-4.12.0-1	4.12 Enhanced authentication	S	TESTED	met		TestConformance_MQTT_4_12_0_1_AnUnsupportedAuthenticationMethodIsRefusedAndClosed
+MQTT-4.12.0-2	4.12 Enhanced authentication	S	NOT-APPLICABLE	n/a	Enhanced authentication (AUTH packets)	enhanced authentication is not offered; the broker never sends AUTH 0x18
+MQTT-4.12.0-3	4.12 Enhanced authentication	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-4.12.0-4	4.12 Enhanced authentication	S	TESTED	met		TestConformance_MQTT_4_12_0_1_AnUnsupportedAuthenticationMethodIsRefusedAndClosed
+MQTT-4.12.0-5	4.12 Enhanced authentication	CS	NOT-APPLICABLE	n/a	Enhanced authentication (AUTH packets)	enhanced authentication is not offered; no successful CONNACK can carry an Authentication Method
+MQTT-4.12.0-6	4.12 Enhanced authentication	S	TESTED	met		TestConformance_MQTT_4_12_0_6_NoAuthPacketOrMethodWithoutAnAuthenticationMethod
+MQTT-4.12.0-7	4.12 Enhanced authentication	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-4.12.1-1	4.12.1 Re-authentication	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-4.12.1-2	4.12.1 Re-authentication	CS	NOT-APPLICABLE	n/a	Enhanced authentication (AUTH packets)	re-authentication is not offered
+MQTT-4.13.1-1	4.13.1 Malformed Packet and Protocol Errors	S	TESTED	met		TestConformance_MQTT_4_13_1_1_MalformedPacketsAndProtocolErrorsCloseTheConnection TestAClientPublishWithASubscriptionIdentifierIsAProtocolError TestAResponseTopicWithWildcardsIsAProtocolError TestAWillWithAResponseTopicWithWildcardsIsRefusedAtConnect TestNoLocalOnASharedSubscriptionIsAProtocolErrorThatClosesTheConnection
+MQTT-4.13.2-1	4.13.2 Other errors	CS	TESTED	met		TestConformance_MQTT_4_13_2_1_AnErrorReasonCodeAlwaysClosesTheConnection
+MQTT-6.0.0-1	6 Using WebSocket as a network transport	CS	NOT-APPLICABLE	n/a	WebSocket transport	no WebSocket transport (TestConformance_MQTT_6_0_0_NoWebSocketIsOffered shows the TCP listener does not upgrade) | tests: TestConformance_MQTT_6_0_0_NoWebSocketIsOffered
+MQTT-6.0.0-2	6 Using WebSocket as a network transport	CS	NOT-APPLICABLE	n/a	WebSocket transport	no WebSocket transport | tests: TestConformance_MQTT_6_0_0_NoWebSocketIsOffered
+MQTT-6.0.0-3	6 Using WebSocket as a network transport	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-6.0.0-4	6 Using WebSocket as a network transport	S	NOT-APPLICABLE	n/a	WebSocket transport	no WebSocket transport | tests: TestConformance_MQTT_6_0_0_NoWebSocketIsOffered

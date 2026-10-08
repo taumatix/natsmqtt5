@@ -5,7 +5,12 @@ statements a conforming client hits in normal use, then MUSTs on rare or optiona
 SHOULDs, then features the spec defines that the broker does not offer. Operational work that is
 not about conformance comes last. The order comes from the statement-by-statement review in
 `CONFORMANCE.md`; re-run it when the code or the spec has moved a lot. Each entry says what breaks
-today and cites the statements it violates.
+today and cites the statements it touches.
+
+**No known MUST violation is open.** The table in `conformance/mqtt5-statements.tsv` has no VIOLATED
+or UNSURE row (a test enforces it). Tiers 1 and 2 are windows inside MUSTs the table counts as met:
+each needs a particular failure (a broker killed at one instant, a payload near `max_payload`) and
+names it. Entries are checked against the code each time the review is re-run (last: 2026-10-09).
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
@@ -25,8 +30,11 @@ covers the Packet Identifier, so it is usually one session's alone). Test with a
 
 **Today:** `TestARecordTooLargeForAValueKeepsTheOldestInflightMessages` (`restore_inflight_test.go`) and
 `TestExpiryReplayOnARestoredSessionHonoursTheQueueTimestamp` (`expiry_test.go`) sleep 200 ms after a drop or
-a publish before stopping the first broker, so the detach and the queue write have happened. The live-copy
-sleeps are gone (`awaitLiveCopies`, backed by a test-only counter). A slow runner here fails the test, not
+a publish before stopping the first broker, so the detach and the queue write have happened. So do the
+drops in `withdrawn_restart_test.go` before it stops a broker, the delay in
+`TestALiveCopyThatRacesTheConnectionsEndIsNeverLost` (`late_live_copy_delay_test.go`) and
+`TestSmokeSessionMovesBetweenBrokers` (`smoke_test.go`). The live-copy sleeps elsewhere are gone
+(`awaitLiveCopies`, backed by a test-only counter). A slow runner here fails the test, not
 passes it wrongly, so this is flake risk and not a hidden gap.
 
 **Shape:** wait on `waitDetached` and on the publisher's PUBACK instead of the clock.
@@ -134,6 +142,23 @@ entry per member session, the consumer deleted by whoever leaves last). What rem
   again, on its first failed pull (up to `sharedPullWait` later). A message published in that window
   is not in the new consumer, which starts at the next message.
 
+## A client that exceeds the broker's Receive Maximum is not disconnected
+
+**Today:** the broker advertises a Receive Maximum and a client that sends more unacknowledged QoS 1 or
+2 PUBLISH packets than that is simply served; the DISCONNECT with `0x93 Receive Maximum exceeded` the
+spec describes (§3.3.4, §4.9) is never sent. The statement that binds the client
+([MQTT-3.3.4-7]) is CLIENT-ONLY in the table, so nothing is violated; it is a missing courtesy that
+lets a runaway client hold unbounded state. **Shape:** count the inbound unacknowledged identifiers per
+connection and close with 0x93 past the limit.
+
+## Close after a cancelled Serve context can skip the 0x8B DISCONNECT
+
+**Today:** `Broker.Close` following a cancelled `Serve` context can close a connected client without
+the `0x8B Server shutting down` DISCONNECT (a race between `conn.serve` and `Broker.drainConns`,
+`broker.go`). The client sees a TCP close, which the spec allows; the courtesy is sometimes missing.
+**Shape:** make `drainConns` send the DISCONNECT under the connection's write lock whatever state
+the serve loop is in, and test it without a sleep.
+
 ## Restricting `$` topics by default
 
 `Options.RestrictDollarTopics` (opt in) refuses every `$` topic but
@@ -207,12 +232,12 @@ consumer G" but has no concept of "unacked by member B".
 ownership, a private per-member copy of the message, and cleanup for every way
 the exchange can end — unsubscribe, disconnect, session expiry, takeover.
 
-The shared backlog changed this: a member now takes a message off the group's
-consumer and the message becomes that session's in-flight state, exactly the
-handover described above. What QoS 2 still needs is that state surviving a
-broker restart, which the session record now carries for QoS 1 and 2 on a non-shared subscription;
-the shared subscription's own in-flight messages are the entry "In-flight messages with no queue
-copy are not restored".
+The shared backlog changed this: a member takes a message off the group's consumer
+and the message becomes that session's in-flight state, exactly the handover
+described above, and QoS 1 is held in JetStream until its PUBACK (`held.go`). What
+QoS 2 still needs is that state surviving a broker restart and a takeover, which
+the session record carries for QoS 1 and 2 on a non-shared subscription but not
+yet for a message a shared member holds.
 
 ## WebSocket transport
 
@@ -224,7 +249,7 @@ many hosted deployments need.
 
 ## Escaping `*` and `>` in topics
 
-**Today:** a topic containing `*` or `>` is refused with
+**Today:** a topic containing `*`, `>` or whitespace (MQTT 5 §4.7.3 allows the space character) is refused with
 `0x90 Topic Name invalid`, because the `nats-server` subject mapping does not
 escape them and letting them through turns an MQTT subscription into a NATS
 wildcard.
