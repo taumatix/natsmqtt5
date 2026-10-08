@@ -27,3 +27,15 @@ func InflightCount(b *Broker, clientID string) int {
 	defer s.mu.Unlock()
 	return len(s.inflight)
 }
+
+// SetNextPacketID makes the next Packet Identifier the session for clientID
+// allocates the one after id. It stands in for the 65535 allocations it would
+// take to come round to an identifier again.
+func SetNextPacketID(b *Broker, clientID string, id uint16) {
+	b.mu.Lock()
+	s := b.sessions[clientID]
+	b.mu.Unlock()
+	s.mu.Lock()
+	s.nextPacketID = id
+	s.mu.Unlock()
+}
