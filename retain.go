@@ -258,11 +258,18 @@ func (s *retainedStore) store(ctx context.Context, subject, originClientID strin
 		delete(s.byTopic, name)
 		return nil
 	}
+	// The properties are read back from the message just written, not taken from
+	// the PUBLISH: this copy must equal the one the stream consumer builds from
+	// the same message, which carries only what toNATS keeps. A Topic Alias is a
+	// mapping on the publisher's connection and means nothing on another, so it
+	// is not part of a retained message [MQTT-3.1.2-26], [MQTT-3.1.2-27],
+	// [MQTT-3.3.2-11].
+	_, _, _, props := fromNATS(msg)
 	s.byTopic[name] = &retained{
 		topicName: name,
 		payload:   p.Payload,
 		qos:       p.QoS,
-		props:     p.Properties,
+		props:     props,
 		stored:    time.Now(),
 		seq:       ack.Sequence,
 	}

@@ -13,6 +13,12 @@ honestly be reconstructed now.
 
 ### Fixed
 
+- **A retained message no longer carries its publisher's Topic Alias.** A subscriber on the same
+  broker could be sent the alias the publisher used, which means nothing on its connection and is
+  not allowed when the subscriber advertised no Topic Alias Maximum [MQTT-3.1.2-26],
+  [MQTT-3.1.2-27], [MQTT-3.3.2-11]. It showed up in about one run in four, depending on whether the
+  broker's own copy or the one read back from the stream was served.
+
 - **A session restored from the session store resends what it had in flight.** With
   `PersistentSessions`, a session resumed after a restart or on another broker used to come back
   with nothing unacknowledged, so those messages were lost, and a QoS 2 PUBLISH the client resent

@@ -58,16 +58,6 @@ identifier, expiry, a denied filter, no queue, and a record cut for size. Not dr
 that has aged out (`OfflineQueueMaxAge`) between the release and the resume, which is logged and
 the message dropped, and a filter unsubscribed before the release whose message is still owed.
 
-## A retained message keeps its publisher's Topic Alias
-
-**Today:** the broker's in-memory copy of a retained message keeps the Topic Alias property the
-publisher sent (`retain.go`), and a subscriber on the same broker can receive it, an alias that
-means nothing on its connection. 1 in 4 probe runs. [MQTT-3.1.2-26], [MQTT-3.1.2-27],
-[MQTT-3.3.2-11].
-
-**Shape:** strip the Topic Alias when storing, as the publish path does for live messages. Size
-S.
-
 # Tier 2: MUST statements on rare or optional paths
 
 ## A packet over the client's Maximum Packet Size is dropped whole

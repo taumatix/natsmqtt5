@@ -38,8 +38,8 @@ MQTT-3.1.2-22	3.1.2.10 Keep Alive	S	CITED-TESTED			broker_test.go:466 conn.go:13
 MQTT-3.1.2-23	3.1.2.11.2 Session Expiry Interval	CS	CITED-TESTED	b	Offline message queue: what it still loses	Pending QoS 1/2 messages are kept by the offline queue, on by default with JetStream since Unreleased (TestTheOfflineQueueIsOnByDefault). Still violated at the boundary of a restored replay; deliberately so with DisableOfflineQueue or without JetStream.
 MQTT-3.1.2-24	3.1.2.11.4 Maximum Packet Size	S	CITED-CODE			conn.go:387
 MQTT-3.1.2-25	3.1.2.11.4 Maximum Packet Size	S	CITED-TESTED			retransmit_test.go:368 conn.go:360 conn.go:372
-MQTT-3.1.2-26	3.1.2.11.5 Topic Alias Maximum	S	UNCITED	b		The local retained map stores the publisher's Properties, TopicAlias included (retain.go:240-245), and serves them until the stream consumer overwrites the entry (retain.go:177-201). A subscriber on the same broker in that window receives the publisher's Topic Alias (probe: reproduced 1 run in 3).
-MQTT-3.1.2-27	3.1.2.11.5 Topic Alias Maximum	S	UNCITED	b		As 3.1.2-26: a client that advertised no Topic Alias Maximum can be sent one.
+MQTT-3.1.2-26	3.1.2.11.5 Topic Alias Maximum	S	CITED-TESTED	fixed unreleased		retain.go retained_alias_test.go:TestARetainedMessageServedToASubscriberCarriesNoTopicAlias
+MQTT-3.1.2-27	3.1.2.11.5 Topic Alias Maximum	S	CITED-TESTED	fixed unreleased		retain.go retained_alias_test.go:TestARetainedMessageServedToASubscriberCarriesNoTopicAlias
 MQTT-3.1.2-28	3.1.2.11.6 Request Response Information	S	UNCITED	a		Response Information is never sent (handshake.go:538-566).
 MQTT-3.1.2-29	3.1.2.11.7 Request Problem Information	S	CITED-CODE			conn.go:414 conn.go:68
 MQTT-3.1.2-30	3.1.2.11.9 Authentication Method	C	CLIENT-ONLY (UNCITED)			
@@ -108,7 +108,7 @@ MQTT-3.3.2-7	3.3.2.3.4 Topic Alias	CS	CITED-CODE			conn.go:72
 MQTT-3.3.2-8	3.3.2.3.4 Topic Alias	CS	CITED-CODE			packet/properties.go:329
 MQTT-3.3.2-9	3.3.2.3.4 Topic Alias	C	CLIENT-ONLY (UNCITED)			
 MQTT-3.3.2-10	3.3.2.3.4 Topic Alias	C	CLIENT-ONLY (UNCITED)			
-MQTT-3.3.2-11	3.3.2.3.4 Topic Alias	S	UNCITED	b		As 3.1.2-26.
+MQTT-3.3.2-11	3.3.2.3.4 Topic Alias	S	CITED-TESTED	fixed unreleased		retain.go retained_alias_test.go:TestARetainedMessageServedToASubscriberCarriesNoTopicAlias
 MQTT-3.3.2-12	3.3.2.3.4 Topic Alias	S	CITED-CODE			publish.go:113
 MQTT-3.3.2-13	3.3.2.3.5 Response Topic	CS	UNCITED	a		Decoder validates Response Topic as UTF-8.
 MQTT-3.3.2-14	3.3.2.3.5 Response Topic	CS	UNCITED	b		A client-supplied Response Topic with wildcards is accepted and forwarded unchecked (message.go:140-142); low impact.
