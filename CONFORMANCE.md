@@ -113,6 +113,14 @@ conforming client hits in ordinary use:
 - **Fixed, unreleased.** A Reason Code returned by an `Authenticator` was sent in the CONNACK
   whatever it was, so a success or a DISCONNECT-only code could reach the wire. A code Table 3-1
   does not list for a CONNACK is now logged and sent as 0x80. [MQTT-3.2.2-8].
+- **Deviation from a SHOULD, by default.** MQTT 5.0 §4.7.2: "The Server SHOULD prevent Clients from
+  using such Topic Names to exchange messages with other Clients" (no statement id). The broker
+  refuses only the two levels its own data lives under (`$retained`, `$queue`) unless
+  `RestrictDollarTopics` is set, because refusing every `$` topic would break applications using
+  `$app/...` today. With the option, a PUBLISH or Will on a `$` Topic Name is refused with 0x90
+  and a subscription to a `$` Topic Filter with 0x8F; `$share/...` is allowed unless the filter
+  inside it starts with `$`. A subscription a persistent session stored before the option was
+  turned on is resumed. Proven by `dollar_topics_test.go`.
 
 Features the specification defines and the broker does not offer (enhanced AUTH, server-to-client
 topic aliases, WebSocket, QoS 2 on shared subscriptions) are refused or left unadvertised the way

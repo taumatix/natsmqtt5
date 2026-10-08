@@ -410,6 +410,16 @@ What it costs and what it does not cover:
   Code to carry the refusal, so the dropped filters are logged and the client
   still sees `SessionPresent: true`; it finds out by not receiving. The
   unacknowledged messages a dropped filter earned go with it.
+- **Clients may use `$` topics unless you restrict them.** MQTT 5.0 §4.7.2 says
+  a server SHOULD prevent clients exchanging messages on topics starting with
+  `$`. By default only `$retained` and `$queue`, where the broker keeps its own
+  data, are refused, so applications using `$app/...` keep working. Set
+  `Options.RestrictDollarTopics`, or `-restrict-dollar-topics` /
+  `NATSMQTT5_RESTRICT_DOLLAR_TOPICS=true`, and a PUBLISH or Will on a `$` topic
+  is refused with Topic Name invalid (0x90) and a subscription to one with Topic
+  Filter invalid (0x8F). `$share/...` stays allowed unless the filter inside it
+  starts with `$`. A subscription a persistent session stored earlier is still
+  resumed.
 - **The Will Message of a killed broker is published only with `-durable-wills`.**
   Without it a Will belongs to the connection in memory, as before: a broker
   that shuts down cleanly publishes its clients' Wills, one killed outright does

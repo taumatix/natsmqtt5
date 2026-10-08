@@ -546,6 +546,11 @@ func (c *conn) checkWill(cp *packet.Connect) error {
 		c.refuse(packet.TopicNameInvalid, err.Error())
 		return fmt.Errorf("will topic %q: %w", cp.Will.Topic, err)
 	}
+	if c.broker.opts.RestrictDollarTopics && dollarName(cp.Will.Topic) {
+		// The Will is published as an ordinary PUBLISH later, MQTT-5.0 §4.7.2.
+		c.refuse(packet.TopicNameInvalid, "a Will may not target a topic starting with $")
+		return fmt.Errorf("will topic %q starts with $", cp.Will.Topic)
+	}
 	return nil
 }
 

@@ -133,6 +133,18 @@ type Options struct {
 	// Defaults to 1.
 	SessionReplicas int
 
+	// RestrictDollarTopics follows MQTT-5.0 §4.7.2's "The Server SHOULD
+	// prevent Clients from using such Topic Names to exchange messages with
+	// other Clients" for every Topic Name and Topic Filter that starts with
+	// "$": a PUBLISH or Will to one is refused with Topic Name invalid (0x90),
+	// and a subscription to one with Topic Filter invalid (0x8F). A Shared
+	// Subscription ($share/…) is allowed unless the Topic Filter inside it
+	// starts with "$". Off by default, which leaves "$app/…" and the like usable
+	// as before; "$retained" and "$queue", where the broker keeps its own data,
+	// are refused either way. It does not apply to a subscription a persistent
+	// session already stored.
+	RestrictDollarTopics bool
+
 	// DurableWills keeps the Will Message of every open connection in a
 	// JetStream key-value bucket, so that the Will of a broker that is killed
 	// outright is still published: a surviving broker notices the owner has
