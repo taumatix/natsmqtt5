@@ -39,6 +39,12 @@ type Broker struct {
 	// entry and writing it. It is a seam for tests; see export_test.go.
 	resendGate atomic.Pointer[func(id uint16)]
 
+	// onSessionExpired, when set, is called after the sweep has expired a
+	// detached session, with the subscriptions it held (already torn down). It
+	// is the seam for handing a shared member's unacknowledged messages back to
+	// its group, which is a later change; see ROADMAP.md.
+	onSessionExpired atomic.Pointer[func(s *session, subs []*subscription)]
+
 	mu       sync.Mutex
 	sessions map[string]*session
 	// queue holds QoS 1 and 2 messages for disconnected sessions, when
@@ -159,6 +165,8 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 		b.closeNATS()
 		return nil, err
 	}
+	b.wg.Add(1)
+	go b.sweepSessionsLoop(r.SessionSweepInterval)
 	return b, nil
 }
 
@@ -354,7 +362,7 @@ func (b *Broker) takeOverSession(clientID string, cleanStart bool) (*session, bo
 		existing.takeOver()
 	}
 
-	if cleanStart || !ok || existing.expired() {
+	if cleanStart || !ok || !existing.claimForResume() {
 		if ok {
 			existing.discard()
 		}

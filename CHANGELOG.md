@@ -29,8 +29,23 @@ honestly be reconstructed now.
   stores the Will's payload in clear text in that bucket, and it needs JetStream. Behaviour
   without the option is unchanged. [MQTT-3.1.2-7], [MQTT-3.1.2-8], [MQTT-3.1.2-10], [MQTT-3.1.3-9].
 
+- **Detached sessions that are never resumed are now expired.** A session whose client disconnected
+  with a non-zero Session Expiry Interval kept its NATS subscriptions until the client returned or the
+  broker stopped, so a workload that churns through Client Identifiers grew the broker's subscription
+  set without bound. A sweep now drops each such session once its interval (capped by
+  `MaxSessionExpiry`) has passed, and unsubscribes it from NATS. `Options.SessionSweepInterval`
+  (default `DefaultSessionSweepInterval`, one minute) sets how often it runs. A session lives at
+  least its interval and at most one sweep longer; sessions with an interval of 0 and connected
+  sessions are not touched. [MQTT-3.1.2-23].
+
 ### Fixed
 
+- **A takeover in the middle of a stored-session restore no longer loses the session's
+  subscriptions.** With `PersistentSessions`, a second CONNECT on a Client Identifier that landed
+  while the first was still restoring the session from its record (the Authorizer call on a resume
+  has no bound) was answered Session Present 1 and given a session with none of the stored filters,
+  and the empty set was written back to the record. The second connection now finishes the restore.
+  [MQTT-3.1.2-23], [MQTT-3.2.2-3].
 - **A session narrowed repeatedly no longer runs out of Packet Identifiers.** The identifier of a
   message taken back on resume (its filter was denied) stayed spent until the client acknowledged
   it, and a client that never does left it spent for the life of the session. It is now forgotten

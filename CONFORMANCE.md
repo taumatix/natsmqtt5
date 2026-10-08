@@ -59,6 +59,11 @@ conforming client hits in ordinary use:
   time and lost what was waiting for a client that dropped while behind, and nothing was
   replayed for a session whose broker was killed. The record now holds the replay position.
   [MQTT-3.1.2-23], [MQTT-4.5.0-1].
+- **Fixed, unreleased.** A detached session nobody resumed kept its NATS subscriptions for the life
+  of the broker. A sweep now expires it once its Session Expiry Interval (capped by
+  `MaxSessionExpiry`) has passed and never before. [MQTT-3.1.2-23]
+  (`sessionsweep_test.go`). A takeover during a stored-record restore no longer drops the
+  stored filters (`restore_takeover_test.go`).
 - **Fixed, unreleased.** Message Expiry was forwarded and never enforced. A message that has
   waited its whole interval is now deleted, and one that has not goes out with the interval less
   the whole seconds it waited, on every delivery path: live, retained, offline replay, catch-up,

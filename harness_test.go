@@ -33,6 +33,13 @@ func startNATS(t *testing.T) string {
 // Zero keeps the server's default of 1 MiB.
 func startNATSWithMaxPayload(t *testing.T, maxPayload int32) string {
 	t.Helper()
+	return startNATSServer(t, maxPayload).ClientURL()
+}
+
+// startNATSServer is startNATSWithMaxPayload with the server itself, for a test
+// that reads its monitoring data (Subsz, Connz) to see what the broker left on it.
+func startNATSServer(t *testing.T, maxPayload int32) *natsserver.Server {
+	t.Helper()
 	opts := &natsserver.Options{
 		Host:       "127.0.0.1",
 		Port:       -1, // any free port
@@ -49,7 +56,7 @@ func startNATSWithMaxPayload(t *testing.T, maxPayload int32) string {
 	require.True(t, srv.ReadyForConnections(10*time.Second), "embedded NATS server did not start")
 	t.Cleanup(srv.Shutdown)
 
-	return srv.ClientURL()
+	return srv
 }
 
 // startBroker runs a broker against natsURL on an ephemeral MQTT port and
