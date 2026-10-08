@@ -115,7 +115,7 @@ type conn struct {
 	loopDone   chan struct{}
 	// loopStarted is set by serve before it starts deliverLoop, which is the
 	// goroutine that closes loopDone.
-	loopStarted bool
+	loopStarted atomic.Bool
 	// ended is closed once finish has handed the session what a replay needs.
 	ended     chan struct{}
 	endedOnce sync.Once
@@ -183,7 +183,7 @@ func (c *conn) serve(ctx context.Context) {
 	c.logger = c.logger.With("client_id", c.sess.clientID)
 	c.logger.Info("mqtt client connected")
 
-	c.loopStarted = true
+	c.loopStarted.Store(true)
 	go c.deliverLoop()
 
 	err = c.readLoop(ctx, keepAlive)
@@ -347,6 +347,12 @@ func (c *conn) finish(cause error) {
 	if c.broker.queue != nil && c.sess.expiry() > 0 {
 		floor := c.awayFloor()
 		a = &floor
+	} else if c.loopStarted.Load() {
+		// No replay position to record, but a successor still resends what the
+		// session holds, and that is only settled once this connection's
+		// delivery goroutine has stopped tracking messages.
+		c.close()
+		<-c.loopDone
 	}
 	c.sess.detach(c, a)
 	c.markEnded()

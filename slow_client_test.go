@@ -158,3 +158,28 @@ func TestCatchingUpWithSeveralPublishersDeliversEachOnce(t *testing.T) {
 	slow.expectNothing()
 	assert.Len(t, seen, publishers*each)
 }
+
+// readInOrderAfterResume is readInOrder for the first reads after a resume,
+// when the broker may legitimately resend messages the client acknowledged just
+// before the network failed, because those PUBACKs did not reach it
+// [MQTT-4.4.0-1]: a client that closes a socket with data still unread can lose
+// what it sent last. Such a copy is accepted only as a copy: payload among
+// `acked`, DUP set [MQTT-3.3.1-1]. Anything else out of order fails, saying
+// what was sent.
+func (c *rawClient) readInOrderAfterResume(acked, want []string) {
+	c.t.Helper()
+	known := map[string]bool{}
+	for _, a := range acked {
+		known[a] = true
+	}
+	for i, w := range want {
+		p := c.expectPublish()
+		for i == 0 && known[string(p.Payload)] {
+			require.True(c.t, p.Dup, "%s was acknowledged and came again without DUP (Packet Identifier %d)", p.Payload, p.PacketID)
+			c.send(&packet.Puback{Ack: packet.Ack{PacketID: p.PacketID}})
+			p = c.expectPublish()
+		}
+		require.Equal(c.t, w, string(p.Payload), "message %d of %d (DUP=%v, Packet Identifier %d)", i, len(want), p.Dup, p.PacketID)
+		c.send(&packet.Puback{Ack: packet.Ack{PacketID: p.PacketID}})
+	}
+}

@@ -89,6 +89,16 @@ func TestAConnectionDroppedMidCatchUpResumesWhereItStood(t *testing.T) {
 
 // The client keeps its subscription across two drops, and the second comes
 // before the first resume has been given everything.
+//
+// What the client read before the first drop was 0 to 9, each acknowledged. It
+// cannot know the broker saw the last PUBACKs: if the old connection was closed
+// before its reader reached them, those messages are still unacknowledged there
+// and the resume resends them, with DUP set and their original Packet
+// Identifiers [MQTT-4.4.0-1], [MQTT-3.3.1-1]. That is allowed, so the test
+// accepts such copies, DUP required, and nothing else out of order. (This was
+// the one failure seen on CI, undiagnosed: message 9 came where 10 was
+// expected, and the test could not tell a DUP resend from a broker repeating it
+// as new.)
 func TestAConnectionDroppedDuringTheResumeReplayStillGetsTheRest(t *testing.T) {
 	addr := startBroker(t, startNATS(t))
 	slow := slowSubscriber(t, addr, "behind-3", "b/#")
@@ -97,7 +107,7 @@ func TestAConnectionDroppedDuringTheResumeReplayStillGetsTheRest(t *testing.T) {
 	slow.drop()
 
 	second := resume(t, addr, "behind-3", 5)
-	second.readInOrder(sequence(10, 200))
+	second.readInOrderAfterResume(sequence(0, 10), sequence(10, 200))
 	time.Sleep(2500 * time.Millisecond)
 	second.drop()
 
