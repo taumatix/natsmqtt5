@@ -59,6 +59,7 @@ func (c *conn) handleSubscribe(ctx context.Context, p *packet.Subscribe) error {
 				}
 				c.sess.removeSubscription(sub.filter)
 				unsubscribeAll(sub)
+				c.broker.leaveGroup(c.sess, sub.filter)
 				granted[i] = nil
 				codes[i] = packet.ImplementationSpecificError
 			}
@@ -142,6 +143,7 @@ func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID
 	if err := c.bindNATS(sub); err != nil {
 		c.logger.Warn("could not create the NATS subscription",
 			"filter", want.Filter, "subject", full, "error", err)
+		c.broker.leaveGroup(c.sess, want.Filter)
 		return nil, false, packet.ImplementationSpecificError
 	}
 
@@ -152,6 +154,7 @@ func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID
 	old, installed := c.sess.installSubscription(c, sub)
 	if !installed {
 		unsubscribeAll(sub)
+		c.broker.leaveGroup(c.sess, want.Filter)
 		c.logger.Debug("not installing a subscription for a connection that lost its session",
 			"client_id", c.sess.clientID, "filter", want.Filter)
 		return nil, false, packet.UnspecifiedError
@@ -202,7 +205,7 @@ func (c *conn) bindNATS(sub *subscription) error {
 	sess := c.sess
 	if q := c.broker.queue; q != nil && sub.share != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), natsFlushTimeout)
-		backlog, err := q.sharedConsumer(ctx, c.broker.opts, sub)
+		backlog, err := q.joinGroup(ctx, c.broker.opts, c.sess, sub)
 		cancel()
 		if err != nil {
 			return fmt.Errorf("creating the shared subscription's backlog: %w", err)
@@ -276,6 +279,11 @@ func (c *conn) handleUnsubscribe(p *packet.Unsubscribe) error {
 			continue
 		}
 		unsubscribeAll(sub)
+		// Before the UNSUBACK, so that a client told it is unsubscribed can rely
+		// on the shared subscription having ended if it was the last member:
+		// "If this Session was the only Session that the Shared Subscription was
+		// associated with, the Shared Subscription is deleted" (MQTT-5.0 §3.10.4).
+		c.broker.leaveGroup(c.sess, filter)
 		codes[i] = packet.Success
 		removed = true
 	}

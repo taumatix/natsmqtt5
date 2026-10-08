@@ -13,6 +13,14 @@ honestly be reconstructed now.
 
 ### Added
 
+- **A shared subscription ends when its last session does.** The backlog consumer behind
+  `$share/g/f` is now deleted, with the messages in it, when the last session subscribed to it
+  leaves by UNSUBSCRIBE, by a Session Expiry Interval of 0, by expiry, by a Clean Start takeover or
+  by losing the right to resume it, so a client that subscribes to the name later starts with
+  nothing (MQTT 5.0 §4.8.2). The brokers keep a key-value entry per member session in a new bucket
+  `<StreamPrefix>_share_members`, which a broker rewrites for the sessions it holds and which lapses
+  for the sessions of a broker that was killed. It needs the offline queue, like the backlog.
+
 - **A shared member's unacknowledged QoS 1 message goes to another member.** The broker keeps the
   message unacknowledged in JetStream until the member's PUBACK, holding off redelivery while the
   member is connected, and hands it back to the group when the member's session ends: expiry,

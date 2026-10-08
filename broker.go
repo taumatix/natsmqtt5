@@ -170,6 +170,10 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 	if b.queue != nil {
 		b.wg.Add(1)
 		go b.holdLoop()
+		if b.queue.members != nil {
+			b.wg.Add(1)
+			go b.refreshMembersLoop()
+		}
 	}
 	return b, nil
 }
@@ -368,7 +372,8 @@ func (b *Broker) takeOverSession(clientID string, cleanStart bool) (*session, bo
 
 	if cleanStart || !ok || !existing.claimForResume() {
 		if ok {
-			existing.discard()
+			// The session ends here, unlike sessionLost, where it goes on elsewhere.
+			b.leaveGroups(existing, existing.discard())
 		}
 		b.mu.Lock()
 		delete(b.sessions, clientID)

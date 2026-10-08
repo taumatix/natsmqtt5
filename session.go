@@ -8,6 +8,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/nats-io/nuid"
 
 	"github.com/taumatix/natsmqtt5/packet"
 	"github.com/taumatix/natsmqtt5/topic"
@@ -154,6 +155,11 @@ type withdrawal struct {
 // that mirror.
 type session struct {
 	clientID string
+	// instance tells this session from another with the same Client Identifier,
+	// on this broker or another. A shared subscription's membership entry holds
+	// it, so that the end of a session does not remove the entry of the one that
+	// replaced it; see sharedmembers.go.
+	instance string
 	// holds acknowledges, or hands back to its group, the shared-subscription
 	// backlog messages the in-flight entries carry; see outbound.ackSubject. Set
 	// when the session is made, before anything else can reach it; nil in a
@@ -269,6 +275,7 @@ type session struct {
 func newSession(clientID string) *session {
 	return &session{
 		clientID:     clientID,
+		instance:     nuid.Next(),
 		subs:         make(map[string]*subscription),
 		inflight:     make(map[uint16]*outbound),
 		receivedQoS2: make(map[uint16]struct{}),
@@ -443,17 +450,26 @@ func (s *session) expireIfDue() (subs []*subscription, ok bool) {
 
 // discard marks the session unusable and tears down its NATS subscriptions. The
 // shared-subscription messages it still held go back to their groups.
-func (s *session) discard() {
+//
+// It returns the subscriptions the session held. Whether the session has ended
+// or only moved to another broker is the caller's to say: an ended session
+// leaves its shared subscriptions' members (Broker.leaveGroups), a moved one
+// has not left them.
+func (s *session) discard() []*subscription {
 	s.mu.Lock()
-	subs := s.subs
+	held := s.subs
 	s.subs = make(map[string]*subscription)
 	s.discarded = true
 	s.mu.Unlock()
 
-	for _, sub := range subs {
+	subs := make([]*subscription, 0, len(held))
+	for _, sub := range held {
+		sub.live.Store(false)
 		unsubscribeAll(sub)
+		subs = append(subs, sub)
 	}
 	s.handBackHeld()
+	return subs
 }
 
 // handBackHeld gives the shared subscriptions' backlogs back the messages the

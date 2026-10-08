@@ -91,6 +91,14 @@ func TestAnExpiredDetachedSessionLosesItsNATSSubscriptions_MQTT_3_1_2_23(t *test
 				"the sweep must unsubscribe an expired session from NATS; left: %v", subjectsOf(t, srv, "sweep"))
 			assert.Equal(t, 0, natsmqtt5.SessionCount(broker), "the session is dropped from memory")
 
+			// The hook runs after the session has left its shared subscription's
+			// members, which is a round trip to JetStream after the NATS
+			// subscriptions went.
+			require.Eventually(t, func() bool {
+				mu.Lock()
+				defer mu.Unlock()
+				return len(expired) == 1
+			}, 5*time.Second, 20*time.Millisecond, "the hook is told the session expired")
 			mu.Lock()
 			assert.Equal(t, map[string]int{"sweep-gone": 2}, expired, "the hook is told which session and how many filters")
 			mu.Unlock()

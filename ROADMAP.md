@@ -170,14 +170,22 @@ group when the session ends. Two edges remain, neither covered by a test:
   because the keepalive does not look at progress. A hold cap (a deadline after which the message
   is handed back and the packet identifier withdrawn) would bound it.
 
-## A shared subscription with no members keeps its backlog
+## A shared subscription's membership: the edges left
 
-§4.8.2: a shared subscription ends when no session is subscribed to it, and its undelivered
-messages are deleted. The backlog consumer is removed by JetStream only after no member has pulled
-for longer than `MaxSessionExpiry`, so a group whose last member unsubscribed keeps collecting
-messages for that long, and a new member under the same name gets them. Deleting the consumer on
-the last UNSUBSCRIBE needs a count of members across brokers, a key-value entry per group for
-instance.
+A shared subscription now ends when its last session does (`sharedmembers.go`: a key-value
+entry per member session, the consumer deleted by whoever leaves last). What remains:
+
+- A session that is dropped because its persistent record could not be restored (a failed
+  restore) does not leave the group, and a session killed with its broker leaves only when its
+  entry lapses, `MaxSessionExpiry` plus a minute. The consumer's inactivity threshold is the
+  backstop for both, so a group can keep collecting for that long. Making a surviving broker
+  sweep entries whose session record is gone would close it.
+- The refresh that keeps a live session's entry can write it back just after the session left
+  (it read the subscription before the UNSUBSCRIBE and wrote after), leaving a stale entry until it
+  lapses, and the group lives that long. A compare-and-set on the instance would close it.
+- The race of a last leaver and a joiner is healed by the joiner's puller creating the consumer
+  again, on its first failed pull (up to `sharedPullWait` later). A message published in that window
+  is not in the new consumer, which starts at the next message.
 
 ## Keeping clients off `$` topics
 

@@ -51,6 +51,11 @@ type offlineQueue struct {
 	// shared stream handle and so races between two connections replaying at
 	// once (found by -race on CI, once the queue became the default).
 	infoMu sync.Mutex
+	// members says which sessions are subscribed to each shared subscription,
+	// so that its backlog can end with the last of them (sharedmembers.go). Nil
+	// when the bucket could not be made, and then the backlog ends only by the
+	// consumer's inactivity threshold.
+	members *shareMembers
 }
 
 func newOfflineQueue(ctx context.Context, js jetstream.JetStream, opts *resolved) (*offlineQueue, error) {
@@ -67,7 +72,15 @@ func newOfflineQueue(ctx context.Context, js jetstream.JetStream, opts *resolved
 	if err != nil {
 		return nil, err
 	}
-	return &offlineQueue{stream: stream, prefix: opts.SubjectPrefix}, nil
+	q := &offlineQueue{stream: stream, prefix: opts.SubjectPrefix}
+	if q.members, err = newShareMembers(ctx, js, opts); err != nil {
+		// The backlog still works; it just outlives its last member by the
+		// consumer's inactivity threshold, as it did before there was a count.
+		opts.logger.Warn("shared subscriptions will not end with their last member: "+
+			"the membership bucket could not be created", "error", err)
+		q.members = nil
+	}
+	return q, nil
 }
 
 func queuedSubject(prefix, subject string) string {

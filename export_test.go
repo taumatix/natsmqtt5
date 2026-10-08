@@ -101,3 +101,14 @@ func SetSharedAckWait(t interface {
 	sharedAckWait = d
 	t.Cleanup(func() { sharedAckWait = was })
 }
+
+// SetShareMemberSlack changes how long a shared subscription's membership entry
+// outlives MaxSessionExpiry when nothing rewrites it, for the rest of the test.
+// Set it before the broker starts.
+func SetShareMemberSlack(t interface {
+	Cleanup(func())
+}, d time.Duration) {
+	was := shareMemberSlack
+	shareMemberSlack = d
+	t.Cleanup(func() { shareMemberSlack = was })
+}

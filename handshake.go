@@ -317,6 +317,9 @@ func (c *conn) resumeSubscriptions(ctx context.Context, stored []storedSubscript
 	for _, st := range stored {
 		if !c.mayResume(ctx, st.Filter, st.Opts.QoS) {
 			denied = append(denied, st.Filter)
+			// The session was a member of a shared subscription it may no longer
+			// have; the record is what made it one.
+			c.broker.leaveGroup(c.sess, st.Filter)
 			continue
 		}
 		surviving = append(surviving, st.Filter)
@@ -412,6 +415,7 @@ func (c *conn) reauthoriseLive(ctx context.Context) {
 		// what dropQueued below is for.
 		if removed, ok := c.sess.removeSubscription(sub.filter); ok {
 			unsubscribeAll(removed)
+			c.broker.leaveGroup(c.sess, sub.filter)
 		}
 	}
 	if len(denied) == 0 {

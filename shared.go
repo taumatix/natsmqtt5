@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -60,6 +61,25 @@ var sharedAckWait = 30 * time.Second
 func sharedConsumerName(streamPrefix, share, subject string) string {
 	sum := sha256.Sum256([]byte(share + "\x00" + subject))
 	return streamPrefix + "_share_" + hex.EncodeToString(sum[:16])
+}
+
+// joinGroup makes s a member of the shared subscription sub and returns its
+// backlog, creating the consumer if the group has none. The member is recorded
+// first: a member that leaves in between sees this one and does not delete the
+// consumer, and if it had already looked, the consumer is made again by the
+// puller (conn.healBacklog).
+func (q *offlineQueue) joinGroup(ctx context.Context, opts *resolved, s *session, sub *subscription) (jetstream.Consumer, error) {
+	if q.members != nil {
+		subject, ok := topic.TrimPrefix(q.prefix, sub.subject)
+		if !ok {
+			return nil, errors.New("shared subscription subject outside the subject prefix")
+		}
+		group := sharedConsumerName(opts.StreamPrefix, sub.share, subject)
+		if err := q.members.join(ctx, group, s.clientID, s.instance); err != nil {
+			return nil, fmt.Errorf("recording the member of a shared subscription: %w", err)
+		}
+	}
+	return q.sharedConsumer(ctx, opts, sub)
 }
 
 // sharedConsumer creates, or finds, the durable consumer for a shared
@@ -156,6 +176,7 @@ func (c *conn) pull(sub *subscription) {
 		if m == nil {
 			c.releaseQuota()
 			if err != nil {
+				c.healBacklog(sub)
 				select {
 				case <-time.After(sharedPullWait):
 				case <-c.done:
@@ -201,6 +222,29 @@ func (c *conn) pull(sub *subscription) {
 			// Not this member's after all: another can have it now.
 			_ = m.Nak()
 		}
+	}
+}
+
+// healBacklog makes the member's backlog again after a pull failed. The usual
+// cause is that the last member of the group left just as this session joined
+// and deleted the consumer (sharedmembers.go); the group is this session's now,
+// and what was in the old consumer went with the subscription it belonged to.
+// It is the same call that created the consumer, so it is harmless when the
+// failure was only NATS being away.
+func (c *conn) healBacklog(sub *subscription) {
+	q := c.broker.queue
+	if q == nil || !sub.live.Load() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), natsFlushTimeout)
+	defer cancel()
+	if _, err := q.joinGroup(ctx, c.broker.opts, c.sess, sub); err != nil {
+		c.logger.Debug("making a shared subscription's backlog again failed", "filter", sub.filter, "error", err)
+		return
+	}
+	if !sub.live.Load() {
+		// Unsubscribed while this ran: the entry just written is not wanted.
+		c.broker.leaveGroup(c.sess, sub.filter)
 	}
 }
 
