@@ -169,7 +169,9 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 	go b.sweepSessionsLoop(r.SessionSweepInterval)
 	if b.queue != nil {
 		b.wg.Add(1)
-		go b.holdLoop()
+		// The interval is read here, on the caller's goroutine: read inside the
+		// loop it races with a later test changing sharedAckWait.
+		go b.holdLoop(sharedAckWait / 3)
 		if b.queue.members != nil {
 			b.wg.Add(1)
 			go b.refreshMembersLoop()
