@@ -429,6 +429,8 @@ The MQTT layer is written against the [OASIS MQTT v5.0 Standard][spec] of
 - Integration tests run a real NATS server in-process with JetStream, a real
   broker, and the Eclipse Paho v5 client over a real TCP socket.
 - The packet decoder and the topic mapping are fuzzed in CI.
+- Every conformance statement a change touches is proved by an integration test against a real NATS
+  server, citing its `[MQTT-x.y.z-n]` id; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 [spec]: https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html
 

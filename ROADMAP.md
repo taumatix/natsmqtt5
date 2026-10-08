@@ -473,3 +473,33 @@ backlog read at 90 ms a message with a Receive Maximum of 1), so it is skipped u
 `NATSMQTT5_SLOW_TESTS` is set, and CI does not set it. Nothing else would notice a deadline coming
 back to the resume replay. Run it in a separate CI job (or nightly), or find a seam that makes the
 same point faster.
+
+## Statements covered only by unit tests
+
+Found by the 2026-10-08 audit of the offline-queue, session and replay work (v0.9.1 to v0.10.0 and
+after) against the rule in [CONTRIBUTING.md](CONTRIBUTING.md): each statement a change touches needs
+an integration test over a real socket against a real NATS server. `spec_integration_test.go` closed
+most of them; these remain, each with why:
+
+- **A real kill.** The harness cannot end a broker without its cleanup, so the killed-broker
+  fallback ([MQTT-3.1.2-23], [MQTT-4.5.0-1]) is tested against a record rewritten to look like one
+  (`TestASessionLeftAttachedByAKilledBrokerIsReplayedFromTheQueue`). A test that runs the broker
+  as a subprocess and sends it SIGKILL would prove the record a real kill leaves.
+- **A delivered message above the replay's start, produced by the broker.** The guard against
+  sending a QoS 2 message twice on a restored rewind [MQTT-4.3.3-2], [MQTT-4.3.3-6] is proved over
+  the wire with a record written from the queue's real sequences and ids
+  (`TestARestoredRewindDoesNotRedeliverAQoS2MessageItAlreadyDelivered`), because the state needs two
+  publishers' copies to arrive out of order. The unit tests cover how the broker arrives at it
+  (`restored_away_internal_test.go`). A stress test with many concurrent publishers, asserting no
+  QoS 2 message is delivered twice across a drop and a restored resume, would cover it end to end.
+- **The cap on stored delivered ids** (`maxStoredDelivered`, 4096): past it a restored rewind can
+  repeat a QoS 2 message [MQTT-4.3.3-6]. Unit test only (`TestTheStoredIDsAreBounded`). It needs a
+  behind-by-thousands client dropped and restored on another broker.
+- **A session record of a version this broker does not know**, which the broker discards and starts
+  the session fresh (`sessionstore.go`, `claim`): Session Present must then be 0 [MQTT-3.2.2-3]. Only
+  `decodeRecord` is tested. An integration test writes a `Version: 2` record and reconnects.
+- **The offline queue on a broker without JetStream** is not there: a QoS 1 message published while a
+  session is away is lost although the CONNACK said Session Present 1 [MQTT-3.1.2-23],
+  [MQTT-4.5.0-1]. `TestABrokerWithoutJetStreamStillStartsWithNoQueue` pins it as the known
+  deviation. Closing it needs a queue that does not depend on JetStream, which is undecided; until
+  then the README and CONNACK should not promise more than the test shows.
