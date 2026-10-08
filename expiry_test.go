@@ -156,7 +156,7 @@ func TestExpiryReplayOnARestoredSessionHonoursTheQueueTimestamp(t *testing.T) {
 	away.subscribe("exp/restore/#", packet.QoS1)
 	away.drop()
 	pub, _ := connectClient(t, addr, connectOpts("exp-restore-pub"))
-	publishExpiring(pub, "exp/restore/a", "three-of-three", ptrU32(3), false)
+	publishExpiring(pub, "exp/restore/a", "sixty-of-sixty", ptrU32(60), false)
 	publishExpiring(pub, "exp/restore/b", "one-of-one", ptrU32(1), false)
 	time.Sleep(200 * time.Millisecond)
 	stop()
@@ -165,8 +165,16 @@ func TestExpiryReplayOnARestoredSessionHonoursTheQueueTimestamp(t *testing.T) {
 	addr2 := startBroker(t, natsURL, persistentWithQueue)
 	back := dialRaw(t, addr2)
 	require.True(t, back.connect(rawConnect("exp-restore", 300)).SessionPresent)
-	// Stamped about 1.5 s ago, so a 3 s interval has 2 s left.
-	back.expectDelivered("three-of-three", 2)
+	// Stamped about 1.5 s ago, so a 60 s interval has about 58 s left. The
+	// interval is long so that a stalled runner cannot expire it, and the
+	// assertion is a range for the same reason: it says the outage was counted
+	// (below 60) and not how long the runner took. The 1 s message above has
+	// waited more than its interval however slow the runner was.
+	p := back.expectPublish()
+	require.Equal(t, "sixty-of-sixty", string(p.Payload))
+	back.send(&packet.Puback{Ack: packet.Ack{PacketID: p.PacketID}})
+	assert.GreaterOrEqual(t, expiryOf(p), int64(30))
+	assert.LessOrEqual(t, expiryOf(p), int64(59), "the time the stream stamped counts, outage included")
 	back.expectNothing()
 }
 

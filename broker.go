@@ -500,9 +500,20 @@ func (b *Broker) releaseStoredSession(c *conn) {
 // holding. The client is told 0x8E [MQTT-3.1.4-3] and the session is torn down,
 // which also unsubscribes it from NATS — without that, a session that moved
 // away would leave this broker subscribed to its subjects for good.
-func (b *Broker) sessionLost(clientID string) {
+//
+// revision is the bucket revision of the write that named the other broker. The
+// watcher can deliver an old write late (a consumer recreated under load reads
+// it again), after this broker has claimed the record itself; tearing the
+// session down for that would disconnect the client that just arrived here.
+// Revisions only grow, so a write at or below the revision this broker holds
+// for the session is history, not a takeover.
+func (b *Broker) sessionLost(clientID string, revision uint64) {
 	b.mu.Lock()
 	s, ok := b.sessions[clientID]
+	if ok && s.supersedes(revision) {
+		b.mu.Unlock()
+		return
+	}
 	if ok {
 		delete(b.sessions, clientID)
 	}

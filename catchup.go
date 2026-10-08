@@ -42,6 +42,16 @@ import (
 func (c *conn) enqueueQueued(d *delivery) {
 	c.catchMu.Lock()
 	defer c.catchMu.Unlock()
+	if c.isClosed() {
+		// The connection has ended but the session has not yet let go of it, so
+		// the live copy still comes here. Nothing will send it, and it must not
+		// be left to a select between a queue with room and a closed done, which
+		// drops it half the time: a later message that does reach the queue sets
+		// the replay's start above it. Noting it as owed makes awayFloor start
+		// the replay at or before it.
+		c.noteOwedLocked(d.seq)
+		return
+	}
 	if !c.behind {
 		// Counted before it is queued, so a checkpoint never sees it in neither.
 		c.pending.add(d.seq)
@@ -50,7 +60,9 @@ func (c *conn) enqueueQueued(d *delivery) {
 			c.activity.Add(1)
 			return
 		case <-c.done:
+			// Ended since the check above.
 			c.pending.remove(d.seq)
+			c.noteOwedLocked(d.seq)
 			return
 		default:
 			c.pending.remove(d.seq)
@@ -59,12 +71,18 @@ func (c *conn) enqueueQueued(d *delivery) {
 		c.logger.Info("client is not keeping up; catching up from the offline queue",
 			"topic", d.topic, "queue_depth", deliveryQueueDepth)
 	}
-	if c.fromSeq == 0 || d.seq < c.fromSeq {
-		c.fromSeq = d.seq
-	}
+	c.noteOwedLocked(d.seq)
 	select {
 	case c.catchup <- struct{}{}:
 	default:
+	}
+}
+
+// noteOwedLocked records seq as owed to the client and not sent, so the stream
+// is read from it or from something lower. catchMu is held.
+func (c *conn) noteOwedLocked(seq uint64) {
+	if c.fromSeq == 0 || seq < c.fromSeq {
+		c.fromSeq = seq
 	}
 }
 

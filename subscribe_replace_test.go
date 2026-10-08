@@ -31,11 +31,16 @@ func replaceStream(t *testing.T, addr, filter, topic string, qos packet.QoS, tot
 	require.Equal(t, packet.ReasonCode(qos), p2Sub(t, sub.rawClient, opts))
 
 	var (
-		mu   sync.Mutex
-		got  []string
-		subs = make(chan *packet.Suback, 32)
-		done = make(chan struct{})
+		mu       sync.Mutex
+		got      []string
+		subs     = make(chan *packet.Suback, 32)
+		done     = make(chan struct{})
+		complete = make(chan struct{})
 	)
+	// The reader runs until the connection is closed, not until the last
+	// message arrives: on a loaded runner the stream can finish before the last
+	// replacement is acknowledged, and a reader that had gone would leave that
+	// SUBACK unread.
 	go func() {
 		defer close(done)
 		seen := map[string]bool{}
@@ -56,7 +61,11 @@ func replaceStream(t *testing.T, addr, filter, topic string, qos packet.QoS, tot
 				n := len(seen)
 				mu.Unlock()
 				if n == total {
-					return
+					select {
+					case <-complete:
+					default:
+						close(complete)
+					}
 				}
 			case *packet.Suback:
 				subs <- v
@@ -87,6 +96,13 @@ func replaceStream(t *testing.T, addr, filter, topic string, qos packet.QoS, tot
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	select {
+	case <-complete:
+	case <-done:
+		// The read ended early: a message is missing and the caller says which.
+	case <-time.After(10 * time.Second):
+	}
+	require.NoError(t, sub.nc.Close())
 	<-done
 	mu.Lock()
 	defer mu.Unlock()

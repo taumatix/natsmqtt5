@@ -197,7 +197,7 @@ func TestOnUpdateDecidesWhoHasLostASession(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			var lost []string
-			s := &sessionStore{owner: mine, onLost: func(id string) { lost = append(lost, id) }}
+			s := &sessionStore{owner: mine, onLost: func(id string, _ uint64) { lost = append(lost, id) }}
 
 			s.onUpdate(tc.entry)
 
@@ -247,7 +247,7 @@ func storeOn(t *testing.T, natsURL string, customise ...func(*Options)) (*sessio
 
 	lost := make(chan string, 16)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s, err := newSessionStore(context.Background(), js, nc, r, logger, func(id string) { lost <- id })
+	s, err := newSessionStore(context.Background(), js, nc, r, logger, func(id string, _ uint64) { lost <- id })
 	require.NoError(t, err)
 	t.Cleanup(s.close)
 

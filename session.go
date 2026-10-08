@@ -1291,6 +1291,16 @@ func (s *session) snapshot(gen uint64) (*sessionRecord, uint64) {
 	return &cp, s.rev
 }
 
+// supersedes reports whether the record this broker holds for the session is
+// newer than bucket revision rev, so a write at rev cannot be another broker
+// taking the session away. A session with no bound record, or a rev of 0
+// (unknown), is never superseded.
+func (s *session) supersedes(rev uint64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rec != nil && rev != 0 && s.rev >= rev
+}
+
 // commitRecord records the state and revision a successful write leaves behind,
 // unless the record was claimed again while the write was in flight.
 func (s *session) commitRecord(gen uint64, rec *sessionRecord, rev uint64) {
