@@ -87,6 +87,23 @@ type outbound struct {
 	resentOn *conn
 }
 
+// forgetStaleWithdrawals drops the withdrawn identifiers whose acknowledgement
+// the client has had two connections to send.
+//
+// A timer would be the wrong instrument: the client may be offline, and MQTT
+// puts no deadline on an acknowledgement. Two CONNECTs completed after the
+// withdrawal without it is evidence it will not come: a client flushes what it
+// owes when it reconnects. The identifier is then free again, and an
+// acknowledgement that does arrive later is answered as for any unknown one.
+// Called with s.mu held.
+func (s *session) forgetStaleWithdrawals() {
+	for id, w := range s.withdrawn {
+		if s.attaches-w.madeAt >= 2 {
+			delete(s.withdrawn, id)
+		}
+	}
+}
+
 // ackOwed names a resent identifier's connection and the acknowledgement the
 // client owes for it.
 type ackOwed struct {
@@ -107,6 +124,11 @@ func owedAck(o *outbound) packet.Type {
 // withdrawal is an identifier the session no longer holds a message for, but
 // whose acknowledgement the client may still send.
 type withdrawal struct {
+	// madeAt is the session's attach count when the identifier was withdrawn.
+	madeAt uint64
+	// owed is the acknowledgement that settles the identifier, from owedAck. An
+	// acknowledgement of another type does not.
+	owed packet.Type
 	// quotaHolder is the connection whose send-quota slot the owed
 	// acknowledgement returns, or nil when it returns none.
 	quotaHolder *conn
@@ -159,6 +181,10 @@ type session struct {
 	// acknowledgement for them, so one has to be ignored rather than answered
 	// with a protocol error.
 	withdrawn map[uint16]withdrawal
+	// attaches counts the connections attached to this session. A withdrawal
+	// records the count it was made under, which is how attach finds the ones
+	// the client has had two connections to settle; see forgetStaleWithdrawals.
+	attaches uint64
 	// resent records the Packet Identifiers the current connection put back on
 	// the wire after a resumption, and the acknowledgement each one is owed.
 	//
@@ -260,6 +286,8 @@ func (s *session) attach(c *conn) *conn {
 		o.quotaHeld = false
 	}
 	s.resent = make(map[uint16]ackOwed)
+	s.attaches++
+	s.forgetStaleWithdrawals()
 	return prev
 }
 
@@ -501,7 +529,7 @@ func (s *session) completeInflight(c *conn, id uint16) (outbound, bool) {
 		// the identifier is not handed to a new message first; and leave the
 		// send-quota slot for that acknowledgement to return, on the connection
 		// that spent it.
-		w := withdrawal{}
+		w := withdrawal{madeAt: s.attaches, owed: owedAck(o)}
 		if o.quotaHeld {
 			w.quotaHolder = o.resentOn
 		}
@@ -559,7 +587,7 @@ func (s *session) withdrawInflight(denied, surviving []string) []uint16 {
 			continue
 		}
 		delete(s.inflight, id)
-		w := withdrawal{}
+		w := withdrawal{madeAt: s.attaches, owed: owedAck(o)}
 		if o.quotaHeld {
 			// Only on a live connection: attach clears every claim at the
 			// handshake. The client's acknowledgement returns this slot.
@@ -571,14 +599,19 @@ func (s *session) withdrawInflight(denied, surviving []string) []uint16 {
 	return taken
 }
 
-// forgetWithdrawn reports whether id names a message the broker took back, and
-// forgets it if so. The acknowledgement that asks is the last one owed for it.
-func (s *session) forgetWithdrawn(id uint16) (withdrawal, bool) {
+// forgetWithdrawn reports whether id names a message the broker took back that
+// is owed an acknowledgement of type t, and forgets it if so. That
+// acknowledgement is the last one owed for it; one of another type leaves the
+// record for the right one.
+func (s *session) forgetWithdrawn(id uint16, t packet.Type) (withdrawal, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	w, ok := s.withdrawn[id]
+	if !ok || w.owed != t {
+		return withdrawal{}, false
+	}
 	delete(s.withdrawn, id)
-	return w, ok
+	return w, true
 }
 
 // markQoS2Received records a QoS 2 Packet Identifier and reports whether it

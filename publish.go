@@ -190,7 +190,7 @@ func (c *conn) rejectPublish(p *packet.Publish, code packet.ReasonCode, reason s
 func (c *conn) handlePuback(p *packet.Puback) error {
 	o, ok := c.sess.completeInflight(c, p.Ack.PacketID)
 	if !ok {
-		if c.forgetWithdrawn(p.Ack.PacketID) || c.sess.forgetResent(c, p.Ack.PacketID, packet.PUBACK) {
+		if c.forgetWithdrawn(p.Ack.PacketID, packet.PUBACK) || c.sess.forgetResent(c, p.Ack.PacketID, packet.PUBACK) {
 			return nil
 		}
 		c.sendDisconnect(packet.ProtocolError,
@@ -258,7 +258,7 @@ func (c *conn) handlePubcomp(p *packet.Pubcomp) error {
 		// A withdrawn QoS 2 exchange reaches here by way of handlePubrec, which
 		// answers an identifier it no longer holds with 0x92 and leaves the
 		// client owing the PUBCOMP that closes it (MQTT-5.0 §3.6.2.1).
-		if c.forgetWithdrawn(p.Ack.PacketID) || c.sess.forgetResent(c, p.Ack.PacketID, packet.PUBCOMP) {
+		if c.forgetWithdrawn(p.Ack.PacketID, packet.PUBCOMP) || c.sess.forgetResent(c, p.Ack.PacketID, packet.PUBCOMP) {
 			return nil
 		}
 		c.sendDisconnect(packet.ProtocolError,
@@ -272,8 +272,8 @@ func (c *conn) handlePubcomp(p *packet.Pubcomp) error {
 // forgetWithdrawn settles an acknowledgement for an identifier the session
 // only remembers as owed, returning the send-quota slot it was holding if that
 // slot is this connection's.
-func (c *conn) forgetWithdrawn(id uint16) bool {
-	w, ok := c.sess.forgetWithdrawn(id)
+func (c *conn) forgetWithdrawn(id uint16, t packet.Type) bool {
+	w, ok := c.sess.forgetWithdrawn(id, t)
 	if ok && w.quotaHolder == c {
 		c.releaseQuota()
 	}

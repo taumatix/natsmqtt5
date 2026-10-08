@@ -111,11 +111,13 @@ func TestWithdrawInflight(t *testing.T) {
 	_, ok = s.inflightEntry(4)
 	assert.True(t, ok, "an entry no denied filter earned is still owed [MQTT-4.4.0-1]")
 
-	_, ok = s.forgetWithdrawn(1)
+	_, ok = s.forgetWithdrawn(1, packet.PUBCOMP)
+	assert.False(t, ok, "a QoS 1 identifier is not settled by a PUBCOMP")
+	_, ok = s.forgetWithdrawn(1, packet.PUBACK)
 	assert.True(t, ok, "a late acknowledgement for 1 must be recognised")
-	_, ok = s.forgetWithdrawn(1)
+	_, ok = s.forgetWithdrawn(1, packet.PUBACK)
 	assert.False(t, ok, "and recognised only once")
-	_, ok = s.forgetWithdrawn(2)
+	_, ok = s.forgetWithdrawn(2, packet.PUBACK)
 	assert.False(t, ok)
 }
 
