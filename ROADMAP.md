@@ -14,17 +14,31 @@ names it. Entries are checked against the code each time the review is re-run (l
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
-## An in-flight PUBLISH over seven eighths of max_payload is not restored
+## A payload in the in-flight bucket is never deleted when its message completes
 
-**Today:** an unacknowledged message with no queue copy whose encoded PUBLISH is over 16 KiB is kept in
-the `<StreamPrefix>_inflight` bucket. One over seven eighths of the server's `max_payload` (the
-`valueLimit` that bounds a record) is still logged and not resent. Payloads age out after twice the
-maximum Session Expiry Interval and are rewritten while a session holds them; nothing deletes one when
-the session completes the message. [MQTT-4.4.0-1].
+**Today:** the payload bucket now holds a PUBLISH up to `max_payload` less 512 bytes (2026-10-09). A
+payload is deleted by nothing but the bucket's TTL, twice the maximum Session Expiry Interval, and is
+rewritten while a session holds it. A client that acknowledges promptly leaves up to that long of
+dead 1 MiB values behind. [MQTT-4.4.0-1].
 
-**Shape:** raise the payload bucket's limit to `max_payload` less the headers (a retained message
-cannot be larger), and delete a payload when its in-flight entry completes (the key
-covers the Packet Identifier, so it is usually one session's alone). Test with a retained payload just under `max_payload` and a SIGKILL.
+**Why it is not simply deleted:** the key is the SHA-256 of the encoded PUBLISH, Packet Identifier
+included, so two sessions that were sent the same retained message with the same identifier (the first
+one each, say) share a key, and deleting it when one completes loses the other's resend. Deleting
+needs a reference count, or a key that names the session.
+
+**Shape:** key by client and Packet Identifier as well as digest, delete on PUBACK or PUBCOMP, keep
+the TTL as the backstop for a broker that dies first. Test with two sessions sent the same retained
+message, one acknowledging and one killed.
+
+## A session record's inline PUBLISH is cut when max_payload is under about 18 KiB
+
+**Today:** a PUBLISH of 16 KiB or less travels inline in the record. With a `max_payload` under about
+18 KiB, a record holding one can exceed seven eighths of it, and `fitRecord` cuts the entry instead of
+sending it to the bucket, so the message is not resent. Found while testing the entry above; the
+default 1 MiB is unaffected.
+
+**Shape:** lower the inline threshold to what the value limit allows, or move an inline PUBLISH to the
+bucket when it does not fit. Test with a 4 KiB `max_payload` and a 3 KiB retained message.
 
 ## Two tests still wait a fixed 200 ms for a drop to be recorded
 

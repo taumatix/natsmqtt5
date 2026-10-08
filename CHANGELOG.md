@@ -11,6 +11,11 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed.** An unacknowledged message with no queue copy (a retained message, or the queue off) whose
+  PUBLISH was over seven eighths of the NATS server's `max_payload` was logged and not resent after
+  the broker serving the session stopped, though the payload bucket could hold it: the bucket was held
+  to the limit of a session record. It now holds a PUBLISH up to `max_payload` less 512 bytes, which
+  is what a retained message can be.
 - **Fixed.** A SUBSCRIBE to a shared subscription could be refused with 0x83 when it raced the last
   other member's UNSUBSCRIBE: the leaver was deleting the group's JetStream consumer as the joiner
   updated it, and the joiner saw "consumer does not exist" or a failed store. The joiner now tries

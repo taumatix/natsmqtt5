@@ -628,6 +628,23 @@ func (s *sessionStore) valueLimit() int {
 	return max - max/8
 }
 
+// blobLimit is the largest PUBLISH the payload bucket holds. A payload is the
+// whole value of a key-value write, which carries no headers, so unlike a
+// session record it needs no room for the record to outgrow its estimate: a
+// retained message can be as large as max_payload less a little, and this keeps
+// up with it.
+func (s *sessionStore) blobLimit() int {
+	max := int(s.nc.MaxPayload())
+	if max <= 0 {
+		max = defaultMaxPayload
+	}
+	return max - blobHeadroom
+}
+
+// blobHeadroom is what blobLimit leaves under max_payload for anything a
+// key-value write adds to its value.
+const blobHeadroom = 512
+
 // defaultMaxPayload is the NATS server's default max_payload, assumed when the
 // server did not say.
 const defaultMaxPayload = 1 << 20
