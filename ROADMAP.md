@@ -65,14 +65,15 @@ record's compare-and-swap to keep it to one publication.
 **Shape:** a test on a three-server cluster that isolates the server one broker
 uses, and one that heals a long partition and counts the Will publications.
 
-## The Will check reads every record on every tick
+## The Will bucket watcher is not tested through a NATS restart
 
-**Today:** with `DurableWills`, each broker lists the whole Will bucket every
-`WillCheckInterval` and reads each record that is not its own, to learn the
-owner. That is a Get per open connection with a Will per tick per broker.
-**Shape:** key the records by owner (or keep a per-owner index key) so a tick
-lists owners, pings each once, and reads records only for a dead one; measure
-with a few thousand connections before and after.
+**Today:** each broker keeps an in-memory index of the Will bucket from a key-value watcher (`watchLoop`), and a
+check reads it instead of listing and fetching the bucket. While the watcher is down or has not delivered the
+initial contents, a check reads the bucket directly, as before. `TestWillCheckDoesNotReadTheBucketEveryTick`
+counts the reads (about 2,100 direct gets over ten checks of 100 records before; none per record now); the
+fallback after the watcher ends is reasoned about, not driven.
+**Shape:** restart or cut the NATS server under two brokers holding Wills, and assert the index recovers and a
+Will is still adopted afterwards. Also measure the memory held for a few thousand records.
 
 ## Durable Wills on by default
 
