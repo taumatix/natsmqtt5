@@ -160,9 +160,14 @@ entry per member session, the consumer deleted by whoever leaves last). What rem
 
 **Today:** the broker advertises a Receive Maximum and a client that sends more unacknowledged QoS 1 or
 2 PUBLISH packets than that is simply served; the DISCONNECT with `0x93 Receive Maximum exceeded` the
-spec describes (§3.3.4, §4.9) is never sent. The statement that binds the client
-([MQTT-3.3.4-7]) is CLIENT-ONLY in the table, so nothing is violated; it is a missing courtesy that
-lets a runaway client hold unbounded state. **Shape:** count the inbound unacknowledged identifiers per
+spec describes (§3.3.4, §4.9) is never sent. [MQTT-3.3.4-7] itself binds only the client (the Server
+text is "the Server uses a DISCONNECT packet with Reason Code 0x93", with no MUST or MAY and no
+statement id), but §4.13.1 lists 0x93 among the Reason Codes of Protocol Errors and says "When a
+Server detects a Malformed Packet or Protocol Error, and a Reason Code is given in the
+specification, it MUST close the Network Connection" [MQTT-4.13.1-1]. Read that way, serving a
+client past the Receive Maximum is a MUST violation (the table's CLIENT-ONLY row for 3.3.4-7 hides
+it), and this entry belongs with the MUSTs, not the courtesies. It also lets a runaway client hold
+unbounded state. **Shape:** count the inbound unacknowledged identifiers per
 connection and close with 0x93 past the limit.
 
 ## Close after a cancelled Serve context can skip the 0x8B DISCONNECT
