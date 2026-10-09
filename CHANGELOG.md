@@ -11,7 +11,7 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
- **Fixed.** The payloads a session kept in the `<StreamPrefix>_inflight` bucket outlived the session
+- **Fixed.** The payloads a session kept in the `<StreamPrefix>_inflight` bucket outlived the session
   when it was discarded rather than completed: a reconnect with Clean Start, a session with Session Expiry
   Interval 0 ending with its connection, and an expired record swept. Each now deletes the session's
   payloads with its record, instead of leaving up to 1 MiB values until the bucket's TTL. Payloads
