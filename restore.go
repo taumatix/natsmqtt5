@@ -96,7 +96,7 @@ func (b *Broker) restoreEntry(ctx context.Context, clientID string, st storedInf
 	if len(st.Pub) > 0 {
 		o := restoreStoredPublish(st)
 		if o != nil {
-			o.blobKey = st.Blob
+			o.blobKey, o.blobAt = st.Blob, st.BlobAt
 		}
 		return o
 	}
