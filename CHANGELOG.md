@@ -11,6 +11,8 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed.** A payload in the `<StreamPrefix>_inflight` bucket whose delete failed (a NATS timeout at the
+  wrong moment) was left until the bucket's TTL. The next checkpoint now tries the delete again.
 - **Fixed.** With a NATS `max_payload` under about 18 KiB, an unacknowledged message of a few KiB was left
   out of the session record and not resent after the session moved to another broker. The inline share of
   the record now shrinks with `max_payload` (a quarter of the value limit, at most 16 KiB), and a larger
