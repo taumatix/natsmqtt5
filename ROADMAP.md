@@ -28,15 +28,25 @@ moment earlier can be written after that broker's delete, and a key from before 
 never deleted. Both wait on the TTL; a sweep of the bucket for keys whose owner has no session record
 would close them.
 
-## A session record's inline PUBLISH is cut when max_payload is under about 18 KiB
+## Many small in-flight messages still overflow a small-`max_payload` record
 
-**Today:** a PUBLISH of 16 KiB or less travels inline in the record. With a `max_payload` under about
-18 KiB, a record holding one can exceed seven eighths of it, and `fitRecord` cuts the entry instead of
-sending it to the bucket, so the message is not resent. Found while testing the entry above; the
-default 1 MiB is unaffected.
+**Today:** an in-flight PUBLISH over a quarter of the value limit goes to the payload bucket when
+`max_payload` is small (2026-10-09), so one 3 KiB message under a 4 KiB `max_payload` is resent after the
+session moves. A client with a large Receive Maximum and many messages unacknowledged, each under that
+quarter, can still push the record past `valueLimit`; `fitRecord` then keeps the oldest and drops the rest
+(`unrecorded`), as it does at the default 1 MiB.
 
-**Shape:** lower the inline threshold to what the value limit allows, or move an inline PUBLISH to the
-bucket when it does not fit. Test with a 4 KiB `max_payload` and a 3 KiB retained message.
+**Shape:** when `fitRecord` would drop an inline entry and the bucket is available, stash it there instead
+of cutting it. Test with a 4 KiB `max_payload` and twenty 600-byte messages in flight.
+
+## The macOS CI job waits a fixed 5 s for consumers to attach
+
+**Today:** `requireConsumers` gives the broker 5 s to create its JetStream consumers, and the macOS runner
+has failed it on a slow start without any broker bug. It fails the run, not passes it wrongly, so it is
+flake risk, not a hidden gap.
+
+**Shape:** poll with a deadline scaled to the runner (`CI` set) rather than a constant, and print the
+consumer list when it gives up.
 
 ## Two tests still wait a fixed 200 ms for a drop to be recorded
 

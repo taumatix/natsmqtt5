@@ -341,3 +341,31 @@ func TestASessionThatEndsWithItsConnectionDeletesItsPayloads(t *testing.T) {
 	require.Eventually(t, func() bool { return len(inflightKeys(t, natsURL)) == 0 },
 		5*time.Second, 50*time.Millisecond, "ending the session leaves no payload")
 }
+
+// [MQTT-4.4.0-1]: with a small max_payload, a PUBLISH that would fit the inline limit but not a
+// record value goes to the payload bucket and is resent, rather than being cut from the record.
+func TestAnInflightPublishThatFitsTheInlineLimitButNotARecordIsStillResent(t *testing.T) {
+	natsURL := startNATSWithMaxPayload(t, 4096)
+	noQueue := func(o *natsmqtt5.Options) { o.PersistentSessions, o.DisableOfflineQueue = true, true }
+	addrA, stopA := startStoppableBroker(t, natsURL, noQueue)
+	addrB := startBroker(t, natsURL, noQueue)
+
+	c := dialRaw(t, addrA)
+	c.connect(rawConnect("small-max", 300))
+	c.subscribe("sm/#", packet.QoS1)
+	pub, _ := connectClient(t, addrA, connectOpts("pub-small-max"))
+	body := bytes.Repeat([]byte("z"), 3<<10)
+	pub.publish(&paho.Publish{Topic: "sm/a", QoS: 1, Payload: body})
+	first := c.expectPublish()
+	require.Equal(t, body, first.Payload)
+	c.drop()
+	time.Sleep(100 * time.Millisecond)
+	stopA()
+
+	back := dialRaw(t, addrB)
+	require.True(t, back.connect(rawConnect("small-max", 300)).SessionPresent)
+	got := back.expectPublish()
+	assert.Equal(t, first.PacketID, got.PacketID, "[MQTT-4.4.0-1] the original Packet Identifier")
+	assert.True(t, got.Dup)
+	assert.Equal(t, body, got.Payload)
+}
