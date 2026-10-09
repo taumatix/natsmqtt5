@@ -28,16 +28,17 @@ moment earlier can be written after that broker's delete, and a key from before 
 never deleted. Both wait on the TTL; a sweep of the bucket for keys whose owner has no session record
 would close them.
 
-## Many small in-flight messages still overflow a small-`max_payload` record
+## A record of in-flight references can still outgrow a very small `max_payload`
 
-**Today:** an in-flight PUBLISH over a quarter of the value limit goes to the payload bucket when
-`max_payload` is small (2026-10-09), so one 3 KiB message under a 4 KiB `max_payload` is resent after the
-session moves. A client with a large Receive Maximum and many messages unacknowledged, each under that
-quarter, can still push the record past `valueLimit`; `fitRecord` then keeps the oldest and drops the rest
-(`unrecorded`), as it does at the default 1 MiB.
+**Today:** the PUBLISHes kept inline in a session record share a quarter of the value limit and the rest
+go to the payload bucket (2026-10-09), so twelve 600-byte messages in flight under a 4 KiB `max_payload` are
+all resent after the session moves. Each bucket reference still costs about 150 bytes of the record, so
+around 20 unacknowledged messages at 4 KiB reach the value limit and `fitRecord` cuts the newest, as it does
+at the default 1 MiB with enough of them. The 12 here was measured, the 20 was not.
 
-**Shape:** when `fitRecord` would drop an inline entry and the bucket is available, stash it there instead
-of cutting it. Test with a 4 KiB `max_payload` and twenty 600-byte messages in flight.
+**Shape:** measure the per-entry cost and check the figure; if it matters, shorten the reference (the owner
+prefix repeats in every key) or spill the entries beyond the limit to a second record. Low priority: it
+needs a `max_payload` a real deployment seldom sets and a client holding that many messages unacknowledged.
 
 ## The macOS CI job waits a fixed 5 s for consumers to attach
 
