@@ -11,6 +11,10 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-10-09
+
+A patch release: two fixes, tests and documentation; no API change and the Go floor is unchanged.
+
 - **Fixed.** An unacknowledged message with no queue copy (a retained message, or the queue off) whose
   PUBLISH was over seven eighths of the NATS server's `max_payload` was logged and not resent after
   the broker serving the session stopped, though the payload bucket could hold it: the bucket was held
@@ -741,7 +745,8 @@ mapping `nats-server` uses for its own MQTT support.
 [#13]: https://github.com/taumatix/natsmqtt5/pull/13
 [#19]: https://github.com/taumatix/natsmqtt5/pull/19
 [#24]: https://github.com/taumatix/natsmqtt5/pull/24
-[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.11.2...HEAD
+[0.11.2]: https://github.com/taumatix/natsmqtt5/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/taumatix/natsmqtt5/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/taumatix/natsmqtt5/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/taumatix/natsmqtt5/compare/v0.9.1...v0.10.0
