@@ -65,15 +65,18 @@ record's compare-and-swap to keep it to one publication.
 **Shape:** a test on a three-server cluster that isolates the server one broker
 uses, and one that heals a long partition and counts the Will publications.
 
-## The Will bucket watcher is not tested through a NATS restart
+## The Will index's memory is not measured, and a restart fences every client
 
-**Today:** each broker keeps an in-memory index of the Will bucket from a key-value watcher (`watchLoop`), and a
-check reads it instead of listing and fetching the bucket. While the watcher is down or has not delivered the
-initial contents, a check reads the bucket directly, as before. `TestWillCheckDoesNotReadTheBucketEveryTick`
-counts the reads (about 2,100 direct gets over ten checks of 100 records before; none per record now); the
-fallback after the watcher ends is reasoned about, not driven.
-**Shape:** restart or cut the NATS server under two brokers holding Wills, and assert the index recovers and a
-Will is still adopted afterwards. Also measure the memory held for a few thousand records.
+**Today:** the Will index (`watchLoop`) holds every record of the bucket in each broker, so its memory grows with
+the cluster's connections that have a Will; it has not been measured at a few thousand. A NATS server restart under
+two brokers is driven (`will_watch_restart_test.go`): the index recovers and a Will stored afterwards is adopted.
+That restart took longer than twice `WillCheckInterval` in the test, so both brokers closed all their clients,
+as designed; a real restart of a replicated server may or may not.
+
+**Shape:** measure the index at 5,000 and 50,000 records and, if it matters, hold only the owner and revision there
+and read the record when one is to be adopted. Separately, decide whether a restart that finishes inside
+`WillCheckInterval` times two should cost no connection at all, which it does not for a broker that sees the
+reconnect late.
 
 ## Durable Wills on by default
 
