@@ -1503,11 +1503,14 @@ func (s *session) commitRecord(gen uint64, rec *sessionRecord, rev uint64) {
 func (s *session) inflightState(blobs *sessionStore) (inflight []storedInflight, received []uint16, unrecorded int, pending []pendingBlob) {
 	// Under a small max_payload a record of several 16 KiB PUBLISHes would not fit, so
 	// the inline share shrinks with it and the rest goes to the payload bucket.
-	inlineLimit := maxStoredPublish
+	// Together the inline PUBLISHes get a quarter of the value, so that many of them cannot push the
+	// record past it and have fitRecord cut the newest.
+	inlineLimit, inlineLeft := maxStoredPublish, int(^uint(0)>>1)
 	if blobs != nil {
 		if q := blobs.valueLimit() / 4; q < inlineLimit {
 			inlineLimit = q
 		}
+		inlineLeft = blobs.valueLimit() / 4
 	}
 	s.mu.Lock()
 	entries := make([]*outbound, 0, len(s.inflight))
@@ -1533,8 +1536,9 @@ func (s *session) inflightState(blobs *sessionStore) (inflight []storedInflight,
 			case !ok:
 				unrecorded++
 				continue
-			case len(raw) <= inlineLimit:
+			case len(raw) <= inlineLimit && len(raw) <= inlineLeft:
 				st.Pub = raw
+				inlineLeft -= len(raw)
 			case blobs == nil || len(raw) > blobs.blobLimit():
 				unrecorded++
 				continue

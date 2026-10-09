@@ -369,3 +369,39 @@ func TestAnInflightPublishThatFitsTheInlineLimitButNotARecordIsStillResent(t *te
 	assert.True(t, got.Dup)
 	assert.Equal(t, body, got.Payload)
 }
+
+// Many in-flight messages that each fit the inline limit must not, together, push the record
+// past the value: the ones beyond the inline budget go to the payload bucket, so none is lost.
+func TestManySmallInflightPublishesUnderASmallMaxPayloadAreAllResent(t *testing.T) {
+	natsURL := startNATSWithMaxPayload(t, 4096)
+	noQueue := func(o *natsmqtt5.Options) { o.PersistentSessions, o.DisableOfflineQueue = true, true }
+	addrA, stopA := startStoppableBroker(t, natsURL, noQueue)
+	addrB := startBroker(t, natsURL, noQueue)
+
+	const n = 12
+	c := dialRaw(t, addrA)
+	c.connect(rawConnect("many-small", 300))
+	c.subscribe("ms/#", packet.QoS1)
+	pub, _ := connectClient(t, addrA, connectOpts("pub-many-small"))
+	ids := map[uint16]bool{}
+	for i := 0; i < n; i++ {
+		body := bytes.Repeat([]byte{byte('a' + i)}, 600)
+		pub.publish(&paho.Publish{Topic: "ms/x", QoS: 1, Payload: body})
+	}
+	for i := 0; i < n; i++ {
+		ids[c.expectPublish().PacketID] = true
+	}
+	c.drop()
+	time.Sleep(200 * time.Millisecond)
+	stopA()
+
+	back := dialRaw(t, addrB)
+	require.True(t, back.connect(rawConnect("many-small", 300)).SessionPresent)
+	for i := 0; i < n; i++ {
+		got := back.expectPublish()
+		assert.True(t, ids[got.PacketID], "[MQTT-4.4.0-1] resend %d carries an identifier the client was sent", i)
+		assert.True(t, got.Dup)
+		delete(ids, got.PacketID)
+	}
+	assert.Empty(t, ids, "every unacknowledged message is resent")
+}
