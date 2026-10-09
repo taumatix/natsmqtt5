@@ -10,7 +10,7 @@ today and cites the statements it touches.
 **No known MUST violation is open.** The table in `conformance/mqtt5-statements.tsv` has no VIOLATED
 or UNSURE row (a test enforces it). Tiers 1 and 2 are windows inside MUSTs the table counts as met:
 each needs a particular failure (a broker killed at one instant, a payload near `max_payload`) and
-names it. Entries are checked against the code each time the review is re-run (last: 2026-10-09).
+names it. Entries are checked against the code each time the review is re-run (last: 2026-10-09; the Receive Maximum entry, which §4.13.1-1 made a MUST, was done in v0.11.3).
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
@@ -153,20 +153,6 @@ entry per member session, the consumer deleted by whoever leaves last). What rem
 - The race of a last leaver and a joiner is healed by the joiner's puller creating the consumer
   again, on its first failed pull (up to `sharedPullWait` later). A message published in that window
   is not in the new consumer, which starts at the next message.
-
-## A client that exceeds the broker's Receive Maximum is not disconnected
-
-**Today:** the broker advertises a Receive Maximum and a client that sends more unacknowledged QoS 1 or
-2 PUBLISH packets than that is simply served; the DISCONNECT with `0x93 Receive Maximum exceeded` the
-spec describes (§3.3.4, §4.9) is never sent. [MQTT-3.3.4-7] itself binds only the client (the Server
-text is "the Server uses a DISCONNECT packet with Reason Code 0x93", with no MUST or MAY and no
-statement id), but §4.13.1 lists 0x93 among the Reason Codes of Protocol Errors and says "When a
-Server detects a Malformed Packet or Protocol Error, and a Reason Code is given in the
-specification, it MUST close the Network Connection" [MQTT-4.13.1-1]. Read that way, serving a
-client past the Receive Maximum is a MUST violation (the table's CLIENT-ONLY row for 3.3.4-7 hides
-it), and this entry belongs with the MUSTs, not the courtesies. It also lets a runaway client hold
-unbounded state. **Shape:** count the inbound unacknowledged identifiers per
-connection and close with 0x93 past the limit.
 
 ## Close after a cancelled Serve context can skip the 0x8B DISCONNECT
 

@@ -252,7 +252,9 @@ type Options struct {
 	Authorizer Authorizer
 
 	// ReceiveMaximum is advertised in CONNACK and bounds the client's in-flight
-	// QoS 1 and QoS 2 publications. Defaults to DefaultReceiveMaximum.
+	// QoS 1 and QoS 2 publications. A client that has more QoS 2 PUBLISH packets
+	// unacknowledged than this is sent DISCONNECT 0x93 and disconnected
+	// (MQTT-5.0 §3.3.4). Defaults to DefaultReceiveMaximum.
 	ReceiveMaximum uint16
 	// MaximumQoS is the highest QoS the broker accepts in a PUBLISH and grants
 	// on a SUBSCRIBE, advertised in CONNACK [MQTT-3.2.2-9]. Values above 2 are

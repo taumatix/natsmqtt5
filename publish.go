@@ -61,6 +61,26 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 		return c.rejectPublish(p, packet.TopicNameInvalid, "clients may not publish to topics starting with $")
 	}
 
+	// "If it receives more than Receive Maximum QoS 1 and QoS 2 PUBLISH packets
+	// where it has not sent a PUBACK or PUBCOMP in response, the Server uses a
+	// DISCONNECT packet with Reason Code 0x93 (Receive Maximum exceeded)"
+	// (MQTT-5.0 §3.3.4), a Protocol Error the Server answers by closing the
+	// connection [MQTT-4.13.1-1]. A QoS 1 PUBLISH is answered before the next
+	// packet is read, so only QoS 2 can pile up.
+	if p.QoS == packet.QoS2 {
+		if _, resent := c.openQoS2[p.PacketID]; !resent {
+			if len(c.openQoS2) >= int(c.receiveMax) {
+				c.sendDisconnect(packet.ReceiveMaximumExceeded,
+					fmt.Sprintf("more than the Receive Maximum of %d QoS 2 PUBLISH packets are unacknowledged", c.receiveMax))
+				return errors.New("PUBLISH over the Receive Maximum")
+			}
+			if c.openQoS2 == nil {
+				c.openQoS2 = make(map[uint16]struct{})
+			}
+			c.openQoS2[p.PacketID] = struct{}{}
+		}
+	}
+
 	// A QoS 2 PUBLISH whose Packet Identifier is already outstanding is a
 	// redelivery: acknowledge it, but do not deliver the message twice
 	// (MQTT-5.0 §4.3.3).
@@ -202,6 +222,7 @@ func (c *conn) rejectPublish(p *packet.Publish, code packet.ReasonCode, reason s
 		return c.write(&packet.Puback{Ack: packet.Ack{PacketID: p.PacketID, ReasonCode: code, Properties: props}})
 	default:
 		c.sess.releaseQoS2(p.PacketID)
+		delete(c.openQoS2, p.PacketID) // a PUBREC of 0x80 or more gives the quota back (§4.9)
 		return c.write(&packet.Pubrec{Ack: packet.Ack{PacketID: p.PacketID, ReasonCode: code, Properties: props}})
 	}
 }
@@ -271,6 +292,7 @@ func (c *conn) handlePubrec(p *packet.Pubrec) error {
 // releases the Packet Identifier and the broker confirms with PUBCOMP.
 func (c *conn) handlePubrel(p *packet.Pubrel) error {
 	code := packet.Success
+	delete(c.openQoS2, p.Ack.PacketID) // the PUBCOMP below gives the quota back (§4.9)
 	if !c.sess.releaseQoS2(p.Ack.PacketID) {
 		// "If the Packet Identifier is not found, the receiver uses 0x92"
 		// (MQTT-5.0 §3.6.2.1).

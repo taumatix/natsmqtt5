@@ -11,11 +11,16 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
-- **Fixed.** The payloads a session kept in the `<StreamPrefix>_inflight` bucket outlived the session
+ **Fixed.** The payloads a session kept in the `<StreamPrefix>_inflight` bucket outlived the session
   when it was discarded rather than completed: a reconnect with Clean Start, a session with Session Expiry
   Interval 0 ending with its connection, and an expired record swept. Each now deletes the session's
   payloads with its record, instead of leaving up to 1 MiB values until the bucket's TTL. Payloads
   written by versions before keys named their client are still left to the TTL.
+
+## [0.11.3] - 2026-10-09
+
+A patch release: two fixes; no API change and the Go floor is unchanged. One behaviour to know before upgrading: a client that sends more QoS 2 PUBLISH packets unacknowledged than the broker's Receive Maximum is now disconnected with 0x93 (it was served before).
+
 - **Fixed.** The payload of an unacknowledged message too large for the session record stayed in the
   `<StreamPrefix>_inflight` bucket until its TTL, twice the maximum Session Expiry Interval, after the
   client had acknowledged it, so a prompt client left up to that long of dead values behind (up to 1 MiB
@@ -23,6 +28,14 @@ honestly be reconstructed now.
   drops it. Its key now names the client as well as the digest, so one session finishing does not take
   the payload another was sent under the same Packet Identifier. Keys written by earlier versions are
   still read, and are left to the TTL.
+
+- **Fixed.** A client with more QoS 2 PUBLISH packets unacknowledged than the Receive Maximum the
+  CONNACK stated (`Options.ReceiveMaximum`, 1024 by default; 65535 when the CONNACK had to leave it
+  out to fit a small Maximum Packet Size) was served without limit. It is now sent DISCONNECT 0x93
+  Receive Maximum exceeded and the connection is closed (MQTT-5.0 §3.3.4, §4.13.1
+  [MQTT-4.13.1-1]). A PUBCOMP, or a PUBREC of 0x80 or more, gives the slot back; a resent
+  PUBLISH and QoS 0 are not counted, and QoS 1 is answered before the next packet is read, so a
+  client that respects the limit is never disconnected.
 
 ## [0.11.2] - 2026-10-09
 
@@ -758,7 +771,8 @@ mapping `nats-server` uses for its own MQTT support.
 [#13]: https://github.com/taumatix/natsmqtt5/pull/13
 [#19]: https://github.com/taumatix/natsmqtt5/pull/19
 [#24]: https://github.com/taumatix/natsmqtt5/pull/24
-[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.11.2...HEAD
+[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.11.3...HEAD
+[0.11.3]: https://github.com/taumatix/natsmqtt5/compare/v0.11.2...v0.11.3
 [0.11.2]: https://github.com/taumatix/natsmqtt5/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/taumatix/natsmqtt5/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/taumatix/natsmqtt5/compare/v0.10.0...v0.11.0
