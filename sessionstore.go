@@ -272,6 +272,7 @@ type sessionStore struct {
 	blobStorage  jetstream.StorageType
 	blobReplicas int
 	blobName     string
+	blobGrace    time.Duration // zero means blobGrace
 	nc           *nats.Conn
 	logger       *slog.Logger
 	// maxSessionExpiry is how long a record owned by an unreachable broker is
@@ -850,12 +851,17 @@ func (s *sessionStore) sweep(ctx context.Context) error {
 		return err
 	}
 
+	kept := newBlobClaims()
+	complete := true
 	for _, key := range keys {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		entry, err := s.kv.Get(ctx, key)
 		if err != nil {
+			if !errors.Is(err, jetstream.ErrKeyNotFound) {
+				complete = false
+			}
 			continue
 		}
 		rec, err := decodeRecord(entry.Value())
@@ -873,17 +879,93 @@ func (s *sessionStore) sweep(ctx context.Context) error {
 			continue
 		}
 		if !s.reclaimable(ctx, rec, entry) {
+			kept.add(rec)
 			continue
 		}
 		if err := s.kv.Delete(ctx, key, jetstream.LastRevision(entry.Revision())); err == nil {
 			s.deleteOwnerBlobs(ctx, rec.ClientID)
 			s.logger.Debug("swept a session record", "client_id", rec.ClientID)
+		} else {
+			kept.add(rec)
+		}
+	}
+
+	// Only a complete view of the records may condemn a payload: one that could
+	// not be read might be the record that names it.
+	if complete {
+		if err := s.sweepBlobs(ctx, kept); err != nil && ctx.Err() == nil {
+			s.logger.Debug("could not sweep the payload bucket", "error", err)
 		}
 	}
 
 	// Every delete leaves a marker behind. Purging the old ones keeps the
 	// bucket's stream from growing with the churn of short-lived clients.
 	return s.kv.PurgeDeletes(ctx, jetstream.DeleteMarkersOlderThan(sessionSweepInterval))
+}
+
+// blobGrace is how old a payload must be before the sweep may call it an orphan.
+// A payload is written before the record that names it, so a younger one may
+// simply be waiting for that record.
+const blobGrace = 10 * time.Minute
+
+// blobClaims is what the surviving session records say they need from the
+// payload bucket.
+type blobClaims struct {
+	owners map[string]bool
+	keys   map[string]bool
+}
+
+func newBlobClaims() *blobClaims {
+	return &blobClaims{owners: map[string]bool{}, keys: map[string]bool{}}
+}
+
+func (c *blobClaims) add(rec *sessionRecord) {
+	c.owners[blobOwner(rec.ClientID)] = true
+	for _, e := range rec.Inflight {
+		if e.Blob != "" {
+			c.keys[e.Blob] = true
+		}
+	}
+}
+
+// sweepBlobs deletes payloads no session record can still need: those under an
+// owner that has no record (a session discarded before the payload was written,
+// or whose cleanup was lost), and keys from before keys named an owner that no
+// record names. Payloads of a live owner stay to the bucket's TTL, since the
+// record cannot say which of them it has stopped using.
+func (s *sessionStore) sweepBlobs(ctx context.Context, kept *blobClaims) error {
+	kv, err := s.blobBucket(ctx, false)
+	if err != nil {
+		return nil // no payload was ever too large for a record
+	}
+	keys, err := kv.Keys(ctx)
+	if errors.Is(err, jetstream.ErrNoKeysFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	grace := s.blobGrace
+	if grace == 0 {
+		grace = blobGrace
+	}
+	for _, key := range keys {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		owner, _, owned := strings.Cut(key, ".")
+		if owned && kept.owners[owner] || !owned && kept.keys[key] {
+			continue
+		}
+		entry, err := kv.Get(ctx, key)
+		if err != nil || time.Since(entry.Created()) < grace {
+			continue
+		}
+		if err := kv.Delete(ctx, key, jetstream.LastRevision(entry.Revision())); err != nil {
+			s.logger.Debug("could not delete an orphaned payload", "error", err)
+		}
+	}
+	return nil
 }
 
 // reclaimable reports whether the sweep may delete a record.

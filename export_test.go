@@ -1,6 +1,9 @@
 package natsmqtt5
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // Seams for the external tests. They exist only in the test binary.
 
@@ -116,3 +119,14 @@ func SetShareMemberSlack(t interface {
 	shareMemberSlack = d
 	t.Cleanup(func() { shareMemberSlack = was })
 }
+
+// SweepStore runs one pass of the session store's sweep, which otherwise runs
+// every sessionSweepInterval.
+func SweepStore(ctx context.Context, b *Broker) error { return b.store.sweep(ctx) }
+
+// SetBlobGrace shortens how old a payload must be before the sweep may call it
+// an orphan.
+func SetBlobGrace(b *Broker, d time.Duration) { b.store.blobGrace = d }
+
+// BlobOwner is the key prefix payloads of clientID are kept under.
+func BlobOwner(clientID string) string { return blobOwner(clientID) }
