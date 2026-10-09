@@ -3,6 +3,7 @@ package natsmqtt5_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -54,8 +55,22 @@ func sharedConsumers(t *testing.T, natsURL string) []string {
 
 func requireConsumers(t *testing.T, natsURL string, n int, msgAndArgs ...any) {
 	t.Helper()
-	require.Eventually(t, func() bool { return len(sharedConsumers(t, natsURL)) == n },
-		5*time.Second, 50*time.Millisecond, msgAndArgs...)
+	wait := 5 * time.Second
+	if os.Getenv("CI") != "" {
+		wait = 30 * time.Second
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		got := sharedConsumers(t, natsURL)
+		if len(got) == n {
+			return
+		}
+		if time.Now().After(deadline) {
+			require.Failf(t, "wrong number of shared consumers",
+				"want %d after %s, have %d: %v %v", n, wait, len(got), got, msgAndArgs)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // oneAtATime is a CONNECT whose client takes a single QoS 1 message at a time,

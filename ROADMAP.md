@@ -42,15 +42,6 @@ at the default 1 MiB with enough of them. The 12 here was measured, the 20 was n
 prefix repeats in every key) or spill the entries beyond the limit to a second record. Low priority: it
 needs a `max_payload` a real deployment seldom sets and a client holding that many messages unacknowledged.
 
-## The macOS CI job waits a fixed 5 s for consumers to attach
-
-**Today:** `requireConsumers` gives the broker 5 s to create its JetStream consumers, and the macOS runner
-has failed it on a slow start without any broker bug. It fails the run, not passes it wrongly, so it is
-flake risk, not a hidden gap.
-
-**Shape:** poll with a deadline scaled to the runner (`CI` set) rather than a constant, and print the
-consumer list when it gives up.
-
 ## Two tests still wait a fixed 200 ms for a drop to be recorded
 
 **Today:** `TestARecordTooLargeForAValueKeepsTheOldestInflightMessages` (`restore_inflight_test.go`) and
@@ -62,7 +53,7 @@ drops in `withdrawn_restart_test.go` before it stops a broker, the delay in
 (`awaitLiveCopies`, backed by a test-only counter). A slow runner here fails the test, not
 passes it wrongly, so this is flake risk and not a hidden gap.
 
-**Shape:** wait on `waitDetached` and on the publisher's PUBACK instead of the clock.
+**Shape:** wait on `waitDetached` and on the publisher's PUBACK instead of the clock. `requireConsumers` already did the same thing for consumer attachment (2026-10-09): 30 s under `CI`, and the consumer list in the failure.
 
 ## A live copy that outlives the session's time on its broker is still lost
 
