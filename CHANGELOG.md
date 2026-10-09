@@ -11,6 +11,9 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Tests.** `DurablePublish` with the flush failing is driven over a socket (`durable_flush_fail_test.go`): a
+  NATS connection cut after the queue copy is stored still ends in a success PUBACK and one delivery to a
+  subscriber on another broker, and NATS staying down ends in 0x83. No library change.
 - **Performance.** A resume reads only the offline-queue subjects its own subscriptions match, not the whole
   rewind window: 50 sessions resuming over 100,000 queued messages took 7.6 s to the slowest, now 15 ms; one
   session over a million, 2.4 s, now 3 ms. A session whose subscriptions are all shared still reads the whole
