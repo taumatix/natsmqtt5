@@ -666,9 +666,10 @@ func (c *conn) connackFits(ack *packet.Connack) bool {
 //  2. Topic Alias Maximum: absent means 0, the client sends no alias, and the
 //     broker holds it to that (conn.topicAliasMax);
 //  3. Maximum Packet Size and then Receive Maximum: absent means no limit
-//     stated and 65535. The broker does not enforce its Receive Maximum on what
-//     the client sends, and its Maximum Packet Size is 64 MiB by default, so a
-//     client small enough to need this is not asking for what it was not told.
+//     stated and 65535, which is then the limit the broker holds the client to
+//     (conn.receiveMax). The default Receive Maximum is 1024 and the default
+//     Maximum Packet Size 64 MiB, so a client small enough to need this is not
+//     asking for what it was not told.
 //
 // What is never left out is a property the specification requires: the
 // Assigned Client Identifier [MQTT-3.2.2-16], Maximum QoS below 2
@@ -677,6 +678,7 @@ func (c *conn) connackFits(ack *packet.Connack) bool {
 // by writePacket, as any packet is.
 func (c *conn) fitConnack(ack *packet.Connack) {
 	c.topicAliasMax = c.broker.opts.topicAliasMax
+	c.receiveMax = c.broker.opts.receiveMaximum
 	if c.clientMaxPacketSize == 0 || ack.Properties == nil || c.connackFits(ack) {
 		return
 	}
@@ -690,7 +692,7 @@ func (c *conn) fitConnack(ack *packet.Connack) {
 		},
 		func() { p.TopicAliasMaximum, c.topicAliasMax = nil, 0 },
 		func() { p.MaximumPacketSize = nil },
-		func() { p.ReceiveMaximum = nil },
+		func() { p.ReceiveMaximum, c.receiveMax = nil, 65535 },
 	}
 	for _, step := range steps {
 		step()

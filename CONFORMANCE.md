@@ -5,7 +5,7 @@ specification's numbered conformance statements, and is what [ROADMAP.md](ROADMA
 from.
 
 - Specification: [MQTT Version 5.0, OASIS Standard, 7 March 2019](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)
-- Reviewed: 2026-10-09, against v0.11.1 plus the changes after it (see the CHANGELOG's
+- Reviewed: 2026-10-09, against v0.11.2 plus the changes after it (see the CHANGELOG's
   `[Unreleased]`). Re-run when the code or the specification has moved a lot.
 - Data: [`conformance/mqtt5-statements.tsv`](conformance/mqtt5-statements.tsv), one row per
   `[MQTT-x.y.z-n]` statement. The statement texts are in the specification; the file carries the
@@ -30,22 +30,22 @@ from the table between the markers and checked against it
 
 | Class | Meaning | Count |
 |---|---|---|
-| TESTED | a test drives the broker (or the codec) and cites the statement | 199 |
+| TESTED | a test drives the broker (or the codec) and cites the statement | 200 |
 | NOT-APPLICABLE | behind a feature the broker does not offer, or cannot be violated by a request | 13 |
-| CLIENT-ONLY | binds only a Client, and no test of the broker cites it | 40 |
+| CLIENT-ONLY | binds only a Client, and no test of the broker cites it | 39 |
 
 | Verdict | Count |
 |---|---|
-| met | 199 |
-| n/a | 53 |
+| met | 200 |
+| n/a | 52 |
 | VIOLATED | 0 |
 | UNSURE | 0 |
 
 | Binds | Count |
 |---|---|
 | Server | 121 |
-| Client and Server | 86 |
-| Client | 45 |
+| Client and Server | 87 |
+| Client | 44 |
 <!-- counts:end -->
 
 Most of the work behind these counts was integration tests that drive the broker over a real TCP
@@ -137,6 +137,12 @@ CHANGELOG has the full text.
   [MQTT-2.2.1-4]. A success CONNACK is shortened to fit a small Maximum Packet Size
   (`small_connack_test.go`) [MQTT-3.1.2-24], [MQTT-3.2.2-16], [MQTT-3.3.2-12]. A data race
   between `Broker.Close` and a late live copy is gone.
+- **After v0.11.2.** A client with more QoS 2 PUBLISH packets unacknowledged than the Receive
+  Maximum the CONNACK stated was served; it is now sent DISCONNECT 0x93 and the connection is
+  closed. The specification's sentence for this (§3.3.4) has no statement id of its own, but §4.13.1
+  lists 0x93 among the Protocol Error codes and a Server that detects one MUST close the connection
+  [MQTT-4.13.1-1]; the row for [MQTT-3.3.4-7], which binds the client, now also carries the tests
+  of the Server half. The broker first read this as a courtesy, which it is not.
 - **After v0.11.1.** A shared SUBSCRIBE that raced the last member's leaving was refused;
   the joiner now retries the consumer's creation until the old one is gone (§4.8.2, the life of
   the subscription, which has no statement id). The conformance table itself is

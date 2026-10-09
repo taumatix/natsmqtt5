@@ -87,6 +87,18 @@ type conn struct {
 	// Maximum Packet Size (fitConnack): then the client was told nothing, which
 	// is 0 [MQTT-3.3.2-12].
 	topicAliasMax uint16
+	// receiveMax is the Receive Maximum this connection was told, which is the
+	// broker's unless the CONNACK had to leave it out to fit the client's Maximum
+	// Packet Size (fitConnack): then the client was told nothing, which is 65535
+	// (MQTT-5.0 §3.2.2.3.3). A client holding more QoS 2 PUBLISH packets
+	// unacknowledged than this is disconnected with 0x93 (handlePublish).
+	receiveMax uint16
+	// openQoS2 holds the Packet Identifiers of the QoS 2 PUBLISH packets this
+	// connection has sent that the broker has not yet completed with a PUBCOMP or
+	// refused with a PUBREC of 0x80 or more: the quota of MQTT-5.0 §4.9. It is per
+	// connection, since the quota is not part of the session state; only the read
+	// loop touches it.
+	openQoS2 map[uint16]struct{}
 	// clientReceiveMax bounds our in-flight QoS 1 and QoS 2 publications
 	// towards the client (MQTT-5.0 §4.9).
 	clientReceiveMax uint16
