@@ -298,7 +298,8 @@ func TestARestoredResendIsWithdrawnWhenTheFilterIsDeniedOnResume(t *testing.T) {
 func TestARecordTooLargeForAValueKeepsTheOldestInflightMessages(t *testing.T) {
 	// 4 KiB holds the subscription and some tens of entries, not a hundred.
 	natsURL := startNATSWithMaxPayload(t, 4096)
-	addrA, stopA := startStoppableBroker(t, natsURL, persistent)
+	var logs syncBuffer
+	addrA, stopA := startStoppableBroker(t, natsURL, persistent, loggingBroker(t, &logs))
 	addrB := startBroker(t, natsURL, persistent)
 
 	const sent = 200
@@ -314,7 +315,7 @@ func TestARecordTooLargeForAValueKeepsTheOldestInflightMessages(t *testing.T) {
 		ids = append(ids, c.expectPublish().PacketID)
 	}
 	c.drop()
-	time.Sleep(200 * time.Millisecond)
+	waitDetached(t, &logs, "restore-overflow")
 	stopA()
 
 	back := dialRaw(t, addrB)

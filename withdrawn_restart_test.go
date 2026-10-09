@@ -3,7 +3,6 @@ package natsmqtt5_test
 import (
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/stretchr/testify/assert"
@@ -34,7 +33,8 @@ func TestAWithdrawnIdentifierSurvivesABrokerRestart_MQTT_4_4_0_1_MQTT_2_2_1_4(t 
 	// it, with owed the withdrawn identifier, and returns the shared NATS URL.
 	withdrawnAcrossTwoBrokers := func(t *testing.T, deny *atomic.Bool, kill bool) (natsURL string, owed uint16) {
 		natsURL = startNATS(t)
-		addrA, stopA := startStoppableBroker(t, natsURL, narrowingAuthorizer(deny), persistent)
+		var logsA, logsB syncBuffer
+		addrA, stopA := startStoppableBroker(t, natsURL, narrowingAuthorizer(deny), persistent, loggingBroker(t, &logsA))
 		c1 := dialRaw(t, addrA)
 		require.False(t, c1.connect(rawConnect(id, 300)).SessionPresent)
 		c1.subscribe("secret/#", packet.QoS1)
@@ -43,11 +43,11 @@ func TestAWithdrawnIdentifierSurvivesABrokerRestart_MQTT_4_4_0_1_MQTT_2_2_1_4(t 
 		pub.publish(&paho.Publish{Topic: "secret/a", QoS: 1, Payload: []byte("classified")})
 		owed = c1.expectPublish().PacketID
 		c1.drop()
-		time.Sleep(200 * time.Millisecond)
+		waitDetached(t, &logsA, id)
 		stopA()
 
 		deny.Store(true)
-		bB, addrB, stopB := startBrokerHandle(t, natsURL, narrowingAuthorizer(deny), persistent)
+		bB, addrB, stopB := startBrokerHandle(t, natsURL, narrowingAuthorizer(deny), persistent, loggingBroker(t, &logsB))
 		c2 := dialRaw(t, addrB)
 		require.True(t, c2.connect(rawConnect(id, 300)).SessionPresent)
 		c2.expectNothing()
@@ -57,7 +57,7 @@ func TestAWithdrawnIdentifierSurvivesABrokerRestart_MQTT_4_4_0_1_MQTT_2_2_1_4(t 
 			natsmqtt5.Kill(bB)
 		} else {
 			c2.drop()
-			time.Sleep(200 * time.Millisecond)
+			waitDetached(t, &logsB, id)
 			stopB()
 		}
 		deny.Store(false)
@@ -102,13 +102,14 @@ func TestAWithdrawnIdentifierSurvivesABrokerRestart_MQTT_4_4_0_1_MQTT_2_2_1_4(t 
 		}
 
 		// Broker C: the first resumption after the withdrawal. Still owed.
-		bC, addrC, stopC := startBrokerHandle(t, natsURL, narrowingAuthorizer(&deny), persistent)
+		var logsC syncBuffer
+		bC, addrC, stopC := startBrokerHandle(t, natsURL, narrowingAuthorizer(&deny), persistent, loggingBroker(t, &logsC))
 		c3 := dialRaw(t, addrC)
 		require.True(t, c3.connect(rawConnect(id, 300)).SessionPresent)
 		assert.Equal(t, owed+1, allocated(t, bC, addrC, c3),
 			"a withdrawn identifier must stay unavailable across a broker restart")
 		c3.drop()
-		time.Sleep(200 * time.Millisecond)
+		waitDetached(t, &logsC, id)
 		stopC()
 
 		// Broker D: the second resumption. The client has had two connections to
