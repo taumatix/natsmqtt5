@@ -236,6 +236,11 @@ type session struct {
 	nextPacketID uint16
 	inflight     map[uint16]*outbound
 	deadBlobs    []string
+	// spillKeys are the payload-bucket values the last record named in
+	// sessionRecord.Spill, and spillAt when they were written; zero when they
+	// were read back from another broker's record, which makes them stale.
+	spillKeys []string
+	spillAt   time.Time
 	// sendSeq numbers sends so that unacknowledged returns the in-flight set in
 	// the order it left.
 	sendSeq uint64
@@ -1607,7 +1612,35 @@ func (s *session) blobsStale(store *sessionStore) bool {
 			return true
 		}
 	}
-	return false
+	return len(s.spillKeys) > 0 && store.blobStale(s.spillAt)
+}
+
+// spillInto makes rec fit one value, keeping what it can in spilled values
+// (sessionStore.spillRecord), and returns how many in-flight entries were left
+// out.
+func (s *session) spillInto(store *sessionStore, rec *sessionRecord) (lost int, err error) {
+	return store.spillRecord(rec, store.valueLimit())
+}
+
+// commitSpill notes that rec, now written, names its spilled values as of
+// wroteAt, and deletes those an earlier record named that this one does not.
+func (s *session) commitSpill(store *sessionStore, rec *sessionRecord, wroteAt time.Time) {
+	s.mu.Lock()
+	old := s.spillKeys
+	s.spillKeys, s.spillAt = rec.Spill, wroteAt
+	s.mu.Unlock()
+	named := make(map[string]struct{}, len(rec.Spill))
+	for _, k := range rec.Spill {
+		named[k] = struct{}{}
+	}
+	for _, k := range old {
+		if _, still := named[k]; still {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
+		_ = store.deleteBlob(ctx, k)
+		cancel()
+	}
 }
 
 // retireBlobLocked notes that the payload an entry kept in the payload bucket is no

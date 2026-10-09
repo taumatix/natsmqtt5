@@ -217,7 +217,7 @@ MQTT-4.6.0-1	4.6 Message ordering	C	CLIENT-ONLY	n/a		binds only a Client
 MQTT-4.6.0-2	4.6 Message ordering	C	CLIENT-ONLY	n/a		binds only a Client
 MQTT-4.6.0-3	4.6 Message ordering	C	CLIENT-ONLY	n/a		binds only a Client
 MQTT-4.6.0-4	4.6 Message ordering	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-4.6.0-5	4.6 Message ordering	S	TESTED	met		TestARecordTooLargeForAValueKeepsTheOldestInflightMessages TestArrearsComeBeforeMessagesPublishedSince TestResendsKeepTheOriginalOrder TestUnacknowledgedReturnsTheOrderMessagesWereSentIn TestWithdrawnFilterTakesItsUnacknowledgedMessagesWithIt (+1 more)
+MQTT-4.6.0-5	4.6 Message ordering	S	TESTED	met		TestARecordTooLargeForAValueStillResendsEveryInflightMessage TestArrearsComeBeforeMessagesPublishedSince TestResendsKeepTheOriginalOrder TestUnacknowledgedReturnsTheOrderMessagesWereSentIn TestWithdrawnFilterTakesItsUnacknowledgedMessagesWithIt (+1 more)
 MQTT-4.6.0-6	4.6 Message ordering	S	TESTED	met		TestAClientThatFallsBehindLosesNothing TestCatchingUpWithSeveralPublishersDeliversEachOnce TestResendsKeepTheOriginalOrder
 MQTT-4.7.0-1	4.7.1 Topic wildcards	CS	TESTED	met		TestConformance_MQTT_4_7_0_1_WildcardsAreRefusedInATopicName
 MQTT-4.7.1-1	4.7.1.2 Multi-level wildcard	CS	TESTED	met		TestConformance_MQTT_4_7_1_1_MultiLevelWildcardPlacement

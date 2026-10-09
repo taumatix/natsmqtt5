@@ -11,6 +11,11 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed.** Unacknowledged messages that did not fit in a session record (about 15 under a 4 KiB NATS
+  `max_payload`, thousands at the default) were cut, newest first, and not resent after the session moved.
+  They are now kept in the `<StreamPrefix>_inflight` bucket in chunks the record names (`Spill`, an added
+  field; a broker that predates it restores only the entries in the record, as before) and resent in order.
+
 - **Fixed.** A payload in the `<StreamPrefix>_inflight` bucket that no session record could need (stashed
   by a broker that lost its session to a Clean Start elsewhere a moment earlier, or a key from before keys
   named a client) waited for the bucket's TTL. The store sweep now deletes keys whose owner has no record

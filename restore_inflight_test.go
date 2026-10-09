@@ -292,10 +292,11 @@ func TestARestoredResendIsWithdrawnWhenTheFilterIsDeniedOnResume(t *testing.T) {
 	back.expectNothing()
 }
 
-// A record that would not fit a key-value value is cut to fit, oldest first,
-// rather than failing the release and losing the whole session: the oldest
-// in-flight messages are the ones that must go out first [MQTT-4.6.0-5].
-func TestARecordTooLargeForAValueKeepsTheOldestInflightMessages(t *testing.T) {
+// A record that would not fit a key-value value does not fail the release and
+// lose the whole session: the entries beyond what it holds are kept beside it, and
+// every in-flight message is resent oldest first [MQTT-4.6.0-5], [MQTT-4.4.0-1].
+// (A set too large even for that is cut, newest first: TestSpillRecordCounts...)
+func TestARecordTooLargeForAValueStillResendsEveryInflightMessage(t *testing.T) {
 	// 4 KiB holds the subscription and some tens of entries, not a hundred.
 	natsURL := startNATSWithMaxPayload(t, 4096)
 	var logs syncBuffer
@@ -334,8 +335,7 @@ func TestARecordTooLargeForAValueKeepsTheOldestInflightMessages(t *testing.T) {
 		assert.True(t, pk.Dup)
 		n++
 	}
-	assert.Greater(t, n, 5, "some in-flight messages must survive")
-	assert.Less(t, n, sent, "not all of them can fit this value limit")
+	assert.Equal(t, sent, n, "[MQTT-4.4.0-1] every in-flight message survives, though they do not fit one value")
 }
 
 // tryReadPublish returns the next PUBLISH, or false once nothing more arrives

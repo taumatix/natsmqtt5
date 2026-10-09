@@ -54,8 +54,21 @@ func (b *Broker) restoreSessionState(ctx context.Context, s *session, rec *sessi
 	if len(rec.withdrawnWas) > 0 {
 		s.restoreWithdrawn(rec.withdrawnWas)
 	}
+	entries := rec.inflightWas
+	if len(rec.spillWas) > 0 && b.store != nil {
+		spilled, unreadable := b.store.loadSpill(ctx, rec.spillWas)
+		entries = append(append([]storedInflight(nil), entries...), spilled...)
+		if unreadable > 0 {
+			b.logger.Warn("some spilled unacknowledged messages of a restored session could not be read",
+				"client_id", s.clientID, "values", unreadable)
+		}
+		// Named so the first checkpoint, which writes them again, deletes the old ones.
+		s.mu.Lock()
+		s.spillKeys, s.spillAt = rec.spillWas, time.Time{}
+		s.mu.Unlock()
+	}
 	lost := 0
-	for _, st := range rec.inflightWas {
+	for _, st := range entries {
 		o := b.restoreEntry(ctx, s.clientID, st)
 		if o == nil {
 			lost++
@@ -69,7 +82,7 @@ func (b *Broker) restoreSessionState(ctx context.Context, s *session, rec *sessi
 	}
 	if lost > 0 {
 		b.logger.Warn("some unacknowledged messages of a restored session could not be restored and will not be resent",
-			"client_id", s.clientID, "lost", lost, "restored", len(rec.inflightWas)-lost)
+			"client_id", s.clientID, "lost", lost, "restored", len(entries)-lost)
 	}
 }
 

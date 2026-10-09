@@ -452,3 +452,54 @@ func TestSweepDeletesOnlyPayloadsNoRecordCanNeed(t *testing.T) {
 		}
 	}
 }
+
+// spillRecord keeps the entries that do not fit a record in values beside it, in
+// order, and loadSpill gives them back.
+func TestSpillRecordKeepsEveryEntryThatDoesNotFit(t *testing.T) {
+	s, _ := storeFixture(t)
+	ctx := context.Background()
+	rec := &sessionRecord{ClientID: "spiller"}
+	for i := 1; i <= 300; i++ {
+		rec.Inflight = append(rec.Inflight, storedInflight{ID: uint16(i), QoS: 1, Seq: uint64(i)})
+	}
+	want := append([]storedInflight(nil), rec.Inflight...)
+
+	limit := 4096
+	lost, err := s.spillRecord(rec, limit)
+	require.NoError(t, err)
+	assert.Zero(t, lost)
+	assert.LessOrEqual(t, len(encodeRecord(rec)), limit)
+	require.NotEmpty(t, rec.Spill)
+	assert.Less(t, len(rec.Inflight), len(want))
+
+	spilled, unreadable := s.loadSpill(ctx, rec.Spill)
+	assert.Zero(t, unreadable)
+	assert.Equal(t, want, append(append([]storedInflight(nil), rec.Inflight...), spilled...))
+
+	small := &sessionRecord{ClientID: "spiller", Inflight: want[:2]}
+	lost, err = s.spillRecord(small, 1<<20)
+	require.NoError(t, err)
+	assert.Zero(t, lost)
+	assert.Empty(t, small.Spill, "a record that fits is left alone")
+}
+
+// When even the names of the values do not fit, the newest entries are the ones
+// left out and are counted.
+func TestSpillRecordCountsWhatEvenTheValueNamesCannotHold(t *testing.T) {
+	s, _ := storeFixture(t)
+	rec := &sessionRecord{ClientID: "spiller-lost"}
+	for i := 1; i <= 60000; i++ {
+		rec.Inflight = append(rec.Inflight, storedInflight{ID: uint16(i), QoS: 1, Seq: uint64(i)})
+	}
+	limit := 300
+	lost, err := s.spillRecord(rec, limit)
+	require.NoError(t, err)
+	assert.Positive(t, lost)
+	assert.LessOrEqual(t, len(encodeRecord(rec)), limit)
+	spilled, _ := s.loadSpill(context.Background(), rec.Spill)
+	got := append(append([]storedInflight(nil), rec.Inflight...), spilled...)
+	assert.Equal(t, 60000-lost, len(got))
+	for i, e := range got {
+		assert.Equal(t, uint16(i+1), e.ID, "what is kept is the oldest, in order")
+	}
+}
