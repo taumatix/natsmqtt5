@@ -9,6 +9,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -515,7 +516,18 @@ func (b *Broker) releaseStoredSession(c *conn) {
 			"for the payload bucket are not kept, so a restored session will not resend them",
 			"client_id", s.clientID, "count", unrecorded)
 	}
-	if cutInflight, cutQoS2 := fitRecord(rec, b.store.valueLimit()); cutInflight+cutQoS2 > 0 {
+	spillStart := time.Now()
+	var spillLost int
+	if rec.ExpirySeconds != 0 {
+		var serr error
+		spillLost, serr = s.spillInto(b.store, rec)
+		if serr != nil {
+			b.logger.Warn("could not store unacknowledged messages beside the session record",
+				"client_id", s.clientID, "error", serr)
+		}
+	}
+	cutInflight, cutQoS2 := fitRecord(rec, b.store.valueLimit())
+	if cutInflight += spillLost; cutInflight+cutQoS2 > 0 {
 		b.logger.Warn("the session record is too large for one key-value value; "+
 			"the newest unacknowledged messages and received QoS 2 identifiers were left out",
 			"client_id", s.clientID, "inflight_left_out", cutInflight, "qos2_left_out", cutQoS2,
@@ -532,6 +544,7 @@ func (b *Broker) releaseStoredSession(c *conn) {
 		return
 	}
 	s.commitRecord(c.claimGen, rec, newRev)
+	s.commitSpill(b.store, rec, spillStart)
 	if rec.ExpirySeconds == 0 {
 		// The record was deleted, not kept: nothing will restore these payloads.
 		s.mu.Lock()

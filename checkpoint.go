@@ -246,6 +246,11 @@ func (b *Broker) checkpointSession(c *conn) error {
 		b.logger.Warn("could not store the payload of an unacknowledged message beside the session record",
 			"client_id", s.clientID, "error", err)
 	}
+	spillStart := time.Now()
+	if _, err := s.spillInto(b.store, rec); err != nil {
+		b.logger.Warn("could not store unacknowledged messages beside the session record",
+			"client_id", s.clientID, "error", err)
+	}
 	fitRecord(rec, b.store.valueLimit())
 
 	ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
@@ -260,6 +265,7 @@ func (b *Broker) checkpointSession(c *conn) error {
 		return err
 	}
 	s.commitRecord(c.claimGen, rec, newRev)
+	s.commitSpill(b.store, rec, spillStart)
 	s.reapBlobs(b.store)
 	if notStored > 0 {
 		// The record is written without them; the next tick tries again rather

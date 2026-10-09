@@ -160,6 +160,13 @@ type sessionRecord struct {
 	// first. Cleared by the claim, and additive like Inflight.
 	Withdrawn []storedWithdrawn `json:",omitempty"`
 
+	// Spill names payload-bucket values that hold the in-flight entries which
+	// did not fit in the record, in order, after those in Inflight (spillRecord).
+	// Each value is a JSON array of entries. Cleared by the claim, and additive
+	// like Inflight: a broker that predates it ignores the key and restores only
+	// the entries in Inflight.
+	Spill []string `json:",omitempty"`
+
 	// awayWas, awayFromSeqWas, deliveredWas, inflightWas and receivedQoS2Was are
 	// what this broker's claim found and cleared, for the handshake to restore
 	// from. They are never written.
@@ -170,6 +177,7 @@ type sessionRecord struct {
 	inflightWas     []storedInflight
 	receivedQoS2Was []uint16
 	withdrawnWas    []storedWithdrawn
+	spillWas        []string
 }
 
 // storedWithdrawn is one withdrawn identifier of the client's session: the
@@ -473,6 +481,7 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 		rec.inflightWas, rec.Inflight = rec.Inflight, nil
 		rec.receivedQoS2Was, rec.ReceivedQoS2 = rec.ReceivedQoS2, nil
 		rec.withdrawnWas, rec.Withdrawn = rec.Withdrawn, nil
+		rec.spillWas, rec.Spill = rec.Spill, nil
 		rev, err := s.kv.Update(ctx, key, encodeRecord(rec), entry.Revision())
 		if err != nil {
 			// Another broker claimed the same Client Identifier between the
@@ -713,6 +722,102 @@ const blobHeadroom = 512
 // defaultMaxPayload is the NATS server's default max_payload, assumed when the
 // server did not say.
 const defaultMaxPayload = 1 << 20
+
+// spillKeyLen is the length of every payload key: an owner, a dot and a digest.
+const spillKeyLen = 32 + 1 + 64
+
+// spillRecord makes rec fit limit bytes without losing in-flight entries it can
+// keep elsewhere: the newest entries are written, in chunks that each fit a
+// payload, to the payload bucket and named in rec.Spill. It returns how many
+// entries it could not keep (the chunks beyond what the record can name, or
+// that could not be written), and the first write error.
+//
+// A record that fits is left alone and its Spill cleared. What is still too
+// large afterwards (received QoS 2 identifiers) is for fitRecord.
+func (s *sessionStore) spillRecord(rec *sessionRecord, limit int) (lost int, err error) {
+	rec.Spill = nil
+	if len(encodeRecord(rec)) <= limit || len(rec.Inflight) == 0 {
+		return 0, nil
+	}
+	all := rec.Inflight
+	sizes := make([]int, len(all))
+	for i, e := range all {
+		raw, _ := json.Marshal(e)
+		sizes[i] = len(raw) + 1
+	}
+	chunkMax := s.blobLimit()
+	// pack divides all[from:] into spans that each fit one value.
+	pack := func(from int) (spans [][2]int) {
+		used := 2
+		for i := from; i < len(all); i++ {
+			if len(spans) == 0 || used+sizes[i] > chunkMax {
+				spans = append(spans, [2]int{i, i})
+				used = 2
+			}
+			used += sizes[i]
+			spans[len(spans)-1][1] = i + 1
+		}
+		return spans
+	}
+	placeholder := strings.Repeat("x", spillKeyLen)
+	fits := func(keep int, chunks int) bool {
+		rec.Inflight, rec.Spill = all[:keep], make([]string, chunks)
+		for i := range rec.Spill {
+			rec.Spill[i] = placeholder
+		}
+		return len(encodeRecord(rec)) <= limit
+	}
+
+	keep := len(all)
+	var spans [][2]int
+	for keep > 0 {
+		keep -= max(1, keep/8)
+		spans = pack(keep)
+		if fits(keep, len(spans)) {
+			break
+		}
+	}
+	if keep == 0 {
+		// Even the chunks' names are too many; the last ones go.
+		for len(spans) > 0 && !fits(0, len(spans)) {
+			spans = spans[:len(spans)-1]
+		}
+	}
+	rec.Inflight, rec.Spill = all[:keep], nil
+	kept := keep
+	for _, span := range spans {
+		raw, _ := json.Marshal(all[span[0]:span[1]])
+		ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
+		key, perr := s.putBlob(ctx, blobOwner(rec.ClientID), raw)
+		cancel()
+		if perr != nil {
+			err = perr
+			break
+		}
+		rec.Spill = append(rec.Spill, key)
+		kept += span[1] - span[0]
+	}
+	return len(all) - kept, err
+}
+
+// loadSpill reads the entries named by keys back, in order. A value that cannot
+// be read is counted and skipped; the entries of the others keep their order.
+func (s *sessionStore) loadSpill(ctx context.Context, keys []string) (entries []storedInflight, unreadable int) {
+	for _, key := range keys {
+		raw, err := s.getBlob(ctx, key)
+		var chunk []storedInflight
+		if err == nil {
+			err = json.Unmarshal(raw, &chunk)
+		}
+		if err != nil {
+			unreadable++
+			s.logger.Warn("spilled in-flight entries of a session could not be read", "key", key, "error", err)
+			continue
+		}
+		entries = append(entries, chunk...)
+	}
+	return entries, unreadable
+}
 
 // fitRecord cuts rec until its encoding is within limit bytes, and returns how
 // many in-flight entries and received QoS 2 identifiers it left out.

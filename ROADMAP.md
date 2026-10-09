@@ -14,18 +14,6 @@ names it. Entries are checked against the code each time the review is re-run (l
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
-## A record of in-flight references can still outgrow a very small `max_payload`
-
-**Today:** the PUBLISHes kept inline in a session record share a quarter of the value limit and the rest
-go to the payload bucket (2026-10-09), so twelve 600-byte messages in flight under a 4 KiB `max_payload` are
-all resent after the session moves. Each bucket reference still costs about 150 bytes of the record, so
-around 20 unacknowledged messages at 4 KiB reach the value limit and `fitRecord` cuts the newest, as it does
-at the default 1 MiB with enough of them. The 12 here was measured, the 20 was not.
-
-**Shape:** measure the per-entry cost and check the figure; if it matters, shorten the reference (the owner
-prefix repeats in every key) or spill the entries beyond the limit to a second record. Low priority: it
-needs a `max_payload` a real deployment seldom sets and a client holding that many messages unacknowledged.
-
 ## A live copy that outlives the session's time on its broker is still lost
 
 **Today:** a live copy of a queued message that reaches the session after its connection ended is noted
@@ -296,6 +284,20 @@ message against 0.16 ms with the tick only, so one connection's QoS 2 rate is ab
 **Shape:** one write for every message already waiting in the connection's queue (group commit),
 or a write only when the record would change a successor's answer; measure before and after, and
 with `sync_always` on the NATS server, where the writes cost more.
+
+## Spilled in-flight entries are rewritten whole at every changed checkpoint
+
+**Today:** when the in-flight set outgrows a record value, the entries that do not fit are written to the
+payload bucket in chunks (`spillRecord`, 2026-10-09; measured at 225 bytes an entry in the record, not the
+150 this file said). A checkpoint after any change writes every chunk again and deletes the superseded ones,
+so a session holding thousands of unacknowledged messages under a small `max_payload` writes megabytes per
+interval. Past the number of chunk names a record holds (about 35 at 4 KiB) the newest entries are still left
+out and logged, as before. Orphaned chunks of a live owner wait on the TTL (`sweepBlobs` judges owners, not
+keys).
+
+**Shape:** write only the chunks whose content changed (the keys are content-addressed, so this is a
+comparison with the last record's `Spill`); let the sweep delete a live owner's keys that its record no
+longer names. Low priority: it needs a very small `max_payload` or tens of thousands of messages unacknowledged.
 
 ## Other tests still sleep for a drop to be recorded
 

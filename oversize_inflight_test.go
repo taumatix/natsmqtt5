@@ -405,3 +405,42 @@ func TestManySmallInflightPublishesUnderASmallMaxPayloadAreAllResent(t *testing.
 	}
 	assert.Empty(t, ids, "every unacknowledged message is resent")
 }
+
+// [MQTT-4.4.0-1]: more unacknowledged messages than a record value holds under a small
+// max_payload are all resent, in the order they were sent, by the broker that restores the
+// session, because the entries that do not fit the record are kept in the payload bucket
+// beside it. Once they are acknowledged nothing is left in the bucket.
+func TestUnacknowledgedMessagesBeyondOneRecordValueAreAllResentInOrder(t *testing.T) {
+	natsURL := startNATSWithMaxPayload(t, 4096)
+	noQueue := func(o *natsmqtt5.Options) { o.PersistentSessions, o.DisableOfflineQueue = true, true }
+	addrA, stopA := startStoppableBroker(t, natsURL, noQueue)
+	addrB := startBroker(t, natsURL, noQueue)
+
+	const n = 60
+	c := dialRaw(t, addrA)
+	c.connect(rawConnect("many-spill", 300))
+	c.subscribe("sp/#", packet.QoS1)
+	pub, _ := connectClient(t, addrA, connectOpts("pub-many-spill"))
+	for i := 0; i < n; i++ {
+		pub.publish(&paho.Publish{Topic: "sp/x", QoS: 1, Payload: bytes.Repeat([]byte{byte('a' + i%26)}, 600+i)})
+	}
+	sent := make([]uint16, 0, n)
+	for i := 0; i < n; i++ {
+		sent = append(sent, c.expectPublish().PacketID)
+	}
+	c.drop()
+	time.Sleep(300 * time.Millisecond)
+	stopA()
+
+	back := dialRaw(t, addrB)
+	require.True(t, back.connect(rawConnect("many-spill", 300)).SessionPresent)
+	for i := 0; i < n; i++ {
+		got := back.expectPublish()
+		assert.Equal(t, sent[i], got.PacketID, "[MQTT-4.4.0-1] resend %d, in the order sent", i)
+		assert.Equal(t, bytes.Repeat([]byte{byte('a' + i%26)}, 600+i), got.Payload)
+		back.send(&packet.Puback{Ack: packet.Ack{PacketID: got.PacketID}})
+	}
+	back.expectNothing()
+	require.Eventually(t, func() bool { return len(inflightKeys(t, natsURL)) == 0 },
+		10*time.Second, 100*time.Millisecond, "acknowledged messages leave nothing in the bucket")
+}
