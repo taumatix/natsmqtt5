@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -119,6 +120,14 @@ type willStore struct {
 	// adoptOrphans touches it.
 	silentSince map[string]time.Time
 
+	// index mirrors the bucket from a watcher, so a check reads memory instead
+	// of listing the bucket and fetching every record. synced is false until the
+	// watcher has delivered the initial contents and whenever it is down, and a
+	// check then reads the bucket directly.
+	indexMu sync.Mutex
+	index   map[string]*willLease
+	synced  bool
+
 	// publish sends an adopted Will. The broker supplies it.
 	publish func(clientID string, w *packet.Will)
 	// closing closes when the broker shuts down, which abandons Wills waiting
@@ -158,6 +167,7 @@ func newWillStore(ctx context.Context, js jetstream.JetStream, nc *nats.Conn, op
 		fence:         fence,
 		closing:       closing,
 		silentSince:   map[string]time.Time{},
+		index:         map[string]*willLease{},
 	}
 	w.fenceAfter = 2 * every
 	w.selfEvery = every / 2
@@ -168,6 +178,7 @@ func newWillStore(ctx context.Context, js jetstream.JetStream, nc *nats.Conn, op
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	w.stop = cancel
+	go w.watchLoop(runCtx)
 	go w.checkLoop(runCtx)
 	go w.selfLoop(runCtx)
 	return w, nil
@@ -331,6 +342,75 @@ func (w *willStore) settle(ctx context.Context, clientID string, resumed bool) {
 	}
 }
 
+// watchLoop keeps index equal to the bucket. A watcher that ends while the
+// store is running is replaced, and the checks read the bucket directly in the
+// meantime.
+func (w *willStore) watchLoop(ctx context.Context) {
+	for ctx.Err() == nil {
+		w.watchOnce(ctx)
+		w.indexMu.Lock()
+		w.synced = false
+		w.index = map[string]*willLease{}
+		w.indexMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(w.checkEvery):
+		}
+	}
+}
+
+func (w *willStore) watchOnce(ctx context.Context) {
+	watcher, err := w.kv.WatchAll(ctx)
+	if err != nil {
+		w.logger.Warn("could not watch the Will bucket; checks read it directly", "error", err)
+		return
+	}
+	defer watcher.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case e, ok := <-watcher.Updates():
+			if !ok {
+				return
+			}
+			w.indexMu.Lock()
+			switch {
+			case e == nil:
+				w.synced = true
+			case e.Operation() != jetstream.KeyValuePut:
+				delete(w.index, e.Key())
+			default:
+				if rec, err := decodeWillRecord(e.Value()); err == nil {
+					w.index[e.Key()] = &willLease{key: e.Key(), rec: *rec, rev: e.Revision()}
+				} else {
+					delete(w.index, e.Key())
+				}
+			}
+			w.indexMu.Unlock()
+		}
+	}
+}
+
+// indexed returns a copy of the foreign records the watcher knows, or false when
+// it is not in sync.
+func (w *willStore) indexed() ([]*willLease, bool) {
+	w.indexMu.Lock()
+	defer w.indexMu.Unlock()
+	if !w.synced {
+		return nil, false
+	}
+	out := make([]*willLease, 0, len(w.index))
+	for _, l := range w.index {
+		if l.rec.Owner != w.owner {
+			c := *l
+			out = append(out, &c)
+		}
+	}
+	return out, true
+}
+
 func (w *willStore) read(ctx context.Context, key string) (*willLease, bool) {
 	entry, err := w.kv.Get(ctx, key)
 	if err != nil {
@@ -408,10 +488,13 @@ func (w *willStore) reachable(ctx context.Context) bool {
 func (w *willStore) adoptOrphans(ctx context.Context) {
 	listCtx, cancel := context.WithTimeout(ctx, 2*willOpTimeout)
 	defer cancel()
-	keys, err := w.kv.ListKeys(listCtx)
-	if err != nil {
-		w.logger.Warn("could not list Will Messages", "error", err)
-		return
+	leases, ok := w.indexed()
+	if !ok {
+		var err error
+		if leases, err = w.listForeign(listCtx); err != nil {
+			w.logger.Warn("could not list Will Messages", "error", err)
+			return
+		}
 	}
 	alive := map[string]bool{}
 	seen := map[string]bool{}
@@ -422,11 +505,7 @@ func (w *willStore) adoptOrphans(ctx context.Context) {
 			}
 		}
 	}()
-	for key := range keys.Keys() {
-		l, ok := w.read(listCtx, key)
-		if !ok || l.rec.Owner == w.owner {
-			continue
-		}
+	for _, l := range leases {
 		up, known := alive[l.rec.Owner]
 		if !known {
 			// One request, not two: silence has to last waitOut across checks
@@ -450,6 +529,22 @@ func (w *willStore) adoptOrphans(ctx context.Context) {
 			w.adopt(l)
 		}
 	}
+}
+
+// listForeign reads the bucket record by record: the path taken until the
+// watcher is in sync.
+func (w *willStore) listForeign(ctx context.Context) ([]*willLease, error) {
+	keys, err := w.kv.ListKeys(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []*willLease
+	for key := range keys.Keys() {
+		if l, ok := w.read(ctx, key); ok && l.rec.Owner != w.owner {
+			out = append(out, l)
+		}
+	}
+	return out, nil
 }
 
 func (w *willStore) adopt(l *willLease) {

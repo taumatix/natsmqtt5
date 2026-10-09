@@ -11,6 +11,11 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Performance.** With `DurableWills`, a broker's Will check no longer lists the bucket and fetches every
+  other broker's record each `WillCheckInterval`. It reads an in-memory index kept by a bucket watcher and
+  pings each owner once; until the watcher has synced, or while it is down, it reads the bucket as before.
+  Over ten checks of 100 records, 2,100 direct gets became none per record
+  (`TestWillCheckDoesNotReadTheBucketEveryTick`). No option or record format change.
 - **Tests.** `DurablePublish` with the flush failing is driven over a socket (`durable_flush_fail_test.go`): a
   NATS connection cut after the queue copy is stored still ends in a success PUBACK and one delivery to a
   subscriber on another broker, and NATS staying down ends in 0x83. No library change.
