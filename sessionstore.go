@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -583,19 +584,51 @@ func (s *sessionStore) blobBucket(ctx context.Context, create bool) (jetstream.K
 	return kv, nil
 }
 
-// putBlob keeps raw in the payload bucket and returns its key, the digest of
-// raw. Writing the same bytes again refreshes their age.
-func (s *sessionStore) putBlob(ctx context.Context, raw []byte) (string, error) {
+// blobOwner is the prefix of the keys one client's payloads are kept under. A
+// payload's digest includes its Packet Identifier, so two sessions that were sent
+// the same message with the same identifier would otherwise share a key, and
+// one finishing would delete the other's resend.
+func blobOwner(clientID string) string {
+	sum := sha256.Sum256([]byte(clientID))
+	return hex.EncodeToString(sum[:16])
+}
+
+// blobDigest is the part of a key that is the digest of the payload: the whole
+// of a key written before keys named an owner, the part after the dot since.
+func blobDigest(key string) string {
+	if i := strings.LastIndexByte(key, '.'); i >= 0 {
+		return key[i+1:]
+	}
+	return key
+}
+
+// putBlob keeps raw in the payload bucket and returns its key: owner, a dot and
+// the digest of raw. Writing the same bytes again refreshes their age.
+func (s *sessionStore) putBlob(ctx context.Context, owner string, raw []byte) (string, error) {
 	kv, err := s.blobBucket(ctx, true)
 	if err != nil {
 		return "", err
 	}
 	sum := sha256.Sum256(raw)
-	key := hex.EncodeToString(sum[:])
+	key := owner + "." + hex.EncodeToString(sum[:])
 	if _, err := kv.Put(ctx, key, raw); err != nil {
 		return "", err
 	}
 	return key, nil
+}
+
+// deleteBlob removes a payload once nothing needs it. A key without an owner was
+// written by a release that shared keys between sessions, so it is left to the
+// bucket's TTL.
+func (s *sessionStore) deleteBlob(ctx context.Context, key string) error {
+	if !strings.Contains(key, ".") {
+		return nil
+	}
+	kv, err := s.blobBucket(ctx, false)
+	if err != nil {
+		return err
+	}
+	return kv.Delete(ctx, key)
 }
 
 // getBlob reads a payload back, verified against its key so that a truncated
@@ -610,7 +643,7 @@ func (s *sessionStore) getBlob(ctx context.Context, key string) ([]byte, error) 
 		return nil, err
 	}
 	raw := e.Value()
-	if sum := sha256.Sum256(raw); hex.EncodeToString(sum[:]) != key {
+	if sum := sha256.Sum256(raw); hex.EncodeToString(sum[:]) != blobDigest(key) {
 		return nil, fmt.Errorf("stored payload does not match its key %s", key)
 	}
 	return raw, nil

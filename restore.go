@@ -94,7 +94,11 @@ func (b *Broker) restoreEntry(ctx context.Context, clientID string, st storedInf
 		st.Pub = raw
 	}
 	if len(st.Pub) > 0 {
-		return restoreStoredPublish(st)
+		o := restoreStoredPublish(st)
+		if o != nil {
+			o.blobKey = st.Blob
+		}
+		return o
 	}
 	if b.queue == nil || st.Seq == 0 || st.QoS == packet.QoS0 {
 		return nil

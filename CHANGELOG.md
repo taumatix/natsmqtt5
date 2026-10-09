@@ -11,6 +11,13 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed.** The payload of an unacknowledged message too large for the session record stayed in the
+  `<StreamPrefix>_inflight` bucket until its TTL, twice the maximum Session Expiry Interval, after the
+  client had acknowledged it, so a prompt client left up to that long of dead values behind (up to 1 MiB
+  each). The payload is now deleted when the PUBACK or PUBCOMP completes the message, or the session
+  drops it. Its key now names the client as well as the digest, so one session finishing does not take
+  the payload another was sent under the same Packet Identifier. Keys written by earlier versions are
+  still read, and are left to the TTL.
 - **Fixed.** An unacknowledged message with no queue copy (a retained message, or the queue off) whose
   PUBLISH was over seven eighths of the NATS server's `max_payload` was logged and not resent after
   the broker serving the session stopped, though the payload bucket could hold it: the bucket was held

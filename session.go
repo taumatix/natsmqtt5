@@ -235,6 +235,7 @@ type session struct {
 	// (MQTT-5.0 §2.2.1).
 	nextPacketID uint16
 	inflight     map[uint16]*outbound
+	deadBlobs    []string
 	// sendSeq numbers sends so that unacknowledged returns the in-flight set in
 	// the order it left.
 	sendSeq uint64
@@ -747,6 +748,7 @@ func (s *session) completeInflightLocked(c *conn, id uint16) (outbound, bool) {
 		return outbound{}, false
 	}
 	delete(s.inflight, id)
+	s.retireBlobLocked(o)
 	done := *o
 	if r, resent := s.resent[id]; resent && r.conn == c && !r.written && !r.quota && o.quotaHeld && o.resentOn == c {
 		// The original's acknowledgement overtook a resend that has taken a
@@ -837,6 +839,7 @@ func (s *session) withdrawInflightLocked(denied, surviving []string, handBack *[
 			continue
 		}
 		delete(s.inflight, id)
+		s.retireBlobLocked(o)
 		if o.ackSubject != "" {
 			*handBack = append(*handBack, o.ackSubject)
 		}
@@ -1595,6 +1598,42 @@ func (s *session) blobsStale(store *sessionStore) bool {
 	return false
 }
 
+// retireBlobLocked notes that the payload an entry kept in the payload bucket is no
+// longer needed. It is removed by reapBlobs once a record that does not name it
+// has been written. s.mu is held.
+func (s *session) retireBlobLocked(o *outbound) {
+	if o.blobKey != "" {
+		s.deadBlobs = append(s.deadBlobs, o.blobKey)
+		o.blobKey = ""
+	}
+}
+
+// reapBlobs deletes the payloads of entries that have completed, after a record
+// that no longer names them was written. A key an entry holds again (the same
+// message, with the same identifier, sent again) is kept. A failed delete is not
+// retried: the bucket's TTL removes the payload. persistMu is held, which is what
+// keeps a payload from being written between the check and the delete.
+func (s *session) reapBlobs(store *sessionStore) {
+	s.mu.Lock()
+	dead := s.deadBlobs
+	s.deadBlobs = nil
+	held := make(map[string]struct{}, len(s.inflight))
+	for _, o := range s.inflight {
+		if o.blobKey != "" {
+			held[o.blobKey] = struct{}{}
+		}
+	}
+	s.mu.Unlock()
+	for _, key := range dead {
+		if _, still := held[key]; still {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
+		_ = store.deleteBlob(ctx, key)
+		cancel()
+	}
+}
+
 // pendingBlob is an in-flight entry whose PUBLISH is to be written to the
 // payload bucket before the record that names it.
 type pendingBlob struct {
@@ -1616,7 +1655,7 @@ func (s *session) stashBlobs(store *sessionStore, rec *sessionRecord, pending []
 	drop := make(map[int]struct{})
 	for _, p := range pending {
 		ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
-		key, perr := store.putBlob(ctx, p.raw)
+		key, perr := store.putBlob(ctx, blobOwner(s.clientID), p.raw)
 		cancel()
 		if perr != nil {
 			err = perr

@@ -217,3 +217,68 @@ func TestAnInflightRetainedPublishNearMaxPayloadIsRestored(t *testing.T) {
 	assert.True(t, got.Dup)
 	assert.Equal(t, big, got.Payload)
 }
+
+// inflightKeys lists the keys of the payload bucket, none while it holds nothing.
+func inflightKeys(t *testing.T, natsURL string) []string {
+	t.Helper()
+	nc, err := nats.Connect(natsURL)
+	require.NoError(t, err)
+	defer nc.Close()
+	js, err := jetstream.New(nc)
+	require.NoError(t, err)
+	kv, err := js.KeyValue(context.Background(), natsmqtt5.DefaultStreamPrefix+"_inflight")
+	if err != nil {
+		return nil
+	}
+	keys, err := kv.Keys(context.Background())
+	if err != nil {
+		return nil
+	}
+	return keys
+}
+
+// A payload kept for an unacknowledged message is deleted once the client
+// acknowledges it, and one session finishing does not delete the payload of
+// another that was sent the same message under the same Packet Identifier
+// [MQTT-4.4.0-1].
+func TestAnAcknowledgedMessagesPayloadIsDeletedAndAnotherSessionsIsKept(t *testing.T) {
+	natsURL := startNATS(t)
+	fast := func(o *natsmqtt5.Options) {
+		o.PersistentSessions, o.DisableOfflineQueue = true, true
+		o.SessionCheckpointInterval = 100 * time.Millisecond
+	}
+	addrA, stopA := startStoppableBroker(t, natsURL, fast)
+	addrB := startBroker(t, natsURL, fast)
+
+	big := bytes.Repeat([]byte("q"), 100<<10)
+	pub, _ := connectClient(t, addrA, connectOpts("pub-share"))
+	pub.publish(&paho.Publish{Topic: "sh/a", QoS: 1, Retain: true, Payload: big})
+	time.Sleep(200 * time.Millisecond)
+
+	one, two := dialRaw(t, addrA), dialRaw(t, addrA)
+	one.connect(rawConnect("share-one", 300))
+	one.subscribe("sh/#", packet.QoS1)
+	two.connect(rawConnect("share-two", 300))
+	two.subscribe("sh/#", packet.QoS1)
+	first, second := one.expectPublish(), two.expectPublish()
+	require.Equal(t, first.PacketID, second.PacketID, "the same message under the same identifier")
+
+	require.Eventually(t, func() bool { return len(inflightKeys(t, natsURL)) == 2 },
+		5*time.Second, 50*time.Millisecond, "each session keeps its own payload")
+
+	one.send(&packet.Puback{Ack: packet.Ack{PacketID: first.PacketID}})
+	require.Eventually(t, func() bool { return len(inflightKeys(t, natsURL)) == 1 },
+		5*time.Second, 50*time.Millisecond, "the acknowledged message's payload is deleted")
+
+	two.drop()
+	time.Sleep(200 * time.Millisecond)
+	stopA()
+	back := dialRaw(t, addrB)
+	require.True(t, back.connect(rawConnect("share-two", 300)).SessionPresent)
+	got := back.expectPublish()
+	assert.Equal(t, second.PacketID, got.PacketID)
+	assert.Equal(t, big, got.Payload, "the other session's payload survived the first one's acknowledgement")
+	back.send(&packet.Puback{Ack: packet.Ack{PacketID: got.PacketID}})
+	require.Eventually(t, func() bool { return len(inflightKeys(t, natsURL)) == 0 },
+		5*time.Second, 50*time.Millisecond, "and is deleted when it is acknowledged on the broker that restored it")
+}

@@ -260,6 +260,7 @@ func (b *Broker) checkpointSession(c *conn) error {
 		return err
 	}
 	s.commitRecord(c.claimGen, rec, newRev)
+	s.reapBlobs(b.store)
 	if notStored > 0 {
 		// The record is written without them; the next tick tries again rather
 		// than treating the state as recorded.

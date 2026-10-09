@@ -532,6 +532,7 @@ func (b *Broker) releaseStoredSession(c *conn) {
 		return
 	}
 	s.commitRecord(c.claimGen, rec, newRev)
+	s.reapBlobs(b.store)
 }
 
 // persistLateCopy rewrites the record of a released session so that the broker
