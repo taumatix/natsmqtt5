@@ -1543,7 +1543,7 @@ func (s *session) inflightState(blobs *sessionStore) (inflight []storedInflight,
 				unrecorded++
 				continue
 			case o.blobKey != "" && !blobs.blobStale(o.blobAt):
-				st.Blob = o.blobKey
+				st.Blob, st.BlobAt = o.blobKey, o.blobAt
 			default:
 				pending = append(pending, pendingBlob{index: len(inflight), o: o, raw: raw})
 			}
@@ -1677,6 +1677,7 @@ func (s *session) stashBlobs(store *sessionStore, rec *sessionRecord, pending []
 	drop := make(map[int]struct{})
 	for _, p := range pending {
 		ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
+		wroteAt := time.Now()
 		key, perr := store.putBlob(ctx, blobOwner(s.clientID), p.raw)
 		cancel()
 		if perr != nil {
@@ -1684,9 +1685,9 @@ func (s *session) stashBlobs(store *sessionStore, rec *sessionRecord, pending []
 			drop[p.index] = struct{}{}
 			continue
 		}
-		rec.Inflight[p.index].Blob = key
+		rec.Inflight[p.index].Blob, rec.Inflight[p.index].BlobAt = key, wroteAt
 		s.mu.Lock()
-		p.o.blobKey, p.o.blobAt = key, time.Now()
+		p.o.blobKey, p.o.blobAt = key, wroteAt
 		s.mu.Unlock()
 	}
 	if len(drop) > 0 {

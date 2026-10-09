@@ -11,6 +11,10 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed.** A session restored by another broker (or after a restart) wrote every oversize in-flight
+  payload to the `<StreamPrefix>_inflight` bucket again at its first checkpoint, though the bucket held it.
+  The session record now carries when the payload was written (`BlobAt`, an added field; a record without
+  it is rewritten once, as before). A write time ahead of the restoring broker's clock counts as stale.
 - **Fixed.** A payload in the `<StreamPrefix>_inflight` bucket whose delete failed (a NATS timeout at the
   wrong moment) was left until the bucket's TTL. The next checkpoint now tries the delete again.
 - **Fixed.** With a NATS `max_payload` under about 18 KiB, an unacknowledged message of a few KiB was left

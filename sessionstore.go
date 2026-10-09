@@ -212,9 +212,13 @@ type storedInflight struct {
 	// Blob names the PUBLISH in the payload bucket (sessionStore.putBlob) when it
 	// is too large for Pub: the record keeps the key and the payload stays out of
 	// it, so the record remains within a value. At and Exp are as for Pub.
-	Blob string    `json:",omitempty"`
-	At   time.Time `json:",omitempty"`
-	Exp  *uint32   `json:",omitempty"`
+	Blob string `json:",omitempty"`
+	// BlobAt is when the payload named by Blob was last written, so a broker that
+	// restores the record does not write it again at once. A record without it
+	// (from a release before it existed) is rewritten once.
+	BlobAt time.Time `json:",omitempty"`
+	At     time.Time `json:",omitempty"`
+	Exp    *uint32   `json:",omitempty"`
 }
 
 // maxStoredPublish is the largest PUBLISH kept inside a session record for a
@@ -551,8 +555,11 @@ func (s *sessionStore) release(ctx context.Context, rec *sessionRecord, rev uint
 func blobTTL(maxSessionExpiry time.Duration) time.Duration { return 2 * maxSessionExpiry }
 
 // blobStale reports whether a payload written at t is due to be written again.
+// A time in the future (a write time another broker recorded, on a clock ahead of
+// this one) counts as stale: trusting it would let a payload expire unnoticed.
 func (s *sessionStore) blobStale(t time.Time) bool {
-	return t.IsZero() || time.Since(t) > blobTTL(s.maxSessionExpiry)/4
+	age := time.Since(t)
+	return t.IsZero() || age < 0 || age > blobTTL(s.maxSessionExpiry)/4
 }
 
 // blobBucket is the payload bucket, created on the first payload that needs it

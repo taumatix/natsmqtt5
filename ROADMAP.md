@@ -14,21 +14,18 @@ names it. Entries are checked against the code each time the review is re-run (l
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
-## A restored in-flight payload is rewritten once
+## A payload stashed around a Clean Start, or before keys named a client, is not deleted
 
-**Today:** a restored entry has a zero `blobAt`, so the next checkpoint rewrites its payload once
-though it is already in the bucket. (A failed payload delete is now retried at the next checkpoint,
-2026-10-09; that retry is covered by a unit test on `reapBlobs` only, since no real bucket can be made to
-refuse a delete.)
+**Today:** (A restored payload is no longer rewritten, 2026-10-09: the record carries `BlobAt`. A failed
+payload delete is retried at the next checkpoint; that retry is covered by a unit test on `reapBlobs` only,
+since no real bucket can be made to refuse a delete.) A payload stashed by a broker that lost its session to
+a Clean Start on another broker a moment earlier can be written after that broker's delete, and a key from
+before keys named a client is never deleted. Both wait on the TTL.
 
-**Shape:** store the write time in the session record's reference so a restore can carry it; setting
-`blobAt` to the restore time instead would let a payload expire unnoticed. Low priority: it costs one
-extra write per restored payload.
-
-Same family: a payload stashed by a broker that lost its session to a Clean Start on another broker a
-moment earlier can be written after that broker's delete, and a key from before keys named a client is
-never deleted. Both wait on the TTL; a sweep of the bucket for keys whose owner has no session record
-would close them.
+**Shape:** a sweep of the bucket for keys whose owner has no session record would close both. Low priority:
+it costs bucket space for at most the TTL. The restored-payload clock now comes from another broker's
+write time, so a broker whose clock is far behind the others rewrites early (harmless) and one far ahead is
+treated as stale (also harmless).
 
 ## A record of in-flight references can still outgrow a very small `max_payload`
 
