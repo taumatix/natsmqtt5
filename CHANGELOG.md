@@ -11,6 +11,10 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed.** With a NATS `max_payload` under about 18 KiB, an unacknowledged message of a few KiB was left
+  out of the session record and not resent after the session moved to another broker. The inline share of
+  the record now shrinks with `max_payload` (a quarter of the value limit, at most 16 KiB), and a larger
+  message goes to the payload bucket. The default 1 MiB is unchanged.
 - **Fixed.** The payloads a session kept in the `<StreamPrefix>_inflight` bucket outlived the session
   when it was discarded rather than completed: a reconnect with Clean Start, a session with Session Expiry
   Interval 0 ending with its connection, and an expired record swept. Each now deletes the session's

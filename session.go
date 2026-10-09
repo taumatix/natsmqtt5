@@ -1501,6 +1501,14 @@ func (s *session) commitRecord(gen uint64, rec *sessionRecord, rev uint64) {
 // name in the entry at pending[i].index (stashBlobs): the write is a JetStream
 // round trip and this runs under the session lock.
 func (s *session) inflightState(blobs *sessionStore) (inflight []storedInflight, received []uint16, unrecorded int, pending []pendingBlob) {
+	// Under a small max_payload a record of several 16 KiB PUBLISHes would not fit, so
+	// the inline share shrinks with it and the rest goes to the payload bucket.
+	inlineLimit := maxStoredPublish
+	if blobs != nil {
+		if q := blobs.valueLimit() / 4; q < inlineLimit {
+			inlineLimit = q
+		}
+	}
 	s.mu.Lock()
 	entries := make([]*outbound, 0, len(s.inflight))
 	for _, o := range s.inflight {
@@ -1525,7 +1533,7 @@ func (s *session) inflightState(blobs *sessionStore) (inflight []storedInflight,
 			case !ok:
 				unrecorded++
 				continue
-			case len(raw) <= maxStoredPublish:
+			case len(raw) <= inlineLimit:
 				st.Pub = raw
 			case blobs == nil || len(raw) > blobs.blobLimit():
 				unrecorded++
