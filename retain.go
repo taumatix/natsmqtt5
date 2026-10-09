@@ -28,6 +28,10 @@ type retained struct {
 	// Interval starts to run; seq is its stream sequence, 0 if unknown.
 	stored time.Time
 	seq    uint64
+	// id is the Mqtt5-Msg-Id of the PUBLISH it came from, which its offline-queue
+	// copy carries too, so a session sent it as a retained message is not also
+	// replayed that copy. Empty for one stored before ids were kept.
+	id string
 }
 
 // expired reports whether the message's Message Expiry Interval has passed
@@ -212,6 +216,7 @@ func (s *retainedStore) apply(msg jetstream.Msg) {
 		qos:       qos,
 		props:     props,
 		stored:    time.Now(),
+		id:        messageID(&nats.Msg{Header: msg.Headers()}),
 	}
 	// The stream's timestamp, so a message stored before this broker started
 	// has been waiting since then and not since the broker read it.
@@ -234,8 +239,11 @@ func trimRetainedMarker(subject string) (string, bool) {
 // The write is synchronous: PublishMsg waits for the JetStream acknowledgement
 // so that a PUBACK to the client is not sent before the retained message is
 // durable.
-func (s *retainedStore) store(ctx context.Context, subject, originClientID string, p *packet.Publish) error {
+func (s *retainedStore) store(ctx context.Context, subject, originClientID, id string, p *packet.Publish) error {
 	msg := toNATS(retainedSubject(s.prefix, subject), originClientID, p)
+	if id != "" {
+		msg.Header.Set(hdrMsgID, id)
+	}
 	if len(p.Payload) == 0 {
 		// "If the Payload contains zero bytes ... any retained message with
 		// the same topic name MUST be removed" [MQTT-3.3.1-6]. The empty
@@ -272,6 +280,7 @@ func (s *retainedStore) store(ctx context.Context, subject, originClientID strin
 		props:     props,
 		stored:    time.Now(),
 		seq:       ack.Sequence,
+		id:        messageID(msg),
 	}
 	return nil
 }

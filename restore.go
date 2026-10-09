@@ -79,6 +79,9 @@ func (b *Broker) restoreSessionState(ctx context.Context, s *session, rec *sessi
 			continue
 		}
 		s.restoreInflight(o)
+		if o.msgID != "" {
+			s.noteDelivered(o.msgID, o.queueSeq)
+		}
 	}
 	if lost > 0 {
 		b.logger.Warn("some unacknowledged messages of a restored session could not be restored and will not be resent",
@@ -162,6 +165,7 @@ func (b *Broker) restoreEntry(ctx context.Context, clientID string, st storedInf
 		expiry:     d.expiry,
 		queueSeq:   st.Seq,
 		ackSubject: st.Ack,
+		msgID:      messageID(msg),
 	}
 }
 

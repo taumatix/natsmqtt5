@@ -44,9 +44,20 @@ import (
 // instead (conn.awayFloor), however long ago they were published.
 const offlineRewind = 2 * time.Second
 
+// window is how far a replay rewinds (Options.OfflineQueueRewind). It is safe
+// on a nil queue, for a session that has no broker yet.
+func (q *offlineQueue) window() time.Duration {
+	if q == nil || q.rewind <= 0 {
+		return offlineRewind
+	}
+	return q.rewind
+}
+
 type offlineQueue struct {
 	stream jetstream.Stream
 	prefix string
+	// rewind is Options.OfflineQueueRewind, resolved.
+	rewind time.Duration
 	// infoMu serialises stream.Info, which writes a cached copy into the
 	// shared stream handle and so races between two connections replaying at
 	// once (found by -race on CI, once the queue became the default).
@@ -72,7 +83,7 @@ func newOfflineQueue(ctx context.Context, js jetstream.JetStream, opts *resolved
 	if err != nil {
 		return nil, err
 	}
-	q := &offlineQueue{stream: stream, prefix: opts.SubjectPrefix}
+	q := &offlineQueue{stream: stream, prefix: opts.SubjectPrefix, rewind: opts.OfflineQueueRewind}
 	if q.members, err = newShareMembers(ctx, js, opts); err != nil {
 		// The backlog still works; it just outlives its last member by the
 		// consumer's inactivity threshold, as it did before there was a count.
@@ -279,8 +290,13 @@ func (c *conn) replayOffline() error {
 	}
 	c.resume.Store(&a)
 	c.markPositioned()
-	since := a.at.Add(-offlineRewind)
-	if a.restored {
+	since := a.at.Add(-c.sess.window())
+	rewindable := !a.restored
+	if a.restored && !a.rewoundTo.IsZero() {
+		// The record names how far back its delivered ids reach, so the rewind
+		// is as safe as one held in memory.
+		since, rewindable = a.rewoundTo, true
+	} else if a.restored {
 		// Restored from the session store with no replay sequence in the
 		// record (one written before it held them, or a connection that
 		// delivered everything): the ids delivered before the release are not
@@ -318,7 +334,7 @@ func (c *conn) replayOffline() error {
 		fromSeq = a.lateSeq
 	}
 	var err error
-	if fromSeq != 0 && !a.restored && q.storedAfter(ctx, fromSeq, since) {
+	if fromSeq != 0 && rewindable && q.storedAfter(ctx, fromSeq, since) {
 		// The sequence is the lowest message the connection knew it owed. A
 		// message stored before it, whose live copy was still on its way when
 		// the connection ended, is owed too and has no sequence to name: a live

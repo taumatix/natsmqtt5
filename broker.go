@@ -494,6 +494,7 @@ func (b *Broker) releaseStoredSession(c *conn) {
 	// release time and lose what the client was still owed.
 	var dropped int
 	rec.AwayFromSeq, rec.AwayLateSeq, rec.Delivered, dropped = s.awayState()
+	rec.DeliveredSince = s.deliveredFloor()
 	if dropped > 0 {
 		b.logger.Warn("the session record keeps only some of the delivered message ids; "+
 			"a restored replay may repeat the rest", "client_id", s.clientID, "dropped", dropped)

@@ -109,14 +109,16 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 	// The retained store is updated before the message is fanned out, so a
 	// subscriber that arrives immediately after cannot see the message on the
 	// wire but miss it in the retained set.
+	id := newMessageID()
 	if p.Retain {
-		if err := c.broker.retain.store(ctx, subject, c.sess.clientID, p); err != nil {
+		if err := c.broker.retain.store(ctx, subject, c.sess.clientID, id, p); err != nil {
 			c.logger.Warn("storing a retained message failed", "topic", topicName, "error", err)
 			return c.rejectPublish(p, packet.UnspecifiedError, "could not store the retained message")
 		}
 	}
 
 	msg := toNATS(full, c.sess.clientID, p)
+	msg.Header.Set(hdrMsgID, id)
 	if q := c.broker.queue; q != nil && p.QoS > packet.QoS0 {
 		// Queued first, and confirmed; see offlineQueue.keep for why the
 		// order matters. Refusing on failure lets the client try again rather
@@ -392,9 +394,10 @@ func (b *Broker) publishWillFor(clientID string, will *packet.Will) {
 		Payload:    will.Payload,
 		Properties: willProperties(will),
 	}
+	id := newMessageID()
 	if will.Retain && b.retain != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), retainStoreTimeout)
-		if err := b.retain.store(ctx, subject, clientID, p); err != nil {
+		if err := b.retain.store(ctx, subject, clientID, id, p); err != nil {
 			b.logger.Warn("storing a retained will message failed", "topic", name, "error", err)
 		}
 		cancel()
@@ -402,6 +405,7 @@ func (b *Broker) publishWillFor(clientID string, will *packet.Will) {
 
 	full := topic.Prefix(b.opts.SubjectPrefix, subject)
 	msg := toNATS(full, clientID, p)
+	msg.Header.Set(hdrMsgID, id)
 	if b.queue != nil && p.QoS > packet.QoS0 {
 		kctx, cancel := context.WithTimeout(context.Background(), offlineKeepTimeout)
 		if err := b.queue.keep(kctx, b.js, subject, msg); err != nil {

@@ -256,7 +256,9 @@ What it costs and what it does not cover yet:
 
 - Each QoS 1 and 2 message is published twice: first under
   `<prefix>.$queue.<subject>` into the `MQTT5_queue` stream, which keeps it for
-  `OfflineQueueMaxAge` (24 hours by default), and then live. The broker waits
+  `OfflineQueueMaxAge` (24 hours by default), and then live. A resumed session's replay also
+  reaches back `OfflineQueueRewind` (10 seconds by default) before it was released, to catch a
+  message whose live copy never arrived. The broker waits
   for JetStream to confirm the first before publishing live and acknowledging
   the client, which adds a JetStream round trip to every QoS 1 and 2 publish.
   If JetStream cannot store it, the publish is refused, so the client tries
