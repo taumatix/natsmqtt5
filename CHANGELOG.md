@@ -11,6 +11,10 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Performance.** A resume reads only the offline-queue subjects its own subscriptions match, not the whole
+  rewind window: 50 sessions resuming over 100,000 queued messages took 7.6 s to the slowest, now 15 ms; one
+  session over a million, 2.4 s, now 3 ms. A session whose subscriptions are all shared still reads the whole
+  window. `TestReplayReadCost` (skipped unless `NATSMQTT5_REPLAY_COST` is set) measures it.
 - **Tests.** Eleven more tests wait for the broker to log the detach after a `drop()` instead of sleeping a fixed
   100 to 300 ms (`restore_inflight_test.go`, `oversize_inflight_test.go`); no library change.
 - **Fixed.** A queued message whose live copy never reached the broker that had the session (or reached it
