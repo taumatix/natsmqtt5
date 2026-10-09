@@ -150,15 +150,16 @@ func TestExpiryOfflineQueueReplayDecrementsAndDeletes(t *testing.T) {
 // restored on another broker (PersistentSessions) is deleted there too.
 func TestExpiryReplayOnARestoredSessionHonoursTheQueueTimestamp(t *testing.T) {
 	natsURL := startNATS(t)
-	addr, stop := startStoppableBroker(t, natsURL, persistentWithQueue)
+	var logs syncBuffer
+	addr, stop := startStoppableBroker(t, natsURL, persistentWithQueue, loggingBroker(t, &logs))
 	away := dialRaw(t, addr)
 	away.connect(rawConnect("exp-restore", 300))
 	away.subscribe("exp/restore/#", packet.QoS1)
 	away.drop()
+	waitDetached(t, &logs, "exp-restore")
 	pub, _ := connectClient(t, addr, connectOpts("exp-restore-pub"))
 	publishExpiring(pub, "exp/restore/a", "sixty-of-sixty", ptrU32(60), false)
 	publishExpiring(pub, "exp/restore/b", "one-of-one", ptrU32(1), false)
-	time.Sleep(200 * time.Millisecond)
 	stop()
 
 	time.Sleep(waited) // the whole outage counts: the stream stamped them

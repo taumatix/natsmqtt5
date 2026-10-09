@@ -39,19 +39,6 @@ at the default 1 MiB with enough of them. The 12 here was measured, the 20 was n
 prefix repeats in every key) or spill the entries beyond the limit to a second record. Low priority: it
 needs a `max_payload` a real deployment seldom sets and a client holding that many messages unacknowledged.
 
-## Two tests still wait a fixed 200 ms for a drop to be recorded
-
-**Today:** `TestARecordTooLargeForAValueKeepsTheOldestInflightMessages` (`restore_inflight_test.go`) and
-`TestExpiryReplayOnARestoredSessionHonoursTheQueueTimestamp` (`expiry_test.go`) sleep 200 ms after a drop or
-a publish before stopping the first broker, so the detach and the queue write have happened. So do the
-drops in `withdrawn_restart_test.go` before it stops a broker, the delay in
-`TestALiveCopyThatRacesTheConnectionsEndIsNeverLost` (`late_live_copy_delay_test.go`) and
-`TestSmokeSessionMovesBetweenBrokers` (`smoke_test.go`). The live-copy sleeps elsewhere are gone
-(`awaitLiveCopies`, backed by a test-only counter). A slow runner here fails the test, not
-passes it wrongly, so this is flake risk and not a hidden gap.
-
-**Shape:** wait on `waitDetached` and on the publisher's PUBACK instead of the clock. `requireConsumers` already did the same thing for consumer attachment (2026-10-09): 30 s under `CI`, and the consumer list in the failure.
-
 ## A live copy that outlives the session's time on its broker is still lost
 
 **Today:** a live copy of a queued message that reaches the session after its connection ended is noted
@@ -322,6 +309,17 @@ message against 0.16 ms with the tick only, so one connection's QoS 2 rate is ab
 **Shape:** one write for every message already waiting in the connection's queue (group commit),
 or a write only when the record would change a successor's answer; measure before and after, and
 with `sync_always` on the NATS server, where the writes cost more.
+
+## Other tests still sleep for a drop to be recorded
+
+**Today:** the five tests that slept 200 ms wait on `waitDetached` now (2026-10-09). About thirty other
+sites sleep 100 to 700 ms after a `drop()` before stopping a broker or reading the record
+(`restore_inflight_test.go`, `restore_nocopy_test.go`, `restored_rewind_test.go`, `spec_integration_test.go`,
+`killed_*_test.go`, `oversize_inflight_test.go`). Same flake risk, same fix. `TestSmokeSessionMovesBetweenBrokers`
+keeps its 200 ms: it is the back-off of a retry loop against brokers in containers, whose logs the test cannot
+read. The same change found that `TestALiveCopyThatRacesTheConnectionsEndIsNeverLost` had been publishing its
+live copies to the queue's stored-copy subject, which no subscription matches, so it had never exercised the
+race; it does now.
 
 ## Tombstone accumulation in the retained stream
 

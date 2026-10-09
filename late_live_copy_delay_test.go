@@ -2,6 +2,7 @@ package natsmqtt5_test
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -147,7 +148,8 @@ func TestALiveCopyDelayedPastTheRewindIsStillSentToASessionRestoredElsewhere(t *
 // dropped, round after round, and none may be lost.
 func TestALiveCopyThatRacesTheConnectionsEndIsNeverLost(t *testing.T) {
 	natsURL := startNATS(t)
-	addr := startBroker(t, natsURL, persistentWithQueue)
+	var logs syncBuffer
+	b, addr, _ := startBrokerHandle(t, natsURL, persistentWithQueue, loggingBroker(t, &logs))
 	nc, err := nats.Connect(natsURL)
 	require.NoError(t, err)
 	defer nc.Close()
@@ -171,14 +173,18 @@ func TestALiveCopyThatRacesTheConnectionsEndIsNeverLost(t *testing.T) {
 		seed := nextWithPayload(t, spy, "seed"+n)
 		earlier := queuedAndLive(t, js, seed, "earlier"+n)
 		later := queuedAndLive(t, js, seed, "later"+n)
+		before := natsmqtt5.LiveCopies(b)
 		require.NoError(t, nc.PublishMsg(later))
 		require.NoError(t, nc.Flush())
-		time.Sleep(50 * time.Millisecond)
+		awaitLiveCopies(t, b, before, 1)
 
 		c.drop()
 		require.NoError(t, nc.PublishMsg(earlier))
 		require.NoError(t, nc.Flush())
-		time.Sleep(200 * time.Millisecond)
+		// The earlier copy races the connection's end on purpose, so it may find
+		// no subscription at all and cannot be counted; the end of the
+		// connection is the event to wait for.
+		waitDetached(t, &logs, id)
 
 		// The order is the queue's, which the two live copies racing a closing
 		// connection can change; what matters here is that nothing is lost.
@@ -193,7 +199,9 @@ func nextWithPayload(t *testing.T, spy *nats.Subscription, payload string) *nats
 	for {
 		m, err := spy.NextMsg(5 * time.Second)
 		require.NoError(t, err)
-		if string(m.Data) == payload {
+		// The queue's stored copy travels on a $queue subject nobody subscribes
+		// to; a live copy made from it would reach no subscription.
+		if string(m.Data) == payload && !strings.Contains(m.Subject, ".$queue.") {
 			return m
 		}
 	}
