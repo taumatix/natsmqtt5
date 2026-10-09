@@ -415,8 +415,8 @@ What it costs and what it does not cover:
   (retained, or with the queue off) travels in the record as its encoded PUBLISH
   when that is 16 KiB or less, and a larger one is written to the `<StreamPrefix>_inflight`
   bucket (named by the client and the SHA-256 of the PUBLISH, created on first use, deleted when the
-  message is acknowledged or the session drops it, and aged out after twice the maximum Session
-  Expiry Interval otherwise) and read back by the broker that restores the session. One whose
+  message is acknowledged, when the session ends or is replaced by a Clean Start, or when the
+  expired record is swept, and aged out after twice the maximum Session Expiry Interval otherwise) and read back by the broker that restores the session. One whose
   queue copy has aged out, or whose PUBLISH exceeds the server's `max_payload` less 512 bytes,
   is logged and not resent; a broker killed outright leaves what its connections last checkpointed
   (`-session-checkpoint-interval`, one second): a QoS 1 message sent or

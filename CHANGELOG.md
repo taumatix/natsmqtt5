@@ -11,6 +11,11 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed.** The payloads a session kept in the `<StreamPrefix>_inflight` bucket outlived the session
+  when it was discarded rather than completed: a reconnect with Clean Start, a session with Session Expiry
+  Interval 0 ending with its connection, and an expired record swept. Each now deletes the session's
+  payloads with its record, instead of leaving up to 1 MiB values until the bucket's TTL. Payloads
+  written by versions before keys named their client are still left to the TTL.
 - **Fixed.** The payload of an unacknowledged message too large for the session record stayed in the
   `<StreamPrefix>_inflight` bucket until its TTL, twice the maximum Session Expiry Interval, after the
   client had acknowledged it, so a prompt client left up to that long of dead values behind (up to 1 MiB

@@ -282,3 +282,62 @@ func TestAnAcknowledgedMessagesPayloadIsDeletedAndAnotherSessionsIsKept(t *testi
 	require.Eventually(t, func() bool { return len(inflightKeys(t, natsURL)) == 0 },
 		5*time.Second, 50*time.Millisecond, "and is deleted when it is acknowledged on the broker that restored it")
 }
+
+// A session that is discarded takes its stored payloads with it: a client that
+// reconnects with Clean Start has no use for the ones the old session held, and
+// nothing else would remove them before the bucket's TTL.
+func TestACleanStartDeletesThePayloadsOfTheSessionItReplaces(t *testing.T) {
+	natsURL := startNATS(t)
+	fast := func(o *natsmqtt5.Options) {
+		o.PersistentSessions, o.DisableOfflineQueue = true, true
+		o.SessionCheckpointInterval = 100 * time.Millisecond
+	}
+	addr := startBroker(t, natsURL, fast)
+
+	pub, _ := connectClient(t, addr, connectOpts("pub-cs"))
+	pub.publish(&paho.Publish{Topic: "cs/a", QoS: 1, Retain: true, Payload: bytes.Repeat([]byte("z"), 100<<10)})
+	time.Sleep(200 * time.Millisecond)
+
+	old := dialRaw(t, addr)
+	old.connect(rawConnect("cs-client", 300))
+	old.subscribe("cs/#", packet.QoS1)
+	old.expectPublish()
+	require.Eventually(t, func() bool { return len(inflightKeys(t, natsURL)) == 1 },
+		5*time.Second, 50*time.Millisecond, "the session keeps its payload")
+	old.drop()
+	time.Sleep(300 * time.Millisecond)
+	require.Len(t, inflightKeys(t, natsURL), 1, "a session that is only away keeps it")
+
+	fresh := dialRaw(t, addr)
+	cp := rawConnect("cs-client", 300)
+	cp.CleanStart = true
+	require.False(t, fresh.connect(cp).SessionPresent)
+
+	require.Eventually(t, func() bool { return len(inflightKeys(t, natsURL)) == 0 },
+		5*time.Second, 50*time.Millisecond, "the replaced session's payload is deleted")
+}
+
+// A session whose Session Expiry Interval is zero ends with its connection, so
+// the payloads it held are deleted with its record.
+func TestASessionThatEndsWithItsConnectionDeletesItsPayloads(t *testing.T) {
+	natsURL := startNATS(t)
+	fast := func(o *natsmqtt5.Options) {
+		o.PersistentSessions, o.DisableOfflineQueue = true, true
+		o.SessionCheckpointInterval = 100 * time.Millisecond
+	}
+	addr := startBroker(t, natsURL, fast)
+
+	pub, _ := connectClient(t, addr, connectOpts("pub-ex0"))
+	pub.publish(&paho.Publish{Topic: "ex0/a", QoS: 1, Retain: true, Payload: bytes.Repeat([]byte("y"), 100<<10)})
+	time.Sleep(200 * time.Millisecond)
+
+	c := dialRaw(t, addr)
+	c.connect(rawConnect("ex0-client", 0))
+	c.subscribe("ex0/#", packet.QoS1)
+	c.expectPublish()
+	c.drop()
+
+	time.Sleep(time.Second)
+	require.Eventually(t, func() bool { return len(inflightKeys(t, natsURL)) == 0 },
+		5*time.Second, 50*time.Millisecond, "ending the session leaves no payload")
+}

@@ -532,6 +532,14 @@ func (b *Broker) releaseStoredSession(c *conn) {
 		return
 	}
 	s.commitRecord(c.claimGen, rec, newRev)
+	if rec.ExpirySeconds == 0 {
+		// The record was deleted, not kept: nothing will restore these payloads.
+		s.mu.Lock()
+		for _, o := range s.inflight {
+			s.retireBlobLocked(o)
+		}
+		s.mu.Unlock()
+	}
 	s.reapBlobs(b.store)
 }
 

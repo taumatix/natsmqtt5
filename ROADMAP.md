@@ -14,17 +14,6 @@ names it. Entries are checked against the code each time the review is re-run (l
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
-## A payload in the in-flight bucket outlives a session that is discarded
-
-**Today:** a payload is deleted when its message completes (2026-10-09). A session that ends another
-way (clean start, expiry, takeover by a new connection with Clean Start) leaves its payloads to the
-bucket's TTL, twice the maximum Session Expiry Interval, and so do keys written before the key named
-the client. A broker killed before the delete leaves it too.
-
-**Shape:** delete every key under `blobOwner(clientID)` when a session record is discarded (keys carry
-the owner as a prefix, so one `Keys` listing finds them). Test with a persistent session holding a
-large unacknowledged message that reconnects with Clean Start.
-
 ## A restored in-flight payload is rewritten once, and a failed delete is not retried
 
 **Today:** a restored entry has a zero `blobAt`, so the next checkpoint rewrites its payload once
@@ -33,6 +22,11 @@ collects it.
 
 **Shape:** set `blobAt` on restore; keep a failed key in `deadBlobs` for the next checkpoint. Low
 priority: each costs one extra write or one value kept until the TTL.
+
+Same family: a payload stashed by a broker that lost its session to a Clean Start on another broker a
+moment earlier can be written after that broker's delete, and a key from before keys named a client is
+never deleted. Both wait on the TTL; a sweep of the bucket for keys whose owner has no session record
+would close them.
 
 ## A session record's inline PUBLISH is cut when max_payload is under about 18 KiB
 
