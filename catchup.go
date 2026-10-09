@@ -135,7 +135,7 @@ func (c *conn) catchUp() error {
 		delivered := c.sess.deliveredIDs()
 		ctx, cancel := c.streamContext()
 		var deliverErr error
-		_, err := q.replaySeq(ctx, from, func(msg *nats.Msg) {
+		_, err := q.replaySeq(ctx, from, q.replayFilters(c.sess.subscriptions()), func(msg *nats.Msg) {
 			if deliverErr != nil || c.isClosed() {
 				return
 			}

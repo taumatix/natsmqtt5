@@ -20,14 +20,21 @@ names it. Entries are checked against the code each time the review is re-run (l
 on this broker or the one that claims it, and the record carries the delivered ids for that span
 (`DeliveredSince`), so a live copy that reached the old broker late, or never, is replayed instead of lost, and
 nothing already delivered is sent twice (`never_published_copy_test.go`). Still open: a copy delayed past the
-rewind, which is the entry below; and two costs of the bound. Each resume reads that span of the whole queue
-stream, filtering by the session's subscriptions, so a wide rewind on a busy stream is a real read. And the
+rewind, which is the entry below; and two costs of the bound. Each resume
+reads that span of the queue stream (now only the subjects its subscriptions match, below). And the
 record holds at most half a value's worth of ids (`trimDelivered`), so a session that delivered more than that
 in the span can see a QoS 2 message again (logged as a warning). [MQTT-4.4.0-1], [MQTT-4.3.3-2].
 
-**Shape:** measure the read cost on a stream of a million messages and, if it matters, narrow the read by
-subject filter; then replace the span with the per-session cursor below, which makes both costs go away.
-Size S for the measurement.
+**Measured** (2026-10-10, `TestReplayReadCost`, one embedded NATS server, file storage): an unfiltered resume read
+the whole window at about 2.4 us a message (a million messages: 2.4 s), and 50 sessions resuming at once over 100,000
+messages took 7.6 s to the slowest, 200 sessions 31.6 s, since each pays the whole read. The replay now reads only the
+queue subjects the session's non-shared subscriptions match (`replayFilters`): 50 sessions over 100,000 messages
+15 ms to the slowest, one session over a million 3 ms. Still not measured over a clustered, replicated stream.
+
+**Shape:** a session that subscribes during its own replay no longer gets the window's older messages for the new
+filter (they were queued before it subscribed; MQTT owes it only what arrives after). Left: a session whose
+subscriptions are all shared, or whose filters overlap without one covering the other, still reads the whole window;
+the per-session cursor below replaces the span.
 
 ## A live copy for a session that has since delivered 8192 more sequences is not noted
 

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -94,6 +95,82 @@ func newOfflineQueue(ctx context.Context, js jetstream.JetStream, opts *resolved
 	return q, nil
 }
 
+// replayFilters is the set of queue subjects a replay for subs has to read:
+// the ones its non-shared subscriptions can match. A replay reads the whole
+// rewind window otherwise, at a cost per message that every other session's
+// traffic adds to. It returns nil, which reads everything, when there is
+// nothing to narrow by or a filter cannot be converted.
+func (q *offlineQueue) replayFilters(subs []*subscription) []string {
+	var out []string
+	add := func(f string) {
+		for i, have := range out {
+			if !subjectsOverlap(have, f) {
+				continue
+			}
+			// The server refuses overlapping filters; the broader one covers
+			// the other, or neither does and the read is left whole.
+			if covers(have, f) {
+				return
+			}
+			if covers(f, have) {
+				out[i] = f
+				return
+			}
+			out = nil
+			return
+		}
+		out = append(out, f)
+	}
+	for _, sub := range subs {
+		if sub.share != "" {
+			continue
+		}
+		subject, err := topic.FilterToSubject(sub.filter)
+		if err != nil {
+			return nil
+		}
+		add(queuedSubject(q.prefix, subject))
+		if parent, ok := topic.ParentSubject(subject); ok {
+			add(queuedSubject(q.prefix, parent))
+		}
+		if out == nil {
+			return nil
+		}
+	}
+	return out
+}
+
+// subjectsOverlap reports whether some subject matches both NATS filters.
+func subjectsOverlap(a, b string) bool {
+	at, bt := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < len(at) && i < len(bt); i++ {
+		if at[i] == ">" || bt[i] == ">" {
+			return true
+		}
+		if at[i] != bt[i] && at[i] != "*" && bt[i] != "*" {
+			return false
+		}
+	}
+	return len(at) == len(bt)
+}
+
+// covers reports whether every subject matching b also matches the NATS filter a.
+func covers(a, b string) bool {
+	at, bt := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < len(at); i++ {
+		if at[i] == ">" {
+			return len(bt) > i
+		}
+		if i >= len(bt) || bt[i] == ">" {
+			return false
+		}
+		if at[i] != "*" && at[i] != bt[i] {
+			return false
+		}
+	}
+	return len(at) == len(bt)
+}
+
 func queuedSubject(prefix, subject string) string {
 	return topic.Prefix(prefix, "$queue."+subject)
 }
@@ -139,10 +216,11 @@ const offlineKeepTimeout = 5 * time.Second
 // replay calls fn with every queued message stored since `since`, in order,
 // up to the end of the stream as it is when replay starts. The subject handed
 // to fn is the live one, without the "$queue." part.
-func (q *offlineQueue) replay(ctx context.Context, since time.Time, fn func(*nats.Msg)) error {
+func (q *offlineQueue) replay(ctx context.Context, since time.Time, filters []string, fn func(*nats.Msg)) error {
 	_, err := q.replayFrom(ctx, jetstream.OrderedConsumerConfig{
-		DeliverPolicy: jetstream.DeliverByStartTimePolicy,
-		OptStartTime:  &since,
+		DeliverPolicy:  jetstream.DeliverByStartTimePolicy,
+		OptStartTime:   &since,
+		FilterSubjects: filters,
 	}, fn)
 	return err
 }
@@ -157,10 +235,11 @@ func (q *offlineQueue) storedAfter(ctx context.Context, seq uint64, t time.Time)
 
 // replaySeq is replay from a stream sequence rather than a time. It returns
 // the last sequence it read up to, which is the stream's end when it started.
-func (q *offlineQueue) replaySeq(ctx context.Context, from uint64, fn func(*nats.Msg)) (uint64, error) {
+func (q *offlineQueue) replaySeq(ctx context.Context, from uint64, filters []string, fn func(*nats.Msg)) (uint64, error) {
 	return q.replayFrom(ctx, jetstream.OrderedConsumerConfig{
-		DeliverPolicy: jetstream.DeliverByStartSequencePolicy,
-		OptStartSeq:   from,
+		DeliverPolicy:  jetstream.DeliverByStartSequencePolicy,
+		OptStartSeq:    from,
+		FilterSubjects: filters,
 	}, fn)
 }
 
@@ -333,6 +412,7 @@ func (c *conn) replayOffline() error {
 		!(fromSeq == 0 && q.storedAfter(ctx, a.lateSeq, since)) {
 		fromSeq = a.lateSeq
 	}
+	filters := q.replayFilters(c.sess.subscriptions())
 	var err error
 	if fromSeq != 0 && rewindable && q.storedAfter(ctx, fromSeq, since) {
 		// The sequence is the lowest message the connection knew it owed. A
@@ -344,12 +424,12 @@ func (c *conn) replayOffline() error {
 		// long as this rewind reaches) stop it sending those again. Position is
 		// left unset until a message is handled, so a connection that ends
 		// first hands the same absence on (awayFloor).
-		err = q.replay(ctx, since, handle)
+		err = q.replay(ctx, since, filters, handle)
 	} else if fromSeq != 0 {
 		c.streamNext.Store(fromSeq)
-		_, err = q.replaySeq(ctx, fromSeq, handle)
+		_, err = q.replaySeq(ctx, fromSeq, filters, handle)
 	} else {
-		err = q.replay(ctx, since, handle)
+		err = q.replay(ctx, since, filters, handle)
 	}
 	if deliverErr != nil {
 		return deliverErr
