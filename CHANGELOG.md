@@ -11,6 +11,12 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed.** A payload in the `<StreamPrefix>_inflight` bucket that no session record could need (stashed
+  by a broker that lost its session to a Clean Start elsewhere a moment earlier, or a key from before keys
+  named a client) waited for the bucket's TTL. The store sweep now deletes keys whose owner has no record
+  once they are ten minutes old, and old-format keys no record names. It does nothing if it could not read
+  every record.
+
 - **Fixed.** A session restored by another broker (or after a restart) wrote every oversize in-flight
   payload to the `<StreamPrefix>_inflight` bucket again at its first checkpoint, though the bucket held it.
   The session record now carries when the payload was written (`BlobAt`, an added field; a record without

@@ -410,3 +410,45 @@ func TestSweepReclaimsARecordFromAnUnreachableOwner(t *testing.T) {
 	_, err = s.kv.Get(ctx, sessionKey("served"))
 	assert.NoError(t, err, "a record whose owner is running must survive the sweep")
 }
+
+// The sweep deletes a payload under an owner with no record, and one from
+// before keys named an owner unless a record still names it; payloads of an
+// owner that has a record are left to the bucket's TTL.
+func TestSweepDeletesOnlyPayloadsNoRecordCanNeed(t *testing.T) {
+	s, _ := storeFixture(t)
+	s.blobGrace = time.Millisecond
+	ctx := context.Background()
+
+	rec, rev, _, err := s.claim(ctx, "owner", "", "", false)
+	require.NoError(t, err)
+	rec.Attached = false
+	rec.ExpirySeconds = 3600
+	rec.ExpiresAt = time.Now().Add(time.Hour)
+	kept, err := s.putBlob(ctx, blobOwner("owner"), []byte("kept"))
+	require.NoError(t, err)
+	const legacyKept = "cafef00d"
+	rec.Inflight = []storedInflight{{Blob: legacyKept}}
+	_, err = s.save(ctx, rec, rev)
+	require.NoError(t, err)
+
+	kv, err := s.blobBucket(ctx, false)
+	require.NoError(t, err)
+	orphan, err := s.putBlob(ctx, blobOwner("ghost"), []byte("orphan"))
+	require.NoError(t, err)
+	_, err = kv.Put(ctx, legacyKept, []byte("legacy kept"))
+	require.NoError(t, err)
+	_, err = kv.Put(ctx, "deadbeef", []byte("legacy orphan"))
+	require.NoError(t, err)
+	time.Sleep(10 * time.Millisecond)
+
+	require.NoError(t, s.sweep(ctx))
+
+	for key, want := range map[string]bool{kept: true, legacyKept: true, orphan: false, "deadbeef": false} {
+		_, err := kv.Get(ctx, key)
+		if want {
+			assert.NoError(t, err, key)
+		} else {
+			assert.ErrorIs(t, err, jetstream.ErrKeyNotFound, key)
+		}
+	}
+}
