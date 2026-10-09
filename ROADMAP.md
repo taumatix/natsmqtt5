@@ -92,13 +92,16 @@ subjects, which overlaps the retained stream's subjects (JetStream refuses overl
 either a subject layout change or per-subscription JetStream consumers. A decision with a
 compatibility cost.
 
-## DurablePublish is untested when the flush itself fails
+## DurablePublish: the retry after a refused flush duplicates the queue copy
 
-`TestDurablePublishAddsOneNATSRoundTripToThePUBACK` proves the flush is waited for, and the stream
-tests prove a queue failure is refused with 0x83. No test makes the flush fail after the queue
-stored the message (the NATS connection lost in that instant), so the 0x83 on that branch and the
-duplicate queue copy a client's retry then leaves are not driven over a socket. Needs a proxy that
-cuts the broker's NATS connection once the JetStream publish-ack has passed.
+The flush failure is driven over a socket now (`durable_flush_fail_test.go`, 2026-10-10): a NATS connection cut
+after the queue stream stored the message is a success (the client library buffers the live publish across the
+reconnect and the flush completes after it, so the subscriber gets the message once), and NATS staying
+unreachable past the 5 s flush timeout is a 0x83 PUBACK. In the second case the queue already holds the copy, so
+the client's retry stores a second, with a new message id, and a session that was away sees it twice. QoS 1
+allows that; a QoS 2 PUBREC refusal cannot be told apart by the client from "never received", so it also does.
+Not tested: that duplicate, and whether a retry could carry the first attempt's id (a `Nats-Msg-Id` on the
+queue publish would let JetStream drop it within its duplicate window).
 
 ## Will Messages are not covered by DurablePublish
 
