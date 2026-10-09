@@ -316,10 +316,12 @@ longer names. Low priority: it needs a very small `max_payload` or tens of thous
 
 ## Other tests still sleep for a drop to be recorded
 
-**Today:** the five tests that slept 200 ms wait on `waitDetached` now (2026-10-09). About thirty other
-sites sleep 100 to 700 ms after a `drop()` before stopping a broker or reading the record
-(`restore_inflight_test.go`, `restore_nocopy_test.go`, `restored_rewind_test.go`, `spec_integration_test.go`,
-`killed_*_test.go`, `oversize_inflight_test.go`). Same flake risk, same fix. `TestSmokeSessionMovesBetweenBrokers`
+**Today:** the five tests that slept 200 ms wait on `waitDetached` now (2026-10-09), and so do the eleven
+sites that slept 100 to 300 ms after a `drop()` in `restore_inflight_test.go` and `oversize_inflight_test.go`
+(2026-10-10). About twenty other sites sleep 100 to 700 ms after a `drop()` before stopping a broker or reading
+the record (`restore_nocopy_test.go`, `restored_rewind_test.go`, `spec_integration_test.go`, `killed_*_test.go`,
+and the 200 ms sleeps after a publish in `oversize_inflight_test.go`, which wait for a stored payload and not a
+drop). Same flake risk, same fix. `TestSmokeSessionMovesBetweenBrokers`
 keeps its 200 ms: it is the back-off of a retry loop against brokers in containers, whose logs the test cannot
 read. The same change found that `TestALiveCopyThatRacesTheConnectionsEndIsNeverLost` had been publishing its
 live copies to the queue's stored-copy subject, which no subscription matches, so it had never exercised the

@@ -94,8 +94,9 @@ func TestAKilledBrokersOversizeQoS2RetainedMessageInFlightIsResent(t *testing.T)
 // the ones after it [MQTT-4.4.0-1].
 func TestAnOversizePayloadStaysOutOfTheRecordAndItsLossSpoilsOnlyThatMessage(t *testing.T) {
 	natsURL := startNATS(t)
+	var logs syncBuffer
 	noQueue := func(o *natsmqtt5.Options) { o.PersistentSessions, o.DisableOfflineQueue = true, true }
-	addrA, stopA := startStoppableBroker(t, natsURL, noQueue)
+	addrA, stopA := startStoppableBroker(t, natsURL, noQueue, loggingBroker(t, &logs))
 	addrB := startBroker(t, natsURL, noQueue)
 
 	c := dialRaw(t, addrA)
@@ -107,7 +108,7 @@ func TestAnOversizePayloadStaysOutOfTheRecordAndItsLossSpoilsOnlyThatMessage(t *
 	require.Equal(t, "bg/large", c.expectPublish().Topic)
 	small := c.expectPublish()
 	c.drop()
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "big-gone")
 	stopA()
 
 	nc, err := nats.Connect(natsURL)
@@ -188,10 +189,11 @@ func TestAnOversizePayloadOfAMessageLeftUnacknowledgedIsKeptAlive(t *testing.T) 
 // stops. The payload bucket's limit is the server's max_payload less the room a
 // key-value write needs, not the 7/8 a session record is held to.
 func TestAnInflightRetainedPublishNearMaxPayloadIsRestored(t *testing.T) {
+	var logs syncBuffer
 	const maxPayload = 64 << 10
 	natsURL := startNATSWithMaxPayload(t, maxPayload)
 	noQueue := func(o *natsmqtt5.Options) { o.PersistentSessions, o.DisableOfflineQueue = true, true }
-	addrA, stopA := startStoppableBroker(t, natsURL, noQueue)
+	addrA, stopA := startStoppableBroker(t, natsURL, noQueue, loggingBroker(t, &logs))
 	addrB := startBroker(t, natsURL, noQueue)
 
 	// Over seven eighths of max_payload (57344), so over what a session record
@@ -207,7 +209,7 @@ func TestAnInflightRetainedPublishNearMaxPayloadIsRestored(t *testing.T) {
 	first := c.expectPublish()
 	require.Equal(t, big, first.Payload)
 	c.drop()
-	time.Sleep(200 * time.Millisecond)
+	waitDetached(t, &logs, "near-max")
 	stopA()
 
 	back := dialRaw(t, addrB)
@@ -345,9 +347,10 @@ func TestASessionThatEndsWithItsConnectionDeletesItsPayloads(t *testing.T) {
 // [MQTT-4.4.0-1]: with a small max_payload, a PUBLISH that would fit the inline limit but not a
 // record value goes to the payload bucket and is resent, rather than being cut from the record.
 func TestAnInflightPublishThatFitsTheInlineLimitButNotARecordIsStillResent(t *testing.T) {
+	var logs syncBuffer
 	natsURL := startNATSWithMaxPayload(t, 4096)
 	noQueue := func(o *natsmqtt5.Options) { o.PersistentSessions, o.DisableOfflineQueue = true, true }
-	addrA, stopA := startStoppableBroker(t, natsURL, noQueue)
+	addrA, stopA := startStoppableBroker(t, natsURL, noQueue, loggingBroker(t, &logs))
 	addrB := startBroker(t, natsURL, noQueue)
 
 	c := dialRaw(t, addrA)
@@ -359,7 +362,7 @@ func TestAnInflightPublishThatFitsTheInlineLimitButNotARecordIsStillResent(t *te
 	first := c.expectPublish()
 	require.Equal(t, body, first.Payload)
 	c.drop()
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "small-max")
 	stopA()
 
 	back := dialRaw(t, addrB)
@@ -373,9 +376,10 @@ func TestAnInflightPublishThatFitsTheInlineLimitButNotARecordIsStillResent(t *te
 // Many in-flight messages that each fit the inline limit must not, together, push the record
 // past the value: the ones beyond the inline budget go to the payload bucket, so none is lost.
 func TestManySmallInflightPublishesUnderASmallMaxPayloadAreAllResent(t *testing.T) {
+	var logs syncBuffer
 	natsURL := startNATSWithMaxPayload(t, 4096)
 	noQueue := func(o *natsmqtt5.Options) { o.PersistentSessions, o.DisableOfflineQueue = true, true }
-	addrA, stopA := startStoppableBroker(t, natsURL, noQueue)
+	addrA, stopA := startStoppableBroker(t, natsURL, noQueue, loggingBroker(t, &logs))
 	addrB := startBroker(t, natsURL, noQueue)
 
 	const n = 12
@@ -392,7 +396,7 @@ func TestManySmallInflightPublishesUnderASmallMaxPayloadAreAllResent(t *testing.
 		ids[c.expectPublish().PacketID] = true
 	}
 	c.drop()
-	time.Sleep(200 * time.Millisecond)
+	waitDetached(t, &logs, "many-small")
 	stopA()
 
 	back := dialRaw(t, addrB)
@@ -411,9 +415,10 @@ func TestManySmallInflightPublishesUnderASmallMaxPayloadAreAllResent(t *testing.
 // session, because the entries that do not fit the record are kept in the payload bucket
 // beside it. Once they are acknowledged nothing is left in the bucket.
 func TestUnacknowledgedMessagesBeyondOneRecordValueAreAllResentInOrder(t *testing.T) {
+	var logs syncBuffer
 	natsURL := startNATSWithMaxPayload(t, 4096)
 	noQueue := func(o *natsmqtt5.Options) { o.PersistentSessions, o.DisableOfflineQueue = true, true }
-	addrA, stopA := startStoppableBroker(t, natsURL, noQueue)
+	addrA, stopA := startStoppableBroker(t, natsURL, noQueue, loggingBroker(t, &logs))
 	addrB := startBroker(t, natsURL, noQueue)
 
 	const n = 60
@@ -429,7 +434,7 @@ func TestUnacknowledgedMessagesBeyondOneRecordValueAreAllResentInOrder(t *testin
 		sent = append(sent, c.expectPublish().PacketID)
 	}
 	c.drop()
-	time.Sleep(300 * time.Millisecond)
+	waitDetached(t, &logs, "many-spill")
 	stopA()
 
 	back := dialRaw(t, addrB)

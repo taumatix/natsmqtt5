@@ -28,7 +28,8 @@ import (
 
 func TestMQTT4_4_0_1_QoS1UnacknowledgedAtReleaseIsResentByAnotherBroker(t *testing.T) {
 	natsURL := startNATS(t)
-	addrA, stopA := startStoppableBroker(t, natsURL, persistent)
+	var logs syncBuffer
+	addrA, stopA := startStoppableBroker(t, natsURL, persistent, loggingBroker(t, &logs))
 	addrB := startBroker(t, natsURL, persistent)
 
 	c := dialRaw(t, addrA)
@@ -46,9 +47,8 @@ func TestMQTT4_4_0_1_QoS1UnacknowledgedAtReleaseIsResentByAnotherBroker(t *testi
 	}
 	// "b" is acknowledged and so is not owed; "a" and "c" are.
 	c.send(&packet.Puback{Ack: packet.Ack{PacketID: first[1].PacketID}})
-	time.Sleep(100 * time.Millisecond)
 	c.drop()
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "restore-q1")
 	stopA()
 
 	back := dialRaw(t, addrB)
@@ -97,7 +97,8 @@ func TestMQTT4_4_0_1_QoS1UnacknowledgedIsResentAfterTheBrokerRestarts(t *testing
 // resends, with no payload to fetch.
 func TestMQTT4_4_0_1_QoS2PubrelIsResentByAnotherBroker(t *testing.T) {
 	natsURL := startNATS(t)
-	addrA, stopA := startStoppableBroker(t, natsURL, persistent)
+	var logs syncBuffer
+	addrA, stopA := startStoppableBroker(t, natsURL, persistent, loggingBroker(t, &logs))
 	addrB := startBroker(t, natsURL, persistent)
 
 	c := dialRaw(t, addrA)
@@ -110,7 +111,7 @@ func TestMQTT4_4_0_1_QoS2PubrelIsResentByAnotherBroker(t *testing.T) {
 	c.send(&packet.Pubrec{Ack: packet.Ack{PacketID: first.PacketID}})
 	require.Equal(t, first.PacketID, c.expectPubrel().PacketID)
 	c.drop()
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "restore-q2rel")
 	stopA()
 
 	back := dialRaw(t, addrB)
@@ -126,7 +127,8 @@ func TestMQTT4_4_0_1_QoS2PubrelIsResentByAnotherBroker(t *testing.T) {
 // message: it is the PUBLISH that comes back, DUP 1, from the queue.
 func TestMQTT4_4_0_1_QoS2PublishIsResentByAnotherBroker(t *testing.T) {
 	natsURL := startNATS(t)
-	addrA, stopA := startStoppableBroker(t, natsURL, persistent)
+	var logs syncBuffer
+	addrA, stopA := startStoppableBroker(t, natsURL, persistent, loggingBroker(t, &logs))
 	addrB := startBroker(t, natsURL, persistent)
 
 	c := dialRaw(t, addrA)
@@ -136,7 +138,7 @@ func TestMQTT4_4_0_1_QoS2PublishIsResentByAnotherBroker(t *testing.T) {
 	pub.publish(&paho.Publish{Topic: "rs/q2pub", QoS: 2, Payload: []byte("unowned")})
 	first := c.expectPublish()
 	c.drop()
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "restore-q2pub")
 	stopA()
 
 	back := dialRaw(t, addrB)
@@ -156,7 +158,8 @@ func TestMQTT4_4_0_1_QoS2PublishIsResentByAnotherBroker(t *testing.T) {
 // the first [MQTT-4.3.3-10].
 func TestMQTT4_3_3_10_ResentInboundQoS2IsForwardedOnceAcrossBrokers(t *testing.T) {
 	natsURL := startNATS(t)
-	addrA, stopA := startStoppableBroker(t, natsURL, persistent)
+	var logs syncBuffer
+	addrA, stopA := startStoppableBroker(t, natsURL, persistent, loggingBroker(t, &logs))
 	addrB := startBroker(t, natsURL, persistent)
 
 	sub, _ := connectClient(t, addrB, connectOpts("sub-inbound-q2"))
@@ -171,7 +174,7 @@ func TestMQTT4_3_3_10_ResentInboundQoS2IsForwardedOnceAcrossBrokers(t *testing.T
 	require.Equal(t, "once", string(sub.expectMessage().Payload))
 	// The PUBREC never reaches the client in this story: it resends.
 	c.drop()
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "restore-inbound")
 	stopA()
 
 	back := dialRaw(t, addrB)
@@ -219,7 +222,8 @@ func TestMQTT4_3_3_10_ResentInboundQoS2IsForwardedOnceAfterARestart(t *testing.T
 // [MQTT-3.3.2-5]; the restored entry is completed like any expired resend.
 func TestMQTT3_3_2_5_ExpiredRestoredQoS1ResendIsDropped(t *testing.T) {
 	natsURL := startNATS(t)
-	addrA, stopA := startStoppableBroker(t, natsURL, persistent)
+	var logs syncBuffer
+	addrA, stopA := startStoppableBroker(t, natsURL, persistent, loggingBroker(t, &logs))
 	addrB := startBroker(t, natsURL, persistent)
 
 	c := dialRaw(t, addrA)
@@ -239,7 +243,7 @@ func TestMQTT3_3_2_5_ExpiredRestoredQoS1ResendIsDropped(t *testing.T) {
 		require.Equal(t, n, string(c.expectPublish().Payload))
 	}
 	c.drop()
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "restore-expiry")
 	stopA()
 	time.Sleep(2200 * time.Millisecond)
 
@@ -260,7 +264,8 @@ func TestMQTT3_3_2_5_ExpiredRestoredQoS1ResendIsDropped(t *testing.T) {
 // receive is not sent, whatever [MQTT-4.4.0-1] says of resending.
 func TestARestoredResendIsWithdrawnWhenTheFilterIsDeniedOnResume(t *testing.T) {
 	natsURL := startNATS(t)
-	addrA, stopA := startStoppableBroker(t, natsURL, persistent)
+	var logs syncBuffer
+	addrA, stopA := startStoppableBroker(t, natsURL, persistent, loggingBroker(t, &logs))
 	var deny atomic.Bool
 	addrB := startBroker(t, natsURL, persistent, func(o *natsmqtt5.Options) {
 		o.Authorizer = natsmqtt5.AuthorizerFunc(func(_ context.Context, r *natsmqtt5.AuthzRequest) error {
@@ -281,7 +286,7 @@ func TestARestoredResendIsWithdrawnWhenTheFilterIsDeniedOnResume(t *testing.T) {
 	c.expectPublish()
 	c.expectPublish()
 	c.drop()
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "restore-deny")
 	stopA()
 
 	deny.Store(true)

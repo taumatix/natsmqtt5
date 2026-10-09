@@ -11,6 +11,8 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Tests.** Eleven more tests wait for the broker to log the detach after a `drop()` instead of sleeping a fixed
+  100 to 300 ms (`restore_inflight_test.go`, `oversize_inflight_test.go`); no library change.
 - **Fixed.** A queued message whose live copy never reached the broker that had the session (or reached it
   only after another broker claimed the session) was not delivered on resume when it was more than 2 s older
   than the release. A replay now reaches back `OfflineQueueRewind` (new option, 10 s by default) and the
