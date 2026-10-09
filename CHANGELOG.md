@@ -19,6 +19,14 @@ honestly be reconstructed now.
   the payload another was sent under the same Packet Identifier. Keys written by earlier versions are
   still read, and are left to the TTL.
 
+- **Fixed.** A client with more QoS 2 PUBLISH packets unacknowledged than the Receive Maximum the
+  CONNACK stated (`Options.ReceiveMaximum`, 1024 by default; 65535 when the CONNACK had to leave it
+  out to fit a small Maximum Packet Size) was served without limit. It is now sent DISCONNECT 0x93
+  Receive Maximum exceeded and the connection is closed (MQTT-5.0 §3.3.4, §4.13.1
+  [MQTT-4.13.1-1]). A PUBCOMP, or a PUBREC of 0x80 or more, gives the slot back; a resent
+  PUBLISH and QoS 0 are not counted, and QoS 1 is answered before the next packet is read, so a
+  client that respects the limit is never disconnected.
+
 ## [0.11.2] - 2026-10-09
 
 A patch release: two fixes, tests and documentation; no API change and the Go floor is unchanged.
