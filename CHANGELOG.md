@@ -11,6 +11,10 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-10-09
+
+A patch release: two fixes; no API change and the Go floor is unchanged. One behaviour to know before upgrading: a client that sends more QoS 2 PUBLISH packets unacknowledged than the broker's Receive Maximum is now disconnected with 0x93 (it was served before).
+
 - **Fixed.** The payload of an unacknowledged message too large for the session record stayed in the
   `<StreamPrefix>_inflight` bucket until its TTL, twice the maximum Session Expiry Interval, after the
   client had acknowledged it, so a prompt client left up to that long of dead values behind (up to 1 MiB
@@ -761,7 +765,8 @@ mapping `nats-server` uses for its own MQTT support.
 [#13]: https://github.com/taumatix/natsmqtt5/pull/13
 [#19]: https://github.com/taumatix/natsmqtt5/pull/19
 [#24]: https://github.com/taumatix/natsmqtt5/pull/24
-[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.11.2...HEAD
+[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.11.3...HEAD
+[0.11.3]: https://github.com/taumatix/natsmqtt5/compare/v0.11.2...v0.11.3
 [0.11.2]: https://github.com/taumatix/natsmqtt5/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/taumatix/natsmqtt5/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/taumatix/natsmqtt5/compare/v0.10.0...v0.11.0
