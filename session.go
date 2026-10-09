@@ -1622,9 +1622,10 @@ func (s *session) retireBlobLocked(o *outbound) {
 
 // reapBlobs deletes the payloads of entries that have completed, after a record
 // that no longer names them was written. A key an entry holds again (the same
-// message, with the same identifier, sent again) is kept. A failed delete is not
-// retried: the bucket's TTL removes the payload. persistMu is held, which is what
-// keeps a payload from being written between the check and the delete.
+// message, with the same identifier, sent again) is kept. A failed delete is
+// tried again at the next checkpoint, and the bucket's TTL removes the payload if
+// none succeeds. persistMu is held, which is what keeps a payload from being
+// written between the check and the delete.
 func (s *session) reapBlobs(store *sessionStore) {
 	s.mu.Lock()
 	dead := s.deadBlobs
@@ -1636,13 +1637,22 @@ func (s *session) reapBlobs(store *sessionStore) {
 		}
 	}
 	s.mu.Unlock()
+	var failed []string
 	for _, key := range dead {
 		if _, still := held[key]; still {
 			continue
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
-		_ = store.deleteBlob(ctx, key)
+		err := store.deleteBlob(ctx, key)
 		cancel()
+		if err != nil {
+			failed = append(failed, key)
+		}
+	}
+	if len(failed) > 0 {
+		s.mu.Lock()
+		s.deadBlobs = append(s.deadBlobs, failed...)
+		s.mu.Unlock()
 	}
 }
 

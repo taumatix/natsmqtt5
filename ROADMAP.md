@@ -14,14 +14,16 @@ names it. Entries are checked against the code each time the review is re-run (l
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
-## A restored in-flight payload is rewritten once, and a failed delete is not retried
+## A restored in-flight payload is rewritten once
 
 **Today:** a restored entry has a zero `blobAt`, so the next checkpoint rewrites its payload once
-though it is already in the bucket. `reapBlobs` logs a failed delete and drops the key; the TTL
-collects it.
+though it is already in the bucket. (A failed payload delete is now retried at the next checkpoint,
+2026-10-09; that retry is covered by a unit test on `reapBlobs` only, since no real bucket can be made to
+refuse a delete.)
 
-**Shape:** set `blobAt` on restore; keep a failed key in `deadBlobs` for the next checkpoint. Low
-priority: each costs one extra write or one value kept until the TTL.
+**Shape:** store the write time in the session record's reference so a restore can carry it; setting
+`blobAt` to the restore time instead would let a payload expire unnoticed. Low priority: it costs one
+extra write per restored payload.
 
 Same family: a payload stashed by a broker that lost its session to a Clean Start on another broker a
 moment earlier can be written after that broker's delete, and a key from before keys named a client is
