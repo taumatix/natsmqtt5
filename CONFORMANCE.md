@@ -5,8 +5,7 @@ specification's numbered conformance statements, and is what [ROADMAP.md](ROADMA
 from.
 
 - Specification: [MQTT Version 5.0, OASIS Standard, 7 March 2019](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)
-- Reviewed: 2026-10-09, against v0.11.2 plus the changes after it (see the CHANGELOG's
-  `[Unreleased]`). Re-run when the code or the specification has moved a lot.
+- Reviewed: 2026-10-09, against v0.11.3. Re-run when the code or the specification has moved a lot.
 - Data: [`conformance/mqtt5-statements.tsv`](conformance/mqtt5-statements.tsv), one row per
   `[MQTT-x.y.z-n]` statement. The statement texts are in the specification; the file carries the
   ids, sections and findings.
@@ -137,7 +136,7 @@ CHANGELOG has the full text.
   [MQTT-2.2.1-4]. A success CONNACK is shortened to fit a small Maximum Packet Size
   (`small_connack_test.go`) [MQTT-3.1.2-24], [MQTT-3.2.2-16], [MQTT-3.3.2-12]. A data race
   between `Broker.Close` and a late live copy is gone.
-- **After v0.11.2.** A client with more QoS 2 PUBLISH packets unacknowledged than the Receive
+- **v0.11.3.** A client with more QoS 2 PUBLISH packets unacknowledged than the Receive
   Maximum the CONNACK stated was served; it is now sent DISCONNECT 0x93 and the connection is
   closed. The specification's sentence for this (§3.3.4) has no statement id of its own, but §4.13.1
   lists 0x93 among the Protocol Error codes and a Server that detects one MUST close the connection
