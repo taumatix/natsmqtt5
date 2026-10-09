@@ -11,6 +11,12 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed.** The payloads a session kept in the `<StreamPrefix>_inflight` bucket outlived the session
+  when it was discarded rather than completed: a reconnect with Clean Start, a session with Session Expiry
+  Interval 0 ending with its connection, and an expired record swept. Each now deletes the session's
+  payloads with its record, instead of leaving up to 1 MiB values until the bucket's TTL. Payloads
+  written by versions before keys named their client are still left to the TTL.
+
 ## [0.11.3] - 2026-10-09
 
 A patch release: two fixes; no API change and the Go floor is unchanged. One behaviour to know before upgrading: a client that sends more QoS 2 PUBLISH packets unacknowledged than the broker's Receive Maximum is now disconnected with 0x93 (it was served before).

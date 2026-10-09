@@ -417,6 +417,7 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 				lastErr = err
 				continue
 			}
+			s.deleteOwnerBlobs(ctx, clientID)
 			rec, rev, err := s.createFresh(ctx, key, clientID, identity, username)
 			if errors.Is(err, jetstream.ErrKeyExists) {
 				lastErr = err
@@ -629,6 +630,29 @@ func (s *sessionStore) deleteBlob(ctx context.Context, key string) error {
 		return err
 	}
 	return kv.Delete(ctx, key)
+}
+
+// deleteOwnerBlobs removes every payload kept for one client. It is for a session
+// that is discarded (Clean Start, expiry, an unreadable record): nothing will
+// ever restore it, so nothing should keep its payloads until the TTL. It is
+// best effort, and a key written before keys named an owner is not found.
+func (s *sessionStore) deleteOwnerBlobs(ctx context.Context, clientID string) {
+	kv, err := s.blobBucket(ctx, false)
+	if err != nil {
+		// No bucket means no payload was ever too large for a record.
+		return
+	}
+	lister, err := kv.ListKeysFiltered(ctx, blobOwner(clientID)+".*")
+	if err != nil {
+		s.logger.Debug("could not list the payloads of a discarded session", "client_id", clientID, "error", err)
+		return
+	}
+	for key := range lister.Keys() {
+		if err := kv.Delete(ctx, key); err != nil {
+			s.logger.Debug("could not delete a payload of a discarded session",
+				"client_id", clientID, "error", err)
+		}
+	}
 }
 
 // getBlob reads a payload back, verified against its key so that a truncated
@@ -845,6 +869,7 @@ func (s *sessionStore) sweep(ctx context.Context) error {
 			continue
 		}
 		if err := s.kv.Delete(ctx, key, jetstream.LastRevision(entry.Revision())); err == nil {
+			s.deleteOwnerBlobs(ctx, rec.ClientID)
 			s.logger.Debug("swept a session record", "client_id", rec.ClientID)
 		}
 	}
