@@ -99,7 +99,7 @@ func resumeAndRead(t *testing.T, addr, clientID string) []string {
 // session resumes on the same broker.
 func TestALiveCopyDelayedPastTheRewindIsStillSentOnResume(t *testing.T) {
 	natsURL := startNATS(t)
-	b, addr, _ := startBrokerHandle(t, natsURL, persistentWithQueue)
+	b, addr, _ := startBrokerHandle(t, natsURL, persistentWithQueue, rewindOf(2*time.Second))
 	f := newLateCopyFixture(t, natsURL, addr, "ld-mem")
 
 	before := natsmqtt5.LiveCopies(b)
@@ -123,8 +123,8 @@ func TestALiveCopyDelayedPastTheRewindIsStillSentOnResume(t *testing.T) {
 // copy and rewrites the record before the second broker claims it.
 func TestALiveCopyDelayedPastTheRewindIsStillSentToASessionRestoredElsewhere(t *testing.T) {
 	natsURL := startNATS(t)
-	bA, addrA, _ := startBrokerHandle(t, natsURL, persistentWithQueue)
-	addrB := startBroker(t, natsURL, persistentWithQueue)
+	bA, addrA, _ := startBrokerHandle(t, natsURL, persistentWithQueue, rewindOf(2*time.Second))
+	addrB := startBroker(t, natsURL, persistentWithQueue, rewindOf(2*time.Second))
 	f := newLateCopyFixture(t, natsURL, addrA, "ld-restored")
 
 	before := natsmqtt5.LiveCopies(bA)

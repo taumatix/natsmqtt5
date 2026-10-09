@@ -11,6 +11,14 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed.** A queued message whose live copy never reached the broker that had the session (or reached it
+  only after another broker claimed the session) was not delivered on resume when it was more than 2 s older
+  than the release. A replay now reaches back `OfflineQueueRewind` (new option, 10 s by default) and the
+  session record carries the delivered ids for that span (`DeliveredSince`, an added field; a record without
+  it behaves as before). Retained messages sent on subscribe now carry a message id, so the wider rewind does
+  not send them twice. A bound, not a guarantee: a copy delayed past the rewind is still not heard (ROADMAP).
+  The record keeps in-flight entries ahead of delivered ids when both do not fit one value.
+
 - **Fixed.** Unacknowledged messages that did not fit in a session record (about 15 under a 4 KiB NATS
   `max_payload`, thousands at the default) were cut, newest first, and not resent after the session moved.
   They are now kept in the `<StreamPrefix>_inflight` bucket in chunks the record names (`Spill`, an added

@@ -2,6 +2,7 @@ package natsmqtt5
 
 import (
 	"context"
+	"math"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -86,6 +87,9 @@ func (s *subscription) wanted() bool {
 type outbound struct {
 	packetID uint16
 	qos      packet.QoS
+	// msgID is the Mqtt5-Msg-Id of the queue copy a restored entry was read
+	// back from, so that the replay does not deliver it a second time.
+	msgID string
 	// awaitingPubcomp is false while we expect a PUBREC (QoS 2) or PUBACK
 	// (QoS 1), true once PUBREL has gone out and we expect PUBCOMP.
 	awaitingPubcomp bool
@@ -297,6 +301,9 @@ type session struct {
 	// previous connection delivered are not stored with it, so its replay
 	// cannot rewind past them; see replayOffline.
 	awayRestored bool
+	// awayRewoundTo is the time the record's delivered ids reach back to, for
+	// an absence read from the session store that has it (sessionRecord.DeliveredSince).
+	awayRewoundTo time.Time
 	// awayFromSeq is the lowest offline-queue sequence the last connection had
 	// not delivered when it ended, or 0 when it did not note one. A replay
 	// starts there rather than at a time; see conn.awayFloor.
@@ -342,6 +349,23 @@ type session struct {
 	// two run concurrently, and the displaced one holds a revision that has
 	// since been superseded by a claim, not invalidated by one.
 	claimGen uint64
+	// rewind is how far this session's replays reach back (Options.OfflineQueueRewind).
+	rewind time.Duration
+}
+
+// window is how far a replay for this session rewinds.
+func (s *session) window() time.Duration {
+	if s.rewind <= 0 {
+		return offlineRewind
+	}
+	return s.rewind
+}
+
+// deliveredFloor is the time a record written now says its delivered ids reach
+// back to: the replay's rewind before the connection's end, with the
+// checkpoint's skew.
+func (s *session) deliveredFloor() time.Time {
+	return time.Now().Add(-s.window() - checkpointSkew)
 }
 
 func newSession(clientID string) *session {
@@ -1060,7 +1084,7 @@ func (s *session) markAwayLocked(a away) {
 	a.lateSeq = lowestSeq(a.lateSeq, s.lateSeq, s.awayLateSeq)
 	s.lateSeq = 0
 	if !s.awayAt.IsZero() {
-		a.at, a.restored = s.awayAt, s.awayRestored
+		a.at, a.restored, a.rewoundTo = s.awayAt, s.awayRestored, s.awayRewoundTo
 		switch {
 		case s.awayFromSeq == 0:
 			a.fromSeq = 0
@@ -1069,6 +1093,7 @@ func (s *session) markAwayLocked(a away) {
 		}
 	}
 	s.awayAt, s.awayRestored, s.awayFromSeq, s.awayLateSeq = a.at, a.restored, a.fromSeq, a.lateSeq
+	s.awayRewoundTo = a.rewoundTo
 }
 
 // lowestSeq is the lowest of the sequences that are set, or 0 when none is.
@@ -1085,10 +1110,11 @@ func lowestSeq(seqs ...uint64) uint64 {
 // markAwayRestored records the absence a session store record describes: when
 // the session was released, and, if the record has them, the sequence the
 // replay starts at and the ids delivered at or above it.
-func (s *session) markAwayRestored(at time.Time, fromSeq, lateSeq uint64, delivered []storedDelivered) {
+func (s *session) markAwayRestored(at time.Time, fromSeq, lateSeq uint64, rewoundTo time.Time, delivered []storedDelivered) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.awayAt, s.awayRestored, s.awayFromSeq, s.awayLateSeq = at, true, fromSeq, lateSeq
+	s.awayRewoundTo = rewoundTo
 	if len(delivered) == 0 {
 		return
 	}
@@ -1121,7 +1147,7 @@ func (s *session) awayState() (fromSeq, lateSeq uint64, delivered []storedDelive
 	late := lowestSeq(s.awayLateSeq, s.lateSeq)
 	from := lowestSeq(s.awayFromSeq, late)
 	if from == 0 {
-		return 0, 0, nil, 0
+		from = math.MaxUint64 // no sequence: only the ids of the rewind's span
 	}
 	delivered, dropped = s.deliveredFromLocked(from, nil)
 	return s.awayFromSeq, late, delivered, dropped
@@ -1142,6 +1168,7 @@ func (s *session) lateRecord() (rec *sessionRecord, rev, gen uint64) {
 	// Ids past the record's bound are left out here as at release, which
 	// already logged them.
 	cp.Delivered, _ = s.deliveredFromLocked(lowestSeq(s.awayFromSeq, s.awayLateSeq), nil)
+	cp.DeliveredSince = s.deliveredFloor()
 	return &cp, s.rev, s.claimGen
 }
 
@@ -1149,8 +1176,9 @@ func (s *session) lateRecord() (rec *sessionRecord, rev, gen uint64) {
 // fromSeq, lowest first and bounded by maxStoredDelivered, leaving out those
 // whose sequence is in exclude. s.mu is held.
 func (s *session) deliveredFromLocked(fromSeq uint64, exclude map[uint64]bool) (delivered []storedDelivered, dropped int) {
+	floor := s.deliveredFloor()
 	for id, m := range s.delivered {
-		if m.seq >= fromSeq && !exclude[m.seq] {
+		if (m.seq >= fromSeq || !m.at.Before(floor)) && !exclude[m.seq] {
 			delivered = append(delivered, storedDelivered{ID: id, Seq: m.seq})
 		}
 	}
@@ -1170,35 +1198,18 @@ func (s *session) deliveredFromLocked(fromSeq uint64, exclude map[uint64]bool) (
 func (s *session) deliveredSince(fromSeq, lateSeq uint64, since time.Time) (delivered []storedDelivered, dropped int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if from := lowestSeq(fromSeq, lateSeq); from != 0 && fromSeq != 0 {
-		return s.deliveredFromLocked(from, nil)
-	}
-	if lateSeq != 0 {
-		// A replay with no sequence starts at a time, or at the late copy's
-		// sequence when that is older than the time: both sets are needed.
-		bySeq, droppedSeq := s.deliveredFromLocked(lateSeq, nil)
-		have := make(map[string]bool, len(bySeq))
-		for _, d := range bySeq {
-			have[d.ID] = true
-		}
-		for id, m := range s.delivered {
-			if !m.at.Before(since) && !have[id] {
-				bySeq = append(bySeq, storedDelivered{ID: id, Seq: m.seq})
-			}
-		}
-		sort.Slice(bySeq, func(i, j int) bool { return bySeq[i].Seq < bySeq[j].Seq })
-		if len(bySeq) > maxStoredDelivered {
-			droppedSeq += len(bySeq) - maxStoredDelivered
-			bySeq = bySeq[:maxStoredDelivered]
-		}
-		return bySeq, droppedSeq
-	}
+	from := lowestSeq(fromSeq, lateSeq)
 	for id, m := range s.delivered {
-		if !m.at.Before(since) {
+		if (from != 0 && m.seq >= from) || !m.at.Before(since) {
 			delivered = append(delivered, storedDelivered{ID: id, Seq: m.seq})
 		}
 	}
-	sort.Slice(delivered, func(i, j int) bool { return delivered[i].ID < delivered[j].ID })
+	sort.Slice(delivered, func(i, j int) bool {
+		if delivered[i].Seq != delivered[j].Seq {
+			return delivered[i].Seq < delivered[j].Seq
+		}
+		return delivered[i].ID < delivered[j].ID
+	})
 	if len(delivered) > maxStoredDelivered {
 		dropped = len(delivered) - maxStoredDelivered
 		delivered = delivered[:maxStoredDelivered]
@@ -1210,7 +1221,10 @@ func (s *session) deliveredSince(fromSeq, lateSeq uint64, since time.Time) (deli
 type away struct {
 	at       time.Time
 	restored bool // read from the session store; see session.awayRestored
-	fromSeq  uint64
+	// rewoundTo is how far back the stored delivered ids reach, when restored
+	// and the record says; zero otherwise.
+	rewoundTo time.Time
+	fromSeq   uint64
 	// lateSeq is the lowest queue sequence a live copy reached the session with
 	// after the connection that was owed it had ended; see session.lateCopy.
 	lateSeq uint64
@@ -1262,8 +1276,9 @@ func (s *session) lateSeqSafeLocked(seq uint64) bool {
 func (s *session) takeAway() (a away, ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	a = away{at: s.awayAt, restored: s.awayRestored, fromSeq: s.awayFromSeq, lateSeq: s.awayLateSeq}
+	a = away{at: s.awayAt, restored: s.awayRestored, rewoundTo: s.awayRewoundTo, fromSeq: s.awayFromSeq, lateSeq: s.awayLateSeq}
 	s.awayAt, s.awayRestored, s.awayFromSeq, s.awayLateSeq = time.Time{}, false, 0, 0
+	s.awayRewoundTo = time.Time{}
 	return a, !a.at.IsZero()
 }
 
@@ -1297,7 +1312,7 @@ func (s *session) noteDelivered(id string, seq uint64) {
 	}
 	if len(s.delivered) > 64 && len(s.delivered)%64 == 0 {
 		for k, m := range s.delivered {
-			if now.Sub(m.at) > 2*offlineRewind && (m.seq == 0 || m.seq+deliveredSeqWindow < s.maxDeliveredSeq) {
+			if now.Sub(m.at) > 2*s.window() && (m.seq == 0 || m.seq+deliveredSeqWindow < s.maxDeliveredSeq) {
 				delete(s.delivered, k)
 			}
 		}

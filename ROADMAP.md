@@ -14,22 +14,20 @@ names it. Entries are checked against the code each time the review is re-run (l
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
-## A live copy that reaches a broker after another has claimed the session is not heard
+## The replay's time rewind is a bound, not a guarantee
 
-**Today:** a live copy of a queued message that reaches the session after its connection ended is noted
-(`session.lateCopy`), written into the stored record (`AwayLateSeq`), and the next replay, on this broker or
-another, starts at or below it however long the copy took (`late_live_copy_delay_test.go`). The window left:
-a copy that reaches the old broker only after another broker has claimed the record. The claim already read
-`AwayFromSeq`/`AwayLateSeq`, and the claimed session no longer subscribes here, so nothing records that the
-session was owed a sequence below the new replay's start. [MQTT-4.4.0-1].
+**Today:** a replay reaches back `OfflineQueueRewind` (10 s by default) before the moment a session was released,
+on this broker or the one that claims it, and the record carries the delivered ids for that span
+(`DeliveredSince`), so a live copy that reached the old broker late, or never, is replayed instead of lost, and
+nothing already delivered is sent twice (`never_published_copy_test.go`). Still open: a copy delayed past the
+rewind, which is the entry below; and two costs of the bound. Each resume reads that span of the whole queue
+stream, filtering by the session's subscriptions, so a wide rewind on a busy stream is a real read. And the
+record holds at most half a value's worth of ids (`trimDelivered`), so a session that delivered more than that
+in the span can see a QoS 2 message again (logged as a warning). [MQTT-4.4.0-1], [MQTT-4.3.3-2].
 
-**Shape:** the new broker's replay must not trust `AwayFromSeq` alone. It starts at the lower of that and the
-first queue sequence stored `offlineRewind` before the release (`AwayAt`), and the `Delivered` ids that
-keep that rewind from sending a QoS 2 message twice are written for the same span, not only from
-`AwayFromSeq` (`deliveredSince` in `session.go`, bounded by `maxStoredDelivered`). Needs: a stream lookup of a
-sequence by time, a test that holds a live copy back across a claim on a second broker (the existing
-`late_live_copy_delay_test.go` seam delays the copy), and a decision for what happens when the span holds
-more ids than a record can carry (log, as the delivered ids already do). Size M.
+**Shape:** measure the read cost on a stream of a million messages and, if it matters, narrow the read by
+subject filter; then replace the span with the per-session cursor below, which makes both costs go away.
+Size S for the measurement.
 
 ## A live copy for a session that has since delivered 8192 more sequences is not noted
 
@@ -41,8 +39,8 @@ deliveries to the same session, so it is rare, but it is the exact case the spec
 **Shape:** a per-session cursor in the record: the highest sequence below which every matching queued message
 has been delivered or acknowledged, advanced only by a stream read, so an unheard copy cannot be skipped over.
 A replay starts at the cursor; the delivered ids are only needed above it. That makes the window above moot
-too, and it is the redesign this entry and the one before it share. Size L; do the entry above first and
-reassess.
+too, and it is the redesign this entry and the one before it share. Size L; the entry above is the bounded
+version that shipped first.
 
 # Tier 2: MUST statements on rare or optional paths
 

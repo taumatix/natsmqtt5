@@ -620,6 +620,7 @@ func (c *conn) sendRetained(sub *subscription, handling packet.RetainHandling, r
 		}
 		c.enqueue(&delivery{
 			sub:     sub,
+			id:      r.id,
 			topic:   r.topicName,
 			qos:     minQoS(r.qos, sub.grantedQoS),
 			payload: r.payload,

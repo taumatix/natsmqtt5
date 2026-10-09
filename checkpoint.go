@@ -130,7 +130,7 @@ func (c *conn) livePosition() away {
 			// A restored replay starts exactly at its time; one that was in memory
 			// rewinds, and the record cannot say which ids were delivered in the
 			// rewind.
-			pos.at = pos.at.Add(-offlineRewind)
+			pos.at = pos.at.Add(-c.sess.window())
 		}
 		if pos.fromSeq == 0 || (a.fromSeq != 0 && a.fromSeq < pos.fromSeq) {
 			pos.fromSeq = a.fromSeq
@@ -229,7 +229,8 @@ func (b *Broker) checkpointSession(c *conn) error {
 		// starts.
 		rec.AwayAt, rec.AwayFromSeq, rec.AwayLateSeq = pos.at, pos.fromSeq, 0
 		var dropped int
-		rec.Delivered, dropped = s.deliveredSince(pos.fromSeq, 0, pos.at)
+		rec.DeliveredSince = pos.at.Add(-s.window())
+		rec.Delivered, dropped = s.deliveredSince(pos.fromSeq, 0, rec.DeliveredSince)
 		if dropped > 0 {
 			b.logger.Warn("the session record keeps only some of the delivered message ids; "+
 				"a restored replay may repeat the rest", "client_id", s.clientID, "dropped", dropped)

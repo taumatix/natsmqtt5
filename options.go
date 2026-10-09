@@ -236,6 +236,14 @@ type Options struct {
 	// OfflineQueueMaxAge is how long a queued message is kept. Defaults to 24
 	// hours. A session away for longer loses what is older.
 	OfflineQueueMaxAge time.Duration
+	// OfflineQueueRewind is how far before a session's connection ended its
+	// replay reaches for a queued message whose live copy never arrived (the
+	// publisher stopped between storing the queue copy and publishing the live
+	// one), and for one still on its way. The session keeps the ids of what it
+	// delivered in that span so that nothing is sent twice, so a longer rewind
+	// costs memory per session and a read of that much of the queue stream on
+	// every resume. Defaults to 10 seconds.
+	OfflineQueueRewind time.Duration
 	// OfflineQueueStorage selects file or memory storage for the queue
 	// stream. Defaults to file storage.
 	OfflineQueueStorage jetstream.StorageType
@@ -343,6 +351,9 @@ func (o Options) resolve() (*resolved, error) {
 	}
 	if r.OfflineQueueMaxAge <= 0 {
 		r.OfflineQueueMaxAge = 24 * time.Hour
+	}
+	if r.OfflineQueueRewind <= 0 {
+		r.OfflineQueueRewind = 10 * time.Second
 	}
 	if r.OfflineQueueReplicas == 0 {
 		r.OfflineQueueReplicas = 1

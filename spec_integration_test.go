@@ -398,6 +398,10 @@ func restoredRewind(t *testing.T, listDelivered bool) (second *packet.Publish) {
 		rec["AwayFromSeq"] = 1
 		if listDelivered {
 			rec["Delivered"] = []map[string]any{{"ID": deliveredID, "Seq": 2}}
+		} else {
+			// The releasing broker listed it too, now that the record keeps the
+			// ids a time rewind can reach; the control must not have it.
+			delete(rec, "Delivered")
 		}
 	})
 

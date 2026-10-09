@@ -130,6 +130,14 @@ type sessionRecord struct {
 	AwayFromSeq uint64            `json:",omitempty"`
 	Delivered   []storedDelivered `json:",omitempty"`
 
+	// DeliveredSince is the time Delivered reaches back to: it names every id
+	// delivered since then (up to the bound on the list), whatever its
+	// sequence. A claim whose record has it may rewind the replay to that time,
+	// as a session held in memory does, and so finds a queued message whose
+	// live copy never arrived [MQTT-4.4.0-1]. Cleared by the claim, and
+	// additive like AwayFromSeq: a record without it is replayed as it was.
+	DeliveredSince time.Time `json:",omitzero"`
+
 	// AwayLateSeq is the lowest sequence of a message whose live copy reached
 	// the released session after it was released: the copy was stored before the
 	// connection ended and its delivery was delayed past that. A claim replays
@@ -170,14 +178,15 @@ type sessionRecord struct {
 	// awayWas, awayFromSeqWas, deliveredWas, inflightWas and receivedQoS2Was are
 	// what this broker's claim found and cleared, for the handshake to restore
 	// from. They are never written.
-	awayWas         time.Time
-	awayFromSeqWas  uint64
-	awayLateSeqWas  uint64
-	deliveredWas    []storedDelivered
-	inflightWas     []storedInflight
-	receivedQoS2Was []uint16
-	withdrawnWas    []storedWithdrawn
-	spillWas        []string
+	awayWas           time.Time
+	awayFromSeqWas    uint64
+	awayLateSeqWas    uint64
+	deliveredSinceWas time.Time
+	deliveredWas      []storedDelivered
+	inflightWas       []storedInflight
+	receivedQoS2Was   []uint16
+	withdrawnWas      []storedWithdrawn
+	spillWas          []string
 }
 
 // storedWithdrawn is one withdrawn identifier of the client's session: the
@@ -447,7 +456,7 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 		attachedElsewhere := rec.Attached && previousOwner != s.owner
 		ownerDead := attachedElsewhere && !s.ownerAlive(ctx, previousOwner)
 		if attachedElsewhere && !ownerDead {
-			rec.AwayAt, rec.AwayFromSeq, rec.AwayLateSeq, rec.Delivered = time.Time{}, 0, 0, nil
+			rec.AwayAt, rec.AwayFromSeq, rec.AwayLateSeq, rec.Delivered, rec.DeliveredSince = time.Time{}, 0, 0, nil, time.Time{}
 		}
 		legacy := ownerDead && rec.AwayAt.IsZero() && s.queueMaxAge > 0
 		rec.Owner = s.owner
@@ -461,6 +470,7 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 		rec.awayWas = rec.AwayAt
 		rec.awayFromSeqWas = rec.AwayFromSeq
 		rec.awayLateSeqWas = rec.AwayLateSeq
+		rec.deliveredSinceWas = rec.DeliveredSince
 		rec.deliveredWas = rec.Delivered
 		if legacy {
 			// Attached with no position at all: written by a broker that predates
@@ -723,6 +733,34 @@ const blobHeadroom = 512
 // server did not say.
 const defaultMaxPayload = 1 << 20
 
+// trimDelivered drops the oldest delivered ids until the ids take at most
+// budget bytes of the record, so that they never crowd out the in-flight
+// entries, which a client is owed [MQTT-4.4.0-1] and which the ids only help to
+// deduplicate. It returns how many were dropped.
+func trimDelivered(rec *sessionRecord, budget int) int {
+	all := rec.Delivered
+	if len(all) == 0 {
+		return 0
+	}
+	rec.Delivered = nil
+	base := len(encodeRecord(rec))
+	rec.Delivered = all
+	keep := len(all)
+	for keep > 0 {
+		rec.Delivered = all[len(all)-keep:]
+		if len(encodeRecord(rec))-base <= budget {
+			break
+		}
+		keep -= max(1, keep/8)
+	}
+	if keep <= 0 {
+		rec.Delivered = nil
+	} else {
+		rec.Delivered = all[len(all)-keep:]
+	}
+	return len(all) - max(keep, 0)
+}
+
 // spillKeyLen is the length of every payload key: an owner, a dot and a digest.
 const spillKeyLen = 32 + 1 + 64
 
@@ -736,6 +774,10 @@ const spillKeyLen = 32 + 1 + 64
 // large afterwards (received QoS 2 identifiers) is for fitRecord.
 func (s *sessionStore) spillRecord(rec *sessionRecord, limit int) (lost int, err error) {
 	rec.Spill = nil
+	if n := trimDelivered(rec, limit/2); n > 0 {
+		s.logger.Warn("delivered ids dropped to keep the session record within a value; a replay may repeat a QoS 2 message",
+			"client", rec.ClientID, "dropped", n)
+	}
 	if len(encodeRecord(rec)) <= limit || len(rec.Inflight) == 0 {
 		return 0, nil
 	}
