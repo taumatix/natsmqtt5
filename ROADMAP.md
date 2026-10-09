@@ -14,21 +14,25 @@ names it. Entries are checked against the code each time the review is re-run (l
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
-## A payload in the in-flight bucket is never deleted when its message completes
+## A payload in the in-flight bucket outlives a session that is discarded
 
-**Today:** the payload bucket now holds a PUBLISH up to `max_payload` less 512 bytes (2026-10-09). A
-payload is deleted by nothing but the bucket's TTL, twice the maximum Session Expiry Interval, and is
-rewritten while a session holds it. A client that acknowledges promptly leaves up to that long of
-dead 1 MiB values behind. [MQTT-4.4.0-1].
+**Today:** a payload is deleted when its message completes (2026-10-09). A session that ends another
+way (clean start, expiry, takeover by a new connection with Clean Start) leaves its payloads to the
+bucket's TTL, twice the maximum Session Expiry Interval, and so do keys written before the key named
+the client. A broker killed before the delete leaves it too.
 
-**Why it is not simply deleted:** the key is the SHA-256 of the encoded PUBLISH, Packet Identifier
-included, so two sessions that were sent the same retained message with the same identifier (the first
-one each, say) share a key, and deleting it when one completes loses the other's resend. Deleting
-needs a reference count, or a key that names the session.
+**Shape:** delete every key under `blobOwner(clientID)` when a session record is discarded (keys carry
+the owner as a prefix, so one `Keys` listing finds them). Test with a persistent session holding a
+large unacknowledged message that reconnects with Clean Start.
 
-**Shape:** key by client and Packet Identifier as well as digest, delete on PUBACK or PUBCOMP, keep
-the TTL as the backstop for a broker that dies first. Test with two sessions sent the same retained
-message, one acknowledging and one killed.
+## A restored in-flight payload is rewritten once, and a failed delete is not retried
+
+**Today:** a restored entry has a zero `blobAt`, so the next checkpoint rewrites its payload once
+though it is already in the bucket. `reapBlobs` logs a failed delete and drops the key; the TTL
+collects it.
+
+**Shape:** set `blobAt` on restore; keep a failed key in `deadBlobs` for the next checkpoint. Low
+priority: each costs one extra write or one value kept until the TTL.
 
 ## A session record's inline PUBLISH is cut when max_payload is under about 18 KiB
 

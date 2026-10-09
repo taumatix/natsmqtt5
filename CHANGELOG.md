@@ -11,6 +11,14 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed.** The payload of an unacknowledged message too large for the session record stayed in the
+  `<StreamPrefix>_inflight` bucket until its TTL, twice the maximum Session Expiry Interval, after the
+  client had acknowledged it, so a prompt client left up to that long of dead values behind (up to 1 MiB
+  each). The payload is now deleted when the PUBACK or PUBCOMP completes the message, or the session
+  drops it. Its key now names the client as well as the digest, so one session finishing does not take
+  the payload another was sent under the same Packet Identifier. Keys written by earlier versions are
+  still read, and are left to the TTL.
+
 ## [0.11.2] - 2026-10-09
 
 A patch release: two fixes, tests and documentation; no API change and the Go floor is unchanged.
