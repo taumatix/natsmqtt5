@@ -11,6 +11,10 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Added:** `Options.SharedHoldLimit` (default 0, unlimited). A shared-subscription member that is connected but
+  never acknowledges a message otherwise keeps it for as long as the connection lives; with the limit set, the
+  message goes back to the group once it has been held that long (checked every third of the ack wait), and a
+  late PUBACK from the slow member is still accepted.
 - **Fixed:** the refresh that keeps a shared subscription's membership entry alive could write it back just after
   the session unsubscribed, leaving a stale entry (and so the group and its backlog) until it lapsed. The refresh
   now checks the subscription again after writing and leaves the group if it is gone.

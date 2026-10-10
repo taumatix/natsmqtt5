@@ -134,6 +134,9 @@ type outbound struct {
 	// backlog: acknowledged when this entry completes, handed back to the group
 	// when the session ends with the entry in flight. Empty for any other.
 	ackSubject string
+	// heldSince is when this broker started holding the backlog message above;
+	// zero until the hold loop first sees it. See Options.SharedHoldLimit.
+	heldSince time.Time
 }
 
 // forgetStaleWithdrawals drops the withdrawn identifiers whose acknowledgement
@@ -591,17 +594,28 @@ func (s *session) handBackHeld() {
 }
 
 // heldSubjects lists the acknowledgement subjects of the backlog messages the
-// session is holding, for holdLoop.
-func (s *session) heldSubjects() []string {
+// session is holding, for holdLoop. With a limit, the messages held for longer
+// are not listed but returned in expired, and are no longer held: the caller
+// hands them back to the group, and the entry stays in flight so that the
+// client's late acknowledgement still completes it.
+func (s *session) heldSubjects(now time.Time, limit time.Duration) (held, expired []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var held []string
 	for _, o := range s.inflight {
-		if o.ackSubject != "" {
-			held = append(held, o.ackSubject)
+		if o.ackSubject == "" {
+			continue
 		}
+		if o.heldSince.IsZero() {
+			o.heldSince = now
+		}
+		if limit > 0 && now.Sub(o.heldSince) >= limit {
+			expired = append(expired, o.ackSubject)
+			o.ackSubject = ""
+			continue
+		}
+		held = append(held, o.ackSubject)
 	}
-	return held
+	return held, expired
 }
 
 // holdSink is where a session's backlog messages go: acknowledged when the

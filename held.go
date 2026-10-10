@@ -62,8 +62,14 @@ func (b *Broker) holdLoop(every time.Duration) {
 			}
 			b.mu.Unlock()
 			for _, s := range sessions {
-				for _, subject := range s.heldSubjects() {
+				held, expired := s.heldSubjects(time.Now(), b.opts.SharedHoldLimit)
+				for _, subject := range held {
 					b.settle(subject, ackProg)
+				}
+				if len(expired) > 0 {
+					b.logger.Debug("handing back shared messages held past SharedHoldLimit",
+						"client_id", s.clientID, "messages", len(expired))
+					b.handBack(expired)
 				}
 			}
 		}
