@@ -622,7 +622,8 @@ type Authorizer interface {
 //
 // The resume check runs before the takeover, over the filters the session holds
 // in memory and in the store. A filter that appears in between is checked again
-// at resume, and an unavailable answer there still reads as a denial.
+// at resume, and an unavailable answer there keeps it: the filter was authorised
+// when it was subscribed and no CONNECT is left to refuse.
 var ErrAuthorizerUnavailable = errors.New("natsmqtt5: the Authorizer could not decide")
 
 // AuthorizerFunc adapts a function to the Authorizer interface.

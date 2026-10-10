@@ -11,6 +11,10 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** a filter that appears after the resume check (a SUBSCRIBE from the connection being displaced, still
+  decoding buffered packets) is no longer dropped when the `Authorizer` answers `ErrAuthorizerUnavailable` for it at
+  resume. It was authorised when it was subscribed and no CONNECT is left to refuse, so it stays, as `Reauthorize`
+  leaves one on an outage. A plain denial still drops it. Only a window one SUBSCRIBE wide, during an outage.
 - **Fixed:** a retained message whose Message Expiry Interval has passed is now removed by the broker's periodic
   sweep (the one that expires detached sessions, every `SessionSweepInterval`), not only when a subscription happens to
   match it. Before, one that no subscription asked for after it expired stayed in the retained stream and in every
