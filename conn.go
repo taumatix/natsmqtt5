@@ -205,12 +205,18 @@ func newConn(b *Broker, nc net.Conn) *conn {
 func (c *conn) serve(ctx context.Context) {
 	defer c.close()
 
-	ctx, cancel := context.WithCancel(ctx)
+	parent := ctx
+	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	go func() {
 		select {
 		case <-ctx.Done():
 		case <-c.done:
+		}
+		if parent.Err() != nil {
+			// Serve's context was cancelled: say why before the socket goes,
+			// as Broker.Close does, rather than racing it with a bare close.
+			c.sendDisconnect(packet.ServerShuttingDown, "broker shutting down")
 		}
 		c.nc.Close()
 	}()
@@ -562,10 +568,19 @@ func (c *conn) writePacket(p packet.Packet, final bool) (discarded bool, err err
 		return false, net.ErrClosed
 	}
 	if final {
+		// Decided under the lock that orders it against the CONNACK, so a
+		// shutdown that starts the instant the client has its CONNACK still
+		// finds the connection connected [MQTT-3.14.0-1].
+		if !c.connected.Load() {
+			return false, nil
+		}
 		c.disconnectSent = true
 	}
 	if _, err := c.nc.Write(raw); err != nil {
 		return false, fmt.Errorf("writing %s: %w", p.Type(), err)
+	}
+	if ack, ok := p.(*packet.Connack); ok && ack.ReasonCode == packet.Success {
+		c.connected.Store(true)
 	}
 	return false, nil
 }
@@ -627,9 +642,6 @@ func withoutOptionalProperties(p packet.Packet) (packet.Packet, bool) {
 // sendDisconnect sends a server DISCONNECT, best effort. It is a no-op before
 // a successful CONNACK, which the spec forbids following [MQTT-3.14.0-1].
 func (c *conn) sendDisconnect(code packet.ReasonCode, reason string) {
-	if !c.connected.Load() {
-		return
-	}
 	d := &packet.Disconnect{ReasonCode: code}
 	// A Reason String is always permitted on DISCONNECT, whatever Request
 	// Problem Information said [MQTT-3.1.2-29].

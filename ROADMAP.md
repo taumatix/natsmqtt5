@@ -149,14 +149,6 @@ entry per member session, the consumer deleted by whoever leaves last). What rem
   again, on its first failed pull (up to `sharedPullWait` later). A message published in that window
   is not in the new consumer, which starts at the next message.
 
-## Close after a cancelled Serve context can skip the 0x8B DISCONNECT
-
-**Today:** `Broker.Close` following a cancelled `Serve` context can close a connected client without
-the `0x8B Server shutting down` DISCONNECT (a race between `conn.serve` and `Broker.drainConns`,
-`broker.go`). The client sees a TCP close, which the spec allows; the courtesy is sometimes missing.
-**Shape:** make `drainConns` send the DISCONNECT under the connection's write lock whatever state
-the serve loop is in, and test it without a sleep.
-
 ## Restricting `$` topics by default
 
 `Options.RestrictDollarTopics` (opt in) refuses every `$` topic but
