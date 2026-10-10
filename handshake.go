@@ -284,11 +284,7 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 		Properties:     c.connackProperties(assigned, sess.expiry(), props),
 	}
 	c.fitConnack(ack)
-	if err := c.write(ack); err != nil {
-		return err
-	}
-	c.connected.Store(true)
-	return nil
+	return c.write(ack)
 }
 
 // checkClientID enforces the length limit persistence imposes. MQTT-5.0

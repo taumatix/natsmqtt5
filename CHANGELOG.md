@@ -11,6 +11,10 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** cancelling the context passed to `Serve` closed every client's socket at once, so a client got a bare TCP
+  close instead of the DISCONNECT with reason 0x8B that `Close` sends; a client could also miss it if shutdown began
+  in the instant after it received its CONNACK. Both now send the DISCONNECT. The spec allows either, so this
+  is a courtesy, but a client library can only tell "the server is going away" from "the network failed" by it.
 - **Tests.** The Will index's memory is measured (`TestWillIndexHeapPerRecord`): about 330 bytes per record plus the
   Will's payload, 16 MiB at 50,000 records. No library change.
 - **Tests.** A NATS server restarting under two brokers (`will_watch_restart_test.go`): the Will index each
