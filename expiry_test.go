@@ -287,6 +287,37 @@ func TestExpiryRetainedMessagesCountFromStorage(t *testing.T) {
 	}, 5*time.Second, 20*time.Millisecond, "expired retained messages must leave the stream")
 }
 
+// An expired retained message nobody subscribes to is still removed: the
+// broker's sweep takes it out of the stream, and a later subscriber is given
+// only the message that does not expire [MQTT-3.3.2-5].
+func TestExpiryRetainedSweepRemovesAMessageNobodyAskedFor(t *testing.T) {
+	natsURL := startNATS(t)
+	addr := startBroker(t, natsURL, func(o *natsmqtt5.Options) {
+		o.SessionSweepInterval = 200 * time.Millisecond
+	})
+	pub, _ := connectClient(t, addr, connectOpts("exp-sweep-pub"))
+	publishExpiring(pub, "exp/sweep/one", "one-of-one", ptrU32(1), true)
+	publishExpiring(pub, "exp/sweep/none", "no-expiry", nil, true)
+
+	js := jetStreamOf(t, natsURL)
+	require.Eventually(t, func() bool {
+		s, err := js.Stream(context.Background(), natsmqtt5.DefaultStreamPrefix+"_retained")
+		if err != nil {
+			return false
+		}
+		info, err := s.Info(context.Background())
+		return err == nil && info.State.Msgs == 1
+	}, 6*time.Second, 50*time.Millisecond, "the sweep must remove the expired message with no subscriber involved")
+
+	sub := dialRaw(t, addr)
+	sub.connect(rawConnect("exp-sweep-sub", 0))
+	sub.subscribe("exp/sweep/#", packet.QoS1)
+	p := sub.expectPublish()
+	assert.Equal(t, "no-expiry", string(p.Payload))
+	sub.send(&packet.Puback{Ack: packet.Ack{PacketID: p.PacketID}})
+	sub.expectNothing()
+}
+
 // A retained message with an interval of 0 or none is not expired by a new
 // subscriber arriving moments later.
 func TestExpiryRetainedZeroIsDeliveredToAPromptSubscriber(t *testing.T) {

@@ -287,7 +287,8 @@ type Options struct {
 	MaxSessionExpiry time.Duration
 	// SessionSweepInterval is how often the broker discards detached sessions
 	// whose Session Expiry Interval has passed, tearing down their NATS
-	// subscriptions. A session therefore outlives its interval by up to this
+	// subscriptions, and retained messages whose Message Expiry Interval has
+	// passed. A session therefore outlives its interval by up to this
 	// long, never less [MQTT-3.1.2-23]; a client that returns after the interval
 	// but before the sweep still gets Session Present 0. Defaults to
 	// DefaultSessionSweepInterval.

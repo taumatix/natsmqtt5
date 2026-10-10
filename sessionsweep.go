@@ -20,6 +20,7 @@ func (b *Broker) sweepSessionsLoop(interval time.Duration) {
 			return
 		case <-t.C:
 			b.sweepSessions()
+			b.retain.sweep()
 		}
 	}
 }

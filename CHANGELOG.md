@@ -11,6 +11,11 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** a retained message whose Message Expiry Interval has passed is now removed by the broker's periodic
+  sweep (the one that expires detached sessions, every `SessionSweepInterval`), not only when a subscription happens to
+  match it. Before, one that no subscription asked for after it expired stayed in the retained stream and in every
+  broker's memory until a publish to its topic replaced it. It was never delivered, so this is storage, not conformance
+  [MQTT-3.3.2-5].
 - **CI:** a `Vulnerability scan` workflow runs `govulncheck` on pushes to `main`, on pull requests that change `go.mod`
   or `go.sum`, and weekly, on the newest Go. No library change. First run on 2026-10-10: nothing called in this module's
   dependencies; six standard-library findings, all fixed in Go 1.27.2.
