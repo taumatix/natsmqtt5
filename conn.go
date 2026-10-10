@@ -526,6 +526,11 @@ func (c *conn) writeReportingDiscard(p packet.Packet) (discarded bool, err error
 // server's DISCONNECT: once it has been written, or decided against, no later
 // packet may follow it on this connection [MQTT-3.14.4-1].
 func (c *conn) writePacket(p packet.Packet, final bool) (discarded bool, err error) {
+	if final && !c.connected.Load() {
+		// Before anything the handshake is still writing (clientMaxPacketSize),
+		// and re-checked under writeMu below: connected only ever turns true.
+		return false, nil
+	}
 	raw, err := packet.Encode(p)
 	if err != nil {
 		return false, fmt.Errorf("encoding %s: %w", p.Type(), err)

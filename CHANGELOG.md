@@ -11,6 +11,10 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** a shutdown that raced a connection still in its handshake read the client's Maximum Packet Size while
+  the handshake was writing it (found by `-race` in `TestMQTT_3_1_2_25_ANoConnackFitsBelowFiveBytes`, 1 run in
+  about 100). The server DISCONNECT is now skipped before the CONNACK without touching handshake state. The race
+  came in with the unreleased fix above and was never in a release.
 - **Fixed:** cancelling the context passed to `Serve` closed every client's socket at once, so a client got a bare TCP
   close instead of the DISCONNECT with reason 0x8B that `Close` sends; a client could also miss it if shutdown began
   in the instant after it received its CONNACK. Both now send the DISCONNECT. The spec allows either, so this
