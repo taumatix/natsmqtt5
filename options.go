@@ -118,6 +118,15 @@ type Options struct {
 	// tombstones forever. A broker cut off from NATS for longer than this can
 	// miss a clear and keep the cleared message until it restarts.
 	RetainedTombstoneTTL time.Duration
+	// SharedHoldLimit bounds how long a shared-subscription member may hold a
+	// QoS 1 message without acknowledging it. Past it the message is handed
+	// back to the group, so a member that is connected but never sends PUBACK
+	// does not keep it from the others, and the group may deliver it twice:
+	// the late PUBACK is still accepted and completes the exchange with that
+	// client. Zero, the default, holds for as long as the session lives. The
+	// check runs every third of the group's acknowledgement wait (10 s), so the
+	// limit is met to within that.
+	SharedHoldLimit time.Duration
 
 	// PersistentSessions keeps session state in a JetStream key-value bucket
 	// instead of in the broker process, so a client reconnecting with Clean

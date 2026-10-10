@@ -117,20 +117,23 @@ has no client to refuse to. Whether a published Will should wait for the flush i
 
 # Tier 3: SHOULD statements
 
-## A held shared message: the killed-broker window and the missing cap
+## A held shared message: the killed-broker window and the packet identifier
 
 A shared member's QoS 1 message now stays unacknowledged in JetStream until its PUBACK
 (`held.go`), kept alive by an `InProgress` every third of `sharedAckWait`, and goes back to the
-group when the session ends. Two edges remain, neither covered by a test:
+group when the session ends or, with `Options.SharedHoldLimit` set, when it has been held past
+that limit. Two edges remain:
 
 - A broker that is killed stops sending the keepalive, so after `sharedAckWait` (30 s) the
   message returns to the group even though the session record may be restored elsewhere with the
   message in flight. The restored session then settles an acknowledgement JetStream no longer
   expects, and the client can see the message twice (the restored copy with Dup=1, a fresh one
   from the other member). That is at-least-once, which QoS 1 allows, but nothing pins it.
-- A connected member that never PUBACKs holds the message for as long as the connection lives,
-  because the keepalive does not look at progress. A hold cap (a deadline after which the message
-  is handed back and the packet identifier withdrawn) would bound it.
+- A message handed back by `SharedHoldLimit` keeps its packet identifier in flight on the slow
+  member, so it occupies a Receive Maximum slot until that member PUBACKs or disconnects, and it
+  can be delivered to the group twice. Withdrawing the identifier (so the slot is freed and a late
+  PUBACK is ignored) would close that; the limit is also off by default and applies to every
+  group alike, so a per-group value is a possible follow-up.
 
 ## A shared subscription's membership: the edges left
 
