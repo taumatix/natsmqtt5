@@ -357,6 +357,42 @@ func TestASessionRecordWithoutTheReplayPositionIsResumedFromItsReleaseTime(t *te
 	back.expectNothing()
 }
 
+// A record of a version this broker does not know cannot be resumed, so the session starts
+// fresh, and the CONNACK must say so: Session Present 1 would promise subscriptions and
+// queued messages the broker is not going to deliver [MQTT-3.2.2-3]. The fresh session is a
+// session in its own right afterwards.
+func TestASessionRecordOfAnUnknownVersionStartsTheSessionFresh(t *testing.T) {
+	natsURL := startNATS(t)
+	addrA, stopA := startStoppableBroker(t, natsURL, persistentWithQueue)
+
+	away, _ := sessionPresentOnConnect(t, addrA, "future-record", false, 300)
+	away.subscribe("f/#", packet.QoS1)
+	away.send(&packet.Disconnect{})
+	time.Sleep(100 * time.Millisecond)
+	pub, _ := connectClient(t, addrA, connectOpts("pub-future-record"))
+	pub.publish(&paho.Publish{Topic: "f/1", QoS: 1, Payload: []byte("owed to the old session")})
+	stopA()
+
+	rewriteRecord(t, natsURL, "future-record", func(rec map[string]any) {
+		require.EqualValues(t, 1, rec["Version"])
+		rec["Version"] = 2
+	})
+
+	addrB := startBroker(t, natsURL, persistentWithQueue)
+	back, present := sessionPresentOnConnect(t, addrB, "future-record", false, 300)
+	assert.False(t, present, "a record this broker cannot read is not a session [MQTT-3.2.2-3]")
+	back.expectNothing()
+
+	pubB, _ := connectClient(t, addrB, connectOpts("pub-future-record-b"))
+	pubB.publish(&paho.Publish{Topic: "f/2", QoS: 1, Payload: []byte("no subscription")})
+	back.expectNothing()
+
+	back.send(&packet.Disconnect{})
+	time.Sleep(100 * time.Millisecond)
+	_, present = sessionPresentOnConnect(t, addrB, "future-record", false, 300)
+	assert.True(t, present, "the session started fresh is a session from then on")
+}
+
 // A QoS 2 message the last connection delivered above the replay's starting
 // sequence must not be delivered again as a new message when the session is
 // restored on another broker [MQTT-4.3.3-2: a first send is the only send with

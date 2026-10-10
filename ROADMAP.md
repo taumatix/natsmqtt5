@@ -376,9 +376,6 @@ most of them; these remain, each with why:
 - **The cap on stored delivered ids** (`maxStoredDelivered`, 4096): past it a restored rewind can
   repeat a QoS 2 message [MQTT-4.3.3-6]. Unit test only (`TestTheStoredIDsAreBounded`). It needs a
   behind-by-thousands client dropped and restored on another broker.
-- **A session record of a version this broker does not know**, which the broker discards and starts
-  the session fresh (`sessionstore.go`, `claim`): Session Present must then be 0 [MQTT-3.2.2-3]. Only
-  `decodeRecord` is tested. An integration test writes a `Version: 2` record and reconnects.
 - **The offline queue on a broker without JetStream** is not there: a QoS 1 message published while a
   session is away is lost although the CONNACK said Session Present 1 [MQTT-3.1.2-23],
   [MQTT-4.5.0-1]. `TestABrokerWithoutJetStreamStillStartsWithNoQueue` pins it as the known
