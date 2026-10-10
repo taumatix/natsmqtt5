@@ -605,6 +605,23 @@ type Authorizer interface {
 	Authorize(ctx context.Context, req *AuthzRequest) error
 }
 
+// ErrAuthorizerUnavailable is what an Authorizer returns (bare or wrapped, it is
+// matched with errors.Is) when it could not reach its policy and so cannot say
+// either way. The broker then does not treat it as a denial where a denial
+// would be wrong:
+//
+//   - a SUBSCRIBE gets Reason Code 0x83 in its SUBACK, a PUBLISH 0x83 in its
+//     PUBACK or PUBREC, and a CONNECT whose Will cannot be checked 0x83 in the
+//     CONNACK, instead of 0x87 Not authorized, so the client knows to retry;
+//   - [Broker.Reauthorize] leaves the subscriptions and the Will it could not
+//     check as they are, and returns this error once the sweep is over.
+//
+// It is not yet honoured when a session resumes: there the broker still reads any
+// error as a denial and drops the filter (see above), because refusing the
+// CONNECT without touching the stored session is not built. Fail the connection
+// from the Authenticator for now.
+var ErrAuthorizerUnavailable = errors.New("natsmqtt5: the Authorizer could not decide")
+
 // AuthorizerFunc adapts a function to the Authorizer interface.
 type AuthorizerFunc func(ctx context.Context, req *AuthzRequest) error
 

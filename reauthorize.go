@@ -63,6 +63,7 @@ func (b *Broker) reauthorizeLocal(ctx context.Context, clientID string) (held bo
 	identity, username := s.principal()
 
 	var denied, surviving []string
+	var undecided error
 	for _, sub := range s.subscriptions() {
 		err := a.Authorize(ctx, &AuthzRequest{
 			Action:   ActionSubscribe,
@@ -79,6 +80,15 @@ func (b *Broker) reauthorizeLocal(ctx context.Context, clientID string) (held bo
 		}
 		if err == nil {
 			surviving = append(surviving, sub.filter)
+			continue
+		}
+		if errors.Is(err, ErrAuthorizerUnavailable) {
+			// Neither kept as checked nor removed: a policy outage must not
+			// unsubscribe a client.
+			b.logger.Warn("could not re-check a subscription; leaving it",
+				"client_id", clientID, "filter", sub.filter, "error", err)
+			surviving = append(surviving, sub.filter)
+			undecided = err
 			continue
 		}
 		b.logger.Warn("removing a subscription whose permission was revoked",
@@ -113,11 +123,18 @@ func (b *Broker) reauthorizeLocal(ctx context.Context, clientID string) (held bo
 		if ctx.Err() != nil {
 			return true, fmt.Errorf("reauthorizing %q: %w", clientID, ctx.Err())
 		}
-		if err != nil {
+		if errors.Is(err, ErrAuthorizerUnavailable) {
+			b.logger.Warn("could not re-check the Will Message; leaving it",
+				"client_id", clientID, "topic", will.Topic, "error", err)
+			undecided = err
+		} else if err != nil {
 			b.logger.Warn("discarding a Will Message whose permission was revoked",
 				"client_id", clientID, "topic", will.Topic, "error", err)
 			b.wills.drop(s.discardWill(will))
 		}
+	}
+	if undecided != nil {
+		return true, fmt.Errorf("reauthorizing %q: some of it could not be checked: %w", clientID, undecided)
 	}
 	return true, nil
 }
