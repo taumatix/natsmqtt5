@@ -11,6 +11,10 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Added:** a resumed session that lost filters to the `Authorizer` is now told which. The CONNACK carries one
+  `natsmqtt5-dropped-filter` User Property per dropped filter (`natsmqtt5.DroppedFilterProperty`), on both the
+  in-memory and the stored-record resume. It is this broker's own, not MQTT v5, and is left out when the CONNACK
+  would exceed the client's Maximum Packet Size. A client that ignores it behaves as before.
 - **Added:** `Options.RetainedTombstoneTTL` (default 24 h, negative disables). Clearing a retained message leaves a
   zero-length marker in the stream; the periodic sweep now deletes markers older than the TTL, so a workload that
   retains and clears many distinct topics no longer grows the stream without bound. A broker cut off from NATS for

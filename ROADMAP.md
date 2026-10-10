@@ -240,23 +240,6 @@ away.
 
 # Operations and robustness (not conformance)
 
-## Telling a client which of its filters were dropped
-
-**Today:** a filter denied on resume is torn down silently. The CONNACK says
-`SessionPresent: true` and the client finds out by not receiving — there is no
-per-filter Reason Code in a CONNACK the way there is in a SUBACK, so the refusal
-has nowhere to go. A client written to trust Session Present has no way to know
-it must re-subscribe.
-
-**Trade-off:** CONNACK User Properties (MQTT-5.0 §3.2.2.3.10) are unconstrained
-and would carry it, but a property name this broker invents is not something a
-conforming client is required to read, so it informs a client written for this
-broker and nobody else. The alternative — refusing the whole connection — turns a
-narrowed permission into an outage and loses the filters that are still allowed.
-
-**Shape:** a User Property per dropped filter, and a line in the README saying
-it is this broker's own and not part of MQTT v5.
-
 ## Two record writes serialise the delivery of every QoS 2 message
 
 **Today:** a QoS 2 message sent to a persistent session is recorded before its PUBLISH and before
