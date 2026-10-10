@@ -143,7 +143,7 @@ func SetBlobGrace(b *Broker, d time.Duration) { b.store.blobGrace = d }
 func BlobOwner(clientID string) string { return blobOwner(clientID) }
 
 // RefreshMembers runs one pass of the shared-subscription membership refresh.
-func RefreshMembers(b *Broker) { b.refreshMembers() }
+func RefreshMembers(b *Broker) { b.refreshMembers(b.queue.Load()) }
 
 // SetBeforeMemberRefreshWrite runs fn between the refresh reading a session's
 // subscription and writing its membership entry, for the rest of the test.
@@ -152,4 +152,14 @@ func SetBeforeMemberRefreshWrite(t interface {
 }, fn func()) {
 	beforeMemberRefreshWrite.Store(&fn)
 	t.Cleanup(func() { beforeMemberRefreshWrite.Store(nil) })
+}
+
+// SetQueueRetryEvery changes how soon the broker retries a default offline queue
+// that failed at start-up, for the rest of the test. Set it before the broker starts.
+func SetQueueRetryEvery(t interface {
+	Cleanup(func())
+}, first, max time.Duration) {
+	wasFirst, wasMax := queueRetryEvery, queueRetryMax
+	queueRetryEvery, queueRetryMax = first, max
+	t.Cleanup(func() { queueRetryEvery, queueRetryMax = wasFirst, wasMax })
 }

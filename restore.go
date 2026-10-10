@@ -116,10 +116,11 @@ func (b *Broker) restoreEntry(ctx context.Context, clientID string, st storedInf
 		}
 		return o
 	}
-	if b.queue == nil || st.Seq == 0 || st.QoS == packet.QoS0 {
+	q := b.queue.Load()
+	if q == nil || st.Seq == 0 || st.QoS == packet.QoS0 {
 		return nil
 	}
-	msg, err := b.queue.message(ctx, st.Seq)
+	msg, err := q.message(ctx, st.Seq)
 	if err != nil {
 		level := slog.LevelWarn
 		if errors.Is(err, jetstream.ErrMsgNotFound) {

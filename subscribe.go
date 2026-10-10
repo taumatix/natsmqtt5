@@ -243,7 +243,7 @@ func (c *conn) bindNATS(sub *subscription) error {
 	// resumed on a new connection keeps its subscriptions (MQTT-5.0 §4.1), and
 	// capturing would leave them delivering into the closed socket.
 	sess := c.sess
-	if q := c.broker.queue; q != nil && sub.share != "" {
+	if q := c.broker.queue.Load(); q != nil && sub.share != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), natsFlushTimeout)
 		backlog, err := q.joinGroup(ctx, c.broker.opts, c.sess, sub)
 		cancel()
@@ -565,7 +565,7 @@ func (c *conn) deliver(d *delivery) error {
 	c.sess.trackInflight(&outbound{packetID: id, qos: d.qos, publish: pub, quotaHeld: true,
 		arrived: d.arrived, expiry: d.expiry, queueSeq: max(d.seq, d.recordSeq), ackSubject: d.ackSubject})
 	d.held = d.ackSubject != ""
-	if d.id != "" && c.broker.queue != nil {
+	if d.id != "" && c.broker.queue.Load() != nil {
 		// Delivered, or discarded as too large, which counts as delivered
 		// [MQTT-3.1.2-25]: either way a replay must not send it again. Noted
 		// before the write, so one whose write failed is the in-flight message

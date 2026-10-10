@@ -227,7 +227,7 @@ func (c *conn) pull(sub *subscription) {
 		it := &sharedItem{
 			seq:  seq,
 			sub:  sub,
-			msg:  &nats.Msg{Subject: c.broker.queue.liveSubject(m.Subject()), Header: header, Data: m.Data()},
+			msg:  &nats.Msg{Subject: c.broker.queue.Load().liveSubject(m.Subject()), Header: header, Data: m.Data()},
 			ack:  m.Reply(),
 			done: make(chan bool, 1),
 		}
@@ -264,7 +264,7 @@ func (c *conn) pull(sub *subscription) {
 // It is the same call that created the consumer, so it is harmless when the
 // failure was only NATS being away.
 func (c *conn) healBacklog(sub *subscription) {
-	q := c.broker.queue
+	q := c.broker.queue.Load()
 	if q == nil || !sub.live.Load() {
 		return
 	}

@@ -213,14 +213,14 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 			stored = rec.Subscriptions
 			resumed = true
 		}
-		if sess == nil && present && c.broker.queue != nil && !rec.awayWas.IsZero() {
+		if sess == nil && present && c.broker.queue.Load() != nil && !rec.awayWas.IsZero() {
 			restoredAway = rec.awayWas
 		}
 	}
 
 	if sess == nil {
 		sess = newSession(clientID)
-		sess.rewind = c.broker.queue.window()
+		sess.rewind = c.broker.queue.Load().window()
 		sess.holds = c.broker
 		if rec != nil && (len(rec.inflightWas) > 0 || len(rec.spillWas) > 0 || len(rec.receivedQoS2Was) > 0 || len(rec.withdrawnWas) > 0) {
 			c.broker.restoreSessionState(ctx, sess, rec)

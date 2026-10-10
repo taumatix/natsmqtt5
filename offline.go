@@ -358,7 +358,7 @@ func (c *conn) replayOffline() error {
 	// Whatever way this returns, the position the connection was resumed with has
 	// been taken, and the checkpoint may start replacing it.
 	defer c.markPositioned()
-	q := c.broker.queue
+	q := c.broker.queue.Load()
 	if q == nil {
 		return nil
 	}

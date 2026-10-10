@@ -110,7 +110,7 @@ func (c *conn) noteOwedLocked(seq uint64) {
 // from the lowest sequence turned away, round after round, until a round turns
 // nothing away.
 func (c *conn) catchUp() error {
-	q := c.broker.queue
+	q := c.broker.queue.Load()
 	if q == nil {
 		return nil
 	}
