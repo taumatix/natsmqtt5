@@ -1,0 +1,41 @@
+name: Vulnerability scan
+
+# A vulnerability is published against code that has not changed, so this runs
+# on a schedule as well as when dependencies do. It fails only for a
+# vulnerability in code the module actually calls (govulncheck's own rule), on
+# the newest Go toolchain, so a standard-library finding clears as soon as the
+# runner has the fixed release.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - go.mod
+      - go.sum
+      - .github/workflows/vulncheck.yml
+  schedule:
+    - cron: '41 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+          check-latest: true
+
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...

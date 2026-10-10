@@ -11,6 +11,9 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **CI:** a `Vulnerability scan` workflow runs `govulncheck` on pushes to `main`, on pull requests that change `go.mod`
+  or `go.sum`, and weekly, on the newest Go. No library change. First run on 2026-10-10: nothing called in this module's
+  dependencies; six standard-library findings, all fixed in Go 1.27.2.
 - **Added:** `ErrAuthorizerUnavailable`. An `Authorizer` that cannot reach its policy returns it (bare or wrapped)
   and the broker no longer treats that as a denial: SUBSCRIBE gets `0x83` in the SUBACK, PUBLISH `0x83` in the
   PUBACK/PUBREC, and a CONNECT whose Will cannot be checked is refused with `0x83` without displacing the live

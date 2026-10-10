@@ -336,18 +336,20 @@ grows the stream without bound.
 
 **Shape:** a periodic purge of zero-length messages older than some age.
 
-## CI has no vulnerability scan and no linter
+## CI has no linter
 
-**Today:** `.github/workflows/ci.yml` runs `gofmt`, `go vet`, `go build`,
-`go test -race` across two Go versions and two operating systems, fuzzes the
-decoder and the topic mapping, and smoke-tests the container image. It does not
-run `govulncheck`, so a known CVE in a dependency of a library other people
-import goes unnoticed, and it does not run `golangci-lint`.
+**Today:** `.github/workflows/ci.yml` runs `gofmt`, `go vet`, `go build`, `go test -race` across two Go versions and
+two operating systems, fuzzes the decoder and the topic mapping, and smoke-tests the container image. It does not run
+`golangci-lint` (or `staticcheck`).
 
-**Why it is last:** neither limits a deployment today, and adding a linter to
-nine thousand existing lines will produce a batch of findings that has to be
-worked through rather than merged. `govulncheck` is the half worth doing first
-and on its own.
+**Why it is last:** it does not limit a deployment today, and adding a linter to nine thousand existing lines will
+produce a batch of findings that has to be worked through rather than merged.
+
+**Left over from the vulnerability scan (2026-10-10):** the weekly `Vulnerability scan` run is the only thing that fails
+when a vulnerability is published against unchanged code, and nothing routes a failed scheduled run to a pass; the
+maintenance pass should read it, and `check-repo-health.py` counts only the `CI` workflow (the same gap as
+`claude-agent-sdk-go`'s `Upstream surface`). A push that is red because of a standard-library finding is also not this
+module's to fix: it clears when the runner's Go does.
 
 ## Offline-queue replay without scanning everything published
 
