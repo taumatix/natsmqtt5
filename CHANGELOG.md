@@ -11,6 +11,8 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Tests.** The Will index's memory is measured (`TestWillIndexHeapPerRecord`): about 330 bytes per record plus the
+  Will's payload, 16 MiB at 50,000 records. No library change.
 - **Tests.** A NATS server restarting under two brokers (`will_watch_restart_test.go`): the Will index each
   broker keeps comes back, and a Will stored afterwards is adopted when its broker is killed. No library change.
 - **Performance.** With `DurableWills`, a broker's Will check no longer lists the bucket and fetches every

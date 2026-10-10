@@ -65,18 +65,19 @@ record's compare-and-swap to keep it to one publication.
 **Shape:** a test on a three-server cluster that isolates the server one broker
 uses, and one that heals a long partition and counts the Will publications.
 
-## The Will index's memory is not measured, and a restart fences every client
+## A NATS restart fences every client, even a short one
 
-**Today:** the Will index (`watchLoop`) holds every record of the bucket in each broker, so its memory grows with
-the cluster's connections that have a Will; it has not been measured at a few thousand. A NATS server restart under
-two brokers is driven (`will_watch_restart_test.go`): the index recovers and a Will stored afterwards is adopted.
-That restart took longer than twice `WillCheckInterval` in the test, so both brokers closed all their clients,
-as designed; a real restart of a replicated server may or may not.
+**Today:** a NATS server restart under two brokers is driven (`will_watch_restart_test.go`): the index recovers and a
+Will stored afterwards is adopted. That restart took longer than twice `WillCheckInterval` in the test, so both
+brokers closed all their clients, as designed; a real restart of a replicated server may or may not. The index's
+memory is measured (`TestWillIndexHeapPerRecord`, 2026-10-10): about 330 bytes per record plus the Will's payload and
+properties, 16 MiB at 50,000 records of a 7-byte payload. A Will with a large payload (the protocol allows 64 KiB)
+makes that the dominant term, so a deployment of many large Wills would hold them all in every broker; that is
+unmeasured against a real cluster.
 
-**Shape:** measure the index at 5,000 and 50,000 records and, if it matters, hold only the owner and revision there
-and read the record when one is to be adopted. Separately, decide whether a restart that finishes inside
-`WillCheckInterval` times two should cost no connection at all, which it does not for a broker that sees the
-reconnect late.
+**Shape:** decide whether a restart that finishes inside `WillCheckInterval` times two should cost no connection at all,
+which it does not for a broker that sees the reconnect late. If large Wills matter, hold only owner, revision and due
+time in the index and read the record when one is to be adopted.
 
 ## Durable Wills on by default
 
