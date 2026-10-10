@@ -755,7 +755,7 @@ func TestConnectActions_MQTT_3_1_4_1(t *testing.T) {
 	good := rawConnectBytes("MQTT", 5, 0x02, rawUTF8("fmt"))
 
 	short := rawPacket(0x10, append(rawUTF8("MQTT"), 5, 0x02)) // ends after the flags
-	trailing := rawPacket(0x10, good[2:len(good)], []byte{0xFF})
+	trailing := rawPacket(0x10, good[2:], []byte{0xFF})
 	willWithoutFields := rawConnectBytes("MQTT", 5, 0x06, rawUTF8("fmt")) // Will Flag, no Will fields
 	propsPastEnd := rawPacket(0x10, rawUTF8("MQTT"), []byte{5, 0x02, 0x00, 0x1E, 0x7F}, rawUTF8("fmt"))
 	passwordFlagNoField := rawConnectBytes("MQTT", 5, 0x42, rawUTF8("fmt"))

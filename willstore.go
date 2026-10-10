@@ -629,7 +629,7 @@ func decodeWillRecord(b []byte) (*willRecord, error) {
 		return nil, err
 	}
 	if r.Version != willRecordVersion || r.Will == nil {
-		return nil, fmt.Errorf("Will record version %d not understood", r.Version)
+		return nil, fmt.Errorf("will record version %d not understood", r.Version)
 	}
 	return &r, nil
 }
