@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -209,6 +210,10 @@ func (b *Broker) refreshMembersLoop() {
 	}
 }
 
+// beforeMemberRefreshWrite, when set, runs between a refresh reading a session's
+// subscription and writing its entry. A test uses it to unsubscribe there.
+var beforeMemberRefreshWrite atomic.Pointer[func()]
+
 func (b *Broker) refreshMembers() {
 	b.mu.Lock()
 	sessions := make([]*session, 0, len(b.sessions))
@@ -225,11 +230,21 @@ func (b *Broker) refreshMembers() {
 			if !ok {
 				continue
 			}
+			if fn := beforeMemberRefreshWrite.Load(); fn != nil {
+				(*fn)()
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), natsFlushTimeout)
 			err := b.queue.members.join(ctx, group, s.clientID, s.instance)
 			cancel()
 			if err != nil {
 				b.logger.Debug("could not refresh a shared subscription's member", "filter", sub.filter, "error", err)
+				continue
+			}
+			// The subscription was read before this write. If it was dropped in
+			// between, leaving found no entry (or the old one) and this write
+			// has put one back for a session that is not a member.
+			if _, held := s.subscription(sub.filter); !held {
+				b.leaveGroup(s, sub.filter)
 			}
 		}
 	}

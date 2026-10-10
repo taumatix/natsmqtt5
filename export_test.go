@@ -141,3 +141,15 @@ func SetBlobGrace(b *Broker, d time.Duration) { b.store.blobGrace = d }
 
 // BlobOwner is the key prefix payloads of clientID are kept under.
 func BlobOwner(clientID string) string { return blobOwner(clientID) }
+
+// RefreshMembers runs one pass of the shared-subscription membership refresh.
+func RefreshMembers(b *Broker) { b.refreshMembers() }
+
+// SetBeforeMemberRefreshWrite runs fn between the refresh reading a session's
+// subscription and writing its membership entry, for the rest of the test.
+func SetBeforeMemberRefreshWrite(t interface {
+	Cleanup(func())
+}, fn func()) {
+	beforeMemberRefreshWrite.Store(&fn)
+	t.Cleanup(func() { beforeMemberRefreshWrite.Store(nil) })
+}
