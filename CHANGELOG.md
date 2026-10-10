@@ -18,8 +18,13 @@ honestly be reconstructed now.
   and the broker no longer treats that as a denial: SUBSCRIBE gets `0x83` in the SUBACK, PUBLISH `0x83` in the
   PUBACK/PUBREC, and a CONNECT whose Will cannot be checked is refused with `0x83` without displacing the live
   connection, instead of `0x87 Not authorized`. `Broker.Reauthorize` leaves the subscriptions and Will it could not
-  check and returns an error wrapping the sentinel. Not yet honoured when a session resumes, which still reads
-  any error as a denial (on ROADMAP). Additive: an Authorizer that never returns it behaves as before.
+  check and returns an error wrapping the sentinel. Additive: an Authorizer that never returns it behaves as before.
+- **Added:** `ErrAuthorizerUnavailable` is honoured when a session resumes. Before, a policy service that failed
+  during a reconnect storm cost each resuming client its stored filters and unacknowledged messages (the Authorizer's
+  error read as a denial, the reduced set was written back, and the client was told `SessionPresent: true`). Now the
+  resume is checked before the session is claimed or the connection holding it displaced, and a CONNECT whose filters
+  could not be checked is refused with `0x83`; the record and the live connection are untouched and the client retries.
+  The Authorizer is also asked once per filter on a resume, not twice. Any other error is still a denial.
 - **Fixed:** a shutdown that raced a connection still in its handshake read the client's Maximum Packet Size while
   the handshake was writing it (found by `-race` in `TestMQTT_3_1_2_25_ANoConnackFitsBelowFiveBytes`, 1 run in
   about 100). The server DISCONNECT is now skipped before the CONNACK without touching handshake state. The race

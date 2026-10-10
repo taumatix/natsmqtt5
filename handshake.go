@@ -176,6 +176,12 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 		return err
 	}
 
+	// Likewise: a policy service that cannot answer must not cost the session
+	// its filters, nor displace the connection that holds it.
+	if err := c.authoriseResume(ctx, clientID, identity, username, cp.CleanStart); err != nil {
+		return err
+	}
+
 	// Displace any connection already using this Client Identifier
 	// [MQTT-3.1.4-3], and decide whether we may resume its session.
 	sess, resumed := c.broker.takeOverSession(clientID, cp.CleanStart)
@@ -336,6 +342,9 @@ func (c *conn) resumeSubscriptions(ctx context.Context, stored []storedSubscript
 			continue
 		}
 		surviving = append(surviving, st.Filter)
+		if f := c.broker.resumeGate.Load(); f != nil {
+			(*f)(st.Filter)
+		}
 		sub, err := c.rebuild(st)
 		if err != nil {
 			// Every filter in the record was validated when the client first
@@ -493,6 +502,13 @@ func (c *conn) mayResume(ctx context.Context, filter string, qos packet.QoS) boo
 	if a == nil {
 		return true
 	}
+	if ok, asked := c.resumeVerdicts[resumeKey{filter, qos}]; asked {
+		if !ok {
+			c.logger.Warn("dropping a subscription this connection may not resume",
+				"client_id", c.sess.clientID, "filter", filter)
+		}
+		return ok
+	}
 	identity, username := c.sess.principal()
 	err := a.Authorize(ctx, &AuthzRequest{
 		Action:   ActionSubscribe,
@@ -571,6 +587,67 @@ func (c *conn) checkWill(cp *packet.Connect) error {
 		// The Will is published as an ordinary PUBLISH later, MQTT-5.0 §4.7.2.
 		c.refuse(packet.TopicNameInvalid, "a Will may not target a topic starting with $")
 		return fmt.Errorf("will topic %q starts with $", cp.Will.Topic)
+	}
+	return nil
+}
+
+type resumeKey struct {
+	filter string
+	qos    packet.QoS
+}
+
+// authoriseResume asks the Authorizer about the filters a resuming session
+// holds before anything is displaced or claimed, and refuses the CONNECT with
+// 0x83 if it answers ErrAuthorizerUnavailable for any of them.
+//
+// Past this point a refusal is not free: the session is attached, the store
+// claim is made, and the record would be written back without the filters
+// mayResume dropped. Here the old connection and the record are untouched, so
+// the client can retry the CONNECT once the policy service is back. The
+// verdicts it gets are kept for mayResume, so a reconnect storm costs the
+// policy service one call per filter, not two. A filter that appears between
+// this check and the resume (a SUBSCRIBE from the connection being displaced)
+// is not in the cache and is asked about as before.
+func (c *conn) authoriseResume(ctx context.Context, clientID, identity, username string, cleanStart bool) error {
+	a := c.broker.opts.Authorizer
+	if a == nil || cleanStart {
+		return nil
+	}
+	var filters []storedSubscription
+	if sess := c.broker.peekSession(clientID); sess != nil {
+		for _, sub := range sess.subscriptions() {
+			filters = append(filters, storedSubscription{Filter: sub.filter, Opts: packet.Subscription{QoS: sub.opts.QoS}})
+		}
+		filters = append(filters, sess.unrestoredSubscriptions()...)
+	}
+	if c.broker.persistsSessions() {
+		filters = append(filters, c.broker.store.peekSubscriptions(ctx, clientID)...)
+	}
+	for _, st := range filters {
+		key := resumeKey{st.Filter, st.Opts.QoS}
+		if _, asked := c.resumeVerdicts[key]; asked {
+			continue
+		}
+		if c.broker.opts.RestrictDollarTopics && dollarFilter(st.Filter) {
+			continue
+		}
+		err := a.Authorize(ctx, &AuthzRequest{
+			Action:   ActionSubscribe,
+			Resume:   true,
+			ClientID: clientID,
+			Identity: identity,
+			Username: username,
+			Topic:    st.Filter,
+			QoS:      st.Opts.QoS,
+		})
+		if errors.Is(err, ErrAuthorizerUnavailable) {
+			c.refuse(packet.ImplementationSpecificError, "")
+			return fmt.Errorf("resuming %q: the Authorizer could not decide on %q: %w", clientID, st.Filter, err)
+		}
+		if c.resumeVerdicts == nil {
+			c.resumeVerdicts = make(map[resumeKey]bool)
+		}
+		c.resumeVerdicts[key] = err == nil
 	}
 	return nil
 }

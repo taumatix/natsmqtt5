@@ -506,6 +506,23 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 		clientID, claimAttempts, lastErr)
 }
 
+// peekSubscriptions reads the filters a stored session holds, changing nothing.
+// A record that is missing, unreadable, or past its expiry yields none, which is
+// what claim would make of it.
+func (s *sessionStore) peekSubscriptions(ctx context.Context, clientID string) []storedSubscription {
+	ctx, cancel := context.WithTimeout(ctx, sessionOpTimeout)
+	defer cancel()
+	entry, err := s.kv.Get(ctx, sessionKey(clientID))
+	if err != nil {
+		return nil
+	}
+	rec, err := decodeRecord(entry.Value())
+	if err != nil || !rec.resumable(time.Now()) {
+		return nil
+	}
+	return rec.Subscriptions
+}
+
 func (s *sessionStore) createFresh(ctx context.Context, key, clientID, identity, username string) (*sessionRecord, uint64, error) {
 	rec := &sessionRecord{
 		Version:  sessionRecordVersion,

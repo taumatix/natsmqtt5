@@ -599,8 +599,8 @@ type AuthzRequest struct {
 // back to the durable record. An error returned because the policy store could
 // not be reached is therefore indistinguishable from a decision to deny, and
 // costs the client its subscription permanently — an implementation that cannot
-// decide should say so by failing the connection from the Authenticator, not by
-// returning an error from here.
+// decide should return ErrAuthorizerUnavailable, which refuses the CONNECT with
+// 0x83 and leaves the session as it was, rather than any other error.
 type Authorizer interface {
 	Authorize(ctx context.Context, req *AuthzRequest) error
 }
@@ -614,12 +614,14 @@ type Authorizer interface {
 //     PUBACK or PUBREC, and a CONNECT whose Will cannot be checked 0x83 in the
 //     CONNACK, instead of 0x87 Not authorized, so the client knows to retry;
 //   - [Broker.Reauthorize] leaves the subscriptions and the Will it could not
-//     check as they are, and returns this error once the sweep is over.
+//     check as they are, and returns this error once the sweep is over;
+//   - a CONNECT that resumes a session is refused with 0x83 before the session is
+//     claimed or the connection holding it displaced, so the stored filters and
+//     the live connection are untouched and the client can retry.
 //
-// It is not yet honoured when a session resumes: there the broker still reads any
-// error as a denial and drops the filter (see above), because refusing the
-// CONNECT without touching the stored session is not built. Fail the connection
-// from the Authenticator for now.
+// The resume check runs before the takeover, over the filters the session holds
+// in memory and in the store. A filter that appears in between is checked again
+// at resume, and an unavailable answer there still reads as a denial.
 var ErrAuthorizerUnavailable = errors.New("natsmqtt5: the Authorizer could not decide")
 
 // AuthorizerFunc adapts a function to the Authorizer interface.
