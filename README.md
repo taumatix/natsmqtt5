@@ -428,13 +428,14 @@ What it costs and what it does not cover:
   the NATS server's `max_payload` (1 MiB by default), newest in-flight entries
   first, which is about 15000 entries, so a client with a Receive Maximum beyond
   that and that many messages unacknowledged loses the newest, logged.
-- **A filter the `Authorizer` no longer permits is dropped without telling the
-  client.** Every filter of a resumed session goes back past the `Authorizer`
-  before the CONNACK, on both branches, so a permission narrowed while the
-  client was away takes effect immediately. A CONNACK has no per-filter Reason
-  Code to carry the refusal, so the dropped filters are logged and the client
-  still sees `SessionPresent: true`; it finds out by not receiving. The
-  unacknowledged messages a dropped filter earned go with it.
+- **A filter the `Authorizer` no longer permits is dropped, and the CONNACK names it in a User
+  Property that is this broker's own.** Every filter of a resumed session goes back past the
+  `Authorizer` before the CONNACK, on both branches, so a permission narrowed while the client was
+  away takes effect immediately. A CONNACK has no per-filter Reason Code, so the CONNACK carries one
+  `natsmqtt5-dropped-filter` User Property per dropped filter (`natsmqtt5.DroppedFilterProperty`);
+  it is not part of MQTT v5, and a client that does not read it still sees `SessionPresent: true`
+  and finds out by not receiving. It is left out when the CONNACK would exceed the client's Maximum
+  Packet Size. The unacknowledged messages a dropped filter earned go with the filter.
 - **Clients may use `$` topics unless you restrict them.** MQTT 5.0 §4.7.2 says
   a server SHOULD prevent clients exchanging messages on topics starting with
   `$`. By default only `$retained` and `$queue`, where the broker keeps its own

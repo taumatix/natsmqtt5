@@ -380,6 +380,7 @@ func (c *conn) resumeSubscriptions(ctx context.Context, stored []storedSubscript
 	}
 	c.sess.setUnrestored(nil)
 	if len(denied) > 0 {
+		c.droppedFilters = append(c.droppedFilters, denied...)
 		// The messages a denied filter earned are in the in-flight set the
 		// record restored, and the retransmission after the CONNACK would hand
 		// them to this connection [MQTT-4.4.0-1]; see reauthoriseLive.
@@ -443,6 +444,7 @@ func (c *conn) reauthoriseLive(ctx context.Context) {
 	if len(denied) == 0 {
 		return
 	}
+	c.droppedFilters = append(c.droppedFilters, denied...)
 
 	c.dropQueued(surviving)
 
@@ -715,6 +717,14 @@ func (c *conn) sessionExpiry(props *packet.Properties) uint32 {
 	return c.cappedExpiry(*props.SessionExpiryInterval)
 }
 
+// DroppedFilterProperty is the name of the User Property a CONNACK carries, once per
+// filter, for each stored subscription a resumed session lost because the Authorizer
+// refused it on resume. The CONNACK has no per-filter Reason Code, so a client that trusts
+// Session Present would otherwise wait for messages that will not come. It is this
+// broker's own and not part of MQTT v5; a client that does not read it loses nothing. It
+// is left out when the CONNACK would not fit the client's Maximum Packet Size.
+const DroppedFilterProperty = "natsmqtt5-dropped-filter"
+
 // connackProperties builds the server's half of the negotiation
 // (MQTT-5.0 §3.2.2.3). Every limit the broker imposes is advertised, so a
 // conforming client never has to discover one by being disconnected.
@@ -731,6 +741,12 @@ func (c *conn) connackProperties(assignedClientID string, expiry uint32, req *pa
 		SubIDAvailable:       packet.Byte(1),
 		SharedSubAvailable:   packet.Byte(1),
 		RetainAvailable:      packet.Byte(boolByte(c.broker.retainAvailable())),
+	}
+	// A resumed session that lost a filter to the Authorizer says which: the
+	// CONNACK has no per-filter Reason Code, and Session Present alone would
+	// have the client wait for messages that will not come.
+	for _, f := range c.droppedFilters {
+		p.User = append(p.User, packet.UserProperty{Key: DroppedFilterProperty, Value: f})
 	}
 	// "If a Server does not support QoS 1 or QoS 2 PUBLISH packets it MUST
 	// send a Maximum QoS in the CONNACK" [MQTT-3.2.2-9]. Absent means 2.
@@ -764,6 +780,8 @@ func (c *conn) connackFits(ack *packet.Connack) bool {
 // nothing at all [MQTT-3.1.2-24], [MQTT-3.1.2-25]. Only what is optional goes,
 // and in the order in which leaving it out costs the client least:
 //
+//  0. the User Properties naming dropped filters (DroppedFilterProperty), which
+//     inform and promise nothing;
 //  1. the availability flags that state their default (all three are 1 when set
 //     here; MQTT-5.0 §3.2.2.3.11 to .13 read an absent one as 1), and Retain
 //     Available when it too states the default;
@@ -788,6 +806,7 @@ func (c *conn) fitConnack(ack *packet.Connack) {
 	}
 	p := ack.Properties
 	steps := []func(){
+		func() { p.User = nil },
 		func() {
 			p.WildcardSubAvailable, p.SubIDAvailable, p.SharedSubAvailable = nil, nil, nil
 			if p.RetainAvailable != nil && *p.RetainAvailable == 1 {
