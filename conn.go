@@ -74,6 +74,9 @@ type conn struct {
 	writeMu sync.Mutex
 
 	sess *session
+	// resumeVerdicts holds what authoriseResume already asked the Authorizer, so
+	// mayResume does not ask a second time during one handshake.
+	resumeVerdicts map[resumeKey]bool
 	// claimGen is the session-record claim this connection made. Only writes
 	// presenting the session's current generation are allowed, so a connection
 	// displaced by a later CONNECT cannot write over its successor's claim.

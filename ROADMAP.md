@@ -252,26 +252,17 @@ away.
 
 # Operations and robustness (not conformance)
 
-## A resume must be able to refuse when the Authorizer is unavailable
+## A filter added between the resume check and the resume is still dropped on an outage
 
-**Today:** `ErrAuthorizerUnavailable` is honoured on SUBSCRIBE, PUBLISH, the
-Will check at CONNECT, and `Broker.Reauthorize` (0x83 or "left as it was"). It is
-not honoured on resume: `mayResume` and `reauthoriseLive` still read any error as
-a denial, so one 500 from a policy service during a reconnect storm tears down
-each resuming client's stored filters, withdraws their unacknowledged messages,
-and with `PersistentSessions` writes the reduced set back, while every client is
-told `SessionPresent: true`. The `Authorizer` doc says so and tells an
-implementation to fail the connection from the `Authenticator` meanwhile.
+**Today:** `authoriseResume` checks the filters the session holds before anything is displaced, and an unavailable
+answer refuses the CONNECT with `0x83`. A filter that appears afterwards (a SUBSCRIBE from the connection being
+displaced, still decoding packets it had buffered) is asked about again in `mayResume`, and there an unavailable
+answer reads as a denial: the filter is dropped. The window is one SUBSCRIBE wide and needs an outage that starts
+inside it.
 
-**Why it is not simply fixed:** by the time `resumeSubscriptions` runs, the
-session is already attached and registered; `finish` -> `releaseStoredSession`
-snapshots the installed subscriptions, so a refusal at that point would persist a
-partial set; and refusing right after `store.claim` leaves the claim dangling.
-
-**Shape:** decide before the session is attached. Run the re-authorisation of the
-stored filters ahead of `takeOverSession`/`claim` (as `authoriseWill` already
-runs), and on the sentinel refuse the CONNECT with `0x83`, leaving the old
-connection and the record untouched. Fail-closed and non-destructive.
+**Shape:** make `mayResume` return a third state and have `resumeSubscriptions` leave the filter in place, as
+`Broker.Reauthorize` does, instead of refusing. Small; it needs a test that lands a SUBSCRIBE in the window with the
+resume gate (`SetResumeGate`).
 
 ## Telling a client which of its filters were dropped
 

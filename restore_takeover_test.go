@@ -1,7 +1,6 @@
 package natsmqtt5_test
 
 import (
-	"context"
 	"sync"
 	"testing"
 	"time"
@@ -16,10 +15,9 @@ import (
 
 // A second CONNECT on a Client Identifier takes it over while the first is still
 // restoring the session from its stored record [MQTT-3.1.4-3]. The restore is
-// stopped in the Authorizer (the call on a resume is as long as the policy
-// service makes it, and taking over does not interrupt a connection inside it),
-// so the takeover lands between the Authorizer's answer and the subscription
-// being installed. Nothing the first connection rebuilt may stay on NATS, and
+// stopped at the resume gate (taking over does not interrupt a connection
+// inside the resume), so the takeover lands between a filter being authorised
+// and its subscription being installed. Nothing the first connection rebuilt may stay on NATS, and
 // the session the second connection gets must still hold what the record
 // stored: the CONNACK says Session Present 1 [MQTT-3.2.2-3] and the
 // subscriptions are session state that outlives a connection [MQTT-3.1.2-23].
@@ -36,25 +34,18 @@ func TestATakeoverInTheMiddleOfAStoredRecordResumeKeepsTheSessionsSubscriptions(
 	require.Eventually(t, func() bool { return len(subjectsOf(t, srv, "takeover")) == 0 },
 		5*time.Second, 20*time.Millisecond, "broker A is gone, and took its subscriptions with it")
 
-	// Broker B restores from the record. The first resume Authorizer call is
-	// held until the takeover has happened.
+	// Broker B restores from the record. The first filter's rebuild is held
+	// until the takeover has happened.
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	var once sync.Once
-	_, addrB, _ := startBrokerHandle(t, srv.ClientURL(), persistent, func(o *natsmqtt5.Options) {
-		o.Authorizer = natsmqtt5.AuthorizerFunc(func(ctx context.Context, req *natsmqtt5.AuthzRequest) error {
-			if req.Action == natsmqtt5.ActionSubscribe && req.Resume {
-				held := false
-				once.Do(func() { close(entered); held = true })
-				if held {
-					select {
-					case <-release:
-					case <-ctx.Done():
-					}
-				}
-			}
-			return nil
-		})
+	bB, addrB, _ := startBrokerHandle(t, srv.ClientURL(), persistent)
+	natsmqtt5.SetResumeGate(bB, func(string) {
+		held := false
+		once.Do(func() { close(entered); held = true })
+		if held {
+			<-release
+		}
 	})
 
 	first := dialRaw(t, addrB)
@@ -62,7 +53,7 @@ func TestATakeoverInTheMiddleOfAStoredRecordResumeKeepsTheSessionsSubscriptions(
 	select {
 	case <-entered:
 	case <-time.After(5 * time.Second):
-		t.Fatal("the restore never reached the Authorizer")
+		t.Fatal("the restore never reached the first filter")
 	}
 
 	second := dialRaw(t, addrB)

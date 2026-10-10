@@ -39,6 +39,9 @@ type Broker struct {
 	// resendGate, when set, is called by a resend between claiming the in-flight
 	// entry and writing it. It is a seam for tests; see export_test.go.
 	resendGate atomic.Pointer[func(id uint16)]
+	// resumeGate, when set, is called with each stored filter after it has been
+	// authorised and before it is rebuilt: the window a takeover can land in.
+	resumeGate atomic.Pointer[func(filter string)]
 
 	// liveSeen counts the live NATS copies the subscription handlers have
 	// finished with, delivered or dropped. Tests wait on it for a copy to have
@@ -415,6 +418,14 @@ func (b *Broker) takeOverSession(clientID string, cleanStart bool) (*session, bo
 		return nil, false
 	}
 	return existing, true
+}
+
+// peekSession returns the session held in memory for clientID without
+// displacing it.
+func (b *Broker) peekSession(clientID string) *session {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.sessions[clientID]
 }
 
 func (b *Broker) registerSession(s *session) {

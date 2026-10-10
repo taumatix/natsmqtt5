@@ -19,6 +19,17 @@ func SetResendGate(b *Broker, f func(id uint16)) {
 	b.resendGate.Store(&f)
 }
 
+// SetResumeGate makes a resume call f(filter) for each stored filter after the
+// Authorizer has passed it and before it is rebuilt, which is where a second
+// CONNECT can take the session over. nil removes it.
+func SetResumeGate(b *Broker, f func(filter string)) {
+	if f == nil {
+		b.resumeGate.Store(nil)
+		return
+	}
+	b.resumeGate.Store(&f)
+}
+
 // SetSessionExpiredHook makes the session sweep call f with the Client
 // Identifier and the number of subscriptions of every session it expires. nil
 // removes it.
