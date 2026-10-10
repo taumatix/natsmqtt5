@@ -169,3 +169,48 @@ func TestAResumeStillDropsAFilterTheAuthorizerDenies(t *testing.T) {
 	_, ok := again.read().(*packet.Pingresp)
 	require.True(t, ok, "a denied filter still delivered")
 }
+
+// A filter the displaced connection subscribes after the resume check has run is
+// asked about again, and an outage then must not read as a denial: it was
+// authorised when it was subscribed, so it stays.
+func TestAFilterAddedInTheResumeWindowSurvivesAnOutage(t *testing.T) {
+	var down atomic.Bool
+	var holder *rawClient
+	var once sync.Once
+	addr := startBroker(t, startNATS(t), func(o *natsmqtt5.Options) {
+		o.Authorizer = natsmqtt5.AuthorizerFunc(func(_ context.Context, req *natsmqtt5.AuthzRequest) error {
+			if !req.Resume {
+				return nil
+			}
+			if req.Topic == "open/a" {
+				// The resume check is under way and has not displaced the holder:
+				// its SUBSCRIBE is decoded and answered in this window.
+				once.Do(func() {
+					holder.subscribe("flaky/late", packet.QoS0)
+					down.Store(true)
+				})
+				return nil
+			}
+			if down.Load() {
+				return fmt.Errorf("policy store: %w", natsmqtt5.ErrAuthorizerUnavailable)
+			}
+			return nil
+		})
+	})
+
+	holder = dialRaw(t, addr)
+	holder.connect(rawConnect("resume-window", 300))
+	holder.subscribe("open/a", packet.QoS0)
+
+	second := dialRaw(t, addr)
+	ack := second.connect(rawConnect("resume-window", 300))
+	require.True(t, ack.SessionPresent)
+	down.Store(false)
+
+	pub, _ := connectClient(t, addr, connectOpts("pub-resume-window"))
+	pub.publish(&paho.Publish{Topic: "flaky/late", QoS: 0, Payload: []byte("kept")})
+	assert.Equal(t, "flaky/late", second.expectPublish().Topic,
+		"an outage during the resume dropped a filter that was authorised when it was subscribed")
+	pub.publish(&paho.Publish{Topic: "open/a", QoS: 0, Payload: []byte("kept")})
+	assert.Equal(t, "open/a", second.expectPublish().Topic)
+}

@@ -240,18 +240,6 @@ away.
 
 # Operations and robustness (not conformance)
 
-## A filter added between the resume check and the resume is still dropped on an outage
-
-**Today:** `authoriseResume` checks the filters the session holds before anything is displaced, and an unavailable
-answer refuses the CONNECT with `0x83`. A filter that appears afterwards (a SUBSCRIBE from the connection being
-displaced, still decoding packets it had buffered) is asked about again in `mayResume`, and there an unavailable
-answer reads as a denial: the filter is dropped. The window is one SUBSCRIBE wide and needs an outage that starts
-inside it.
-
-**Shape:** make `mayResume` return a third state and have `resumeSubscriptions` leave the filter in place, as
-`Broker.Reauthorize` does, instead of refusing. Small; it needs a test that lands a SUBSCRIBE in the window with the
-resume gate (`SetResumeGate`).
-
 ## Telling a client which of its filters were dropped
 
 **Today:** a filter denied on resume is torn down silently. The CONNACK says

@@ -334,7 +334,7 @@ func (c *conn) resumeSubscriptions(ctx context.Context, stored []storedSubscript
 
 	var denied, surviving []string
 	for _, st := range stored {
-		if !c.mayResume(ctx, st.Filter, st.Opts.QoS) {
+		if c.mayResume(ctx, st.Filter, st.Opts.QoS) == resumeDenied {
 			denied = append(denied, st.Filter)
 			// The session was a member of a shared subscription it may no longer
 			// have; the record is what made it one.
@@ -424,7 +424,7 @@ func (c *conn) reauthoriseLive(ctx context.Context) {
 	// would count as surviving without ever having been put past the Authorizer.
 	var denied, surviving []string
 	for _, sub := range c.sess.subscriptions() {
-		if c.mayResume(ctx, sub.filter, sub.opts.QoS) {
+		if c.mayResume(ctx, sub.filter, sub.opts.QoS) != resumeDenied {
 			surviving = append(surviving, sub.filter)
 			continue
 		}
@@ -491,23 +491,24 @@ func (c *conn) dropQueued(surviving []string) {
 // A denied filter is dropped rather than refused, because a CONNACK has no
 // per-filter Reason Code to carry the refusal. The client is free to subscribe
 // again, and will get an honest 0x87 in the SUBACK when it does.
-func (c *conn) mayResume(ctx context.Context, filter string, qos packet.QoS) bool {
+func (c *conn) mayResume(ctx context.Context, filter string, qos packet.QoS) resumeVerdict {
 	if c.broker.opts.RestrictDollarTopics && dollarFilter(filter) {
 		// A filter stored before the option was turned on (dollar.go).
 		c.logger.Warn("dropping a stored subscription to a $ topic",
 			"client_id", c.sess.clientID, "filter", filter)
-		return false
+		return resumeDenied
 	}
 	a := c.broker.opts.Authorizer
 	if a == nil {
-		return true
+		return resumeAllowed
 	}
 	if ok, asked := c.resumeVerdicts[resumeKey{filter, qos}]; asked {
 		if !ok {
 			c.logger.Warn("dropping a subscription this connection may not resume",
 				"client_id", c.sess.clientID, "filter", filter)
+			return resumeDenied
 		}
-		return ok
+		return resumeAllowed
 	}
 	identity, username := c.sess.principal()
 	err := a.Authorize(ctx, &AuthzRequest{
@@ -519,13 +520,31 @@ func (c *conn) mayResume(ctx context.Context, filter string, qos packet.QoS) boo
 		Topic:    filter,
 		QoS:      qos,
 	})
+	if errors.Is(err, ErrAuthorizerUnavailable) {
+		// Only a filter that appeared after authoriseResume looked gets here: it
+		// was authorised when it was subscribed, and no CONNECT is left to
+		// refuse, so it stays, as Reauthorize leaves one on an outage.
+		c.logger.Warn("keeping a subscription the Authorizer could not decide on at resume",
+			"client_id", c.sess.clientID, "filter", filter, "error", err)
+		return resumeUnknown
+	}
 	if err != nil {
 		c.logger.Warn("dropping a subscription this connection may not resume",
 			"client_id", c.sess.clientID, "filter", filter, "error", err)
-		return false
+		return resumeDenied
 	}
-	return true
+	return resumeAllowed
 }
+
+// resumeVerdict is the answer to whether a resumed session may keep a filter.
+// resumeUnknown means the Authorizer could not decide, which keeps the filter.
+type resumeVerdict int
+
+const (
+	resumeAllowed resumeVerdict = iota
+	resumeDenied
+	resumeUnknown
+)
 
 // rebuild turns a stored subscription back into a live one. The subject and the
 // share name are recomputed rather than read, so a broker whose SubjectPrefix
@@ -607,7 +626,8 @@ type resumeKey struct {
 // verdicts it gets are kept for mayResume, so a reconnect storm costs the
 // policy service one call per filter, not two. A filter that appears between
 // this check and the resume (a SUBSCRIBE from the connection being displaced)
-// is not in the cache and is asked about as before.
+// is not in the cache and is asked about in mayResume, where an unavailable
+// answer keeps it.
 func (c *conn) authoriseResume(ctx context.Context, clientID, identity, username string, cleanStart bool) error {
 	a := c.broker.opts.Authorizer
 	if a == nil || cleanStart {
