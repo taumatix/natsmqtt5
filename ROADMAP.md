@@ -163,18 +163,6 @@ remains of the entry today:
 - The broker publishes nothing of its own on `$SYS`; the option leaves that namespace unused
   rather than serving it.
 
-## Expired retained messages nobody subscribes to stay in the stream
-
-**Today:** Message Expiry is enforced for retained messages when a subscription looks for them: an
-expired one is not sent, and is removed from the in-memory view and deleted from the retained
-stream [MQTT-3.3.2-5]. One that no subscription matches after it expired is never looked at and
-stays in the stream (and in every broker's map) until a publish to its topic replaces it or a
-restart reads it again. It is never delivered, so no statement is violated; it is storage.
-
-**Shape:** a periodic sweep over the retained map, or a per-message TTL on the stream
-(`AllowMsgTTL`, nats-server 2.11 and later, with the interval as the `Nats-TTL` header), which would
-also need a floor for the servers that do not have it.
-
 ## A message's wait is counted from this broker's receipt, and in whole seconds
 
 **Today:** the interval is whole seconds on the wire and the time waited is counted in whole seconds,

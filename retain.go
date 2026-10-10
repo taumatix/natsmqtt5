@@ -311,6 +311,25 @@ func (s *retainedStore) match(filter string) []*retained {
 	return out
 }
 
+// sweep discards every retained message whose interval has passed, including
+// those no subscription has asked for since [MQTT-3.3.2-5]. It runs on the
+// broker's session sweep, so a message outlives its interval by up to
+// Options.SessionSweepInterval.
+func (s *retainedStore) sweep() {
+	now := time.Now()
+	var expired []*retained
+	s.mu.RLock()
+	for _, r := range s.byTopic {
+		if r.expired(now) {
+			expired = append(expired, r)
+		}
+	}
+	s.mu.RUnlock()
+	if len(expired) > 0 {
+		s.discard(expired)
+	}
+}
+
 // discard removes expired messages from the local view and from the stream.
 // A message replaced since it was seen stays: only the one that expired goes.
 func (s *retainedStore) discard(expired []*retained) {
