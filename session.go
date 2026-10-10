@@ -485,14 +485,6 @@ func (s *session) takeOver() {
 	}
 }
 
-// expired reports whether the Session Expiry Interval has elapsed since the
-// connection went away (MQTT-5.0 §3.1.2.11.2).
-func (s *session) expired() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.expiredLocked()
-}
-
 func (s *session) expiredLocked() bool {
 	switch {
 	case s.discarded:

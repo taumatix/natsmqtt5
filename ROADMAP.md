@@ -288,20 +288,15 @@ consumer's resume, and a tombstone the local broker never saw is purged by the s
 (`MaxAge` is not usable: it would expire live retained messages). Needs a test that restarts NATS, which the 3-server
 harness entry above provides.
 
-## CI has no linter
+## The weekly scans fail where no pass reads them
 
-**Today:** `.github/workflows/ci.yml` runs `gofmt`, `go vet`, `go build`, `go test -race` across two Go versions and
-two operating systems, fuzzes the decoder and the topic mapping, and smoke-tests the container image. It does not run
-`golangci-lint` (or `staticcheck`).
+**Done:** CI runs `staticcheck` (pinned, 2026-10-11) beside `go vet`; its four findings were fixed. A broader
+`golangci-lint` set (errcheck, gosec) was not added and would need its own findings worked through.
 
-**Why it is last:** it does not limit a deployment today, and adding a linter to nine thousand existing lines will
-produce a batch of findings that has to be worked through rather than merged.
-
-**Left over from the vulnerability scan (2026-10-10):** the weekly `Vulnerability scan` run is the only thing that fails
-when a vulnerability is published against unchanged code, and nothing routes a failed scheduled run to a pass; the
-maintenance pass should read it, and `check-repo-health.py` counts only the `CI` workflow (the same gap as
-`claude-agent-sdk-go`'s `Upstream surface`). A push that is red because of a standard-library finding is also not this
-module's to fix: it clears when the runner's Go does.
+**Today:** the weekly `Vulnerability scan` run is the only thing that fails when a vulnerability is published against
+unchanged code, and nothing routes a failed scheduled run to a pass; the maintenance pass should read it, and
+`check-repo-health.py` counts only the `CI` workflow (the same gap as `claude-agent-sdk-go`'s `Upstream surface`). A push
+that is red because of a standard-library finding is also not this module's to fix: it clears when the runner's Go does.
 
 ## Offline-queue replay without scanning everything published
 

@@ -807,7 +807,7 @@ func TestConformance_MQTT_4_7_3_4_TopicsAreMatchedByteForByte(t *testing.T) {
 	pub.read()
 	assert.Empty(t, p3Publishes(subCase.p3Drain(400*time.Millisecond)), "topics are case sensitive")
 
-	const exotic = "日本語/ü/😀/ /​"
+	const exotic = "日本語/ü/😀/ /\u200b"
 	subExotic := p3Client(t, addr, "exotic-sub")
 	subExotic.subscribe(exotic, packet.QoS1)
 	pub.send(&packet.Publish{Topic: exotic, QoS: packet.QoS1, PacketID: 4, Payload: []byte("exotic")})
