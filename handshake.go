@@ -599,7 +599,11 @@ func (c *conn) authoriseWill(ctx context.Context, will *packet.Will, clientID, i
 		Retain:   will.Retain,
 	})
 	if err != nil {
-		c.refuse(packet.NotAuthorized, "")
+		code := packet.NotAuthorized
+		if errors.Is(err, ErrAuthorizerUnavailable) {
+			code = packet.ImplementationSpecificError
+		}
+		c.refuse(code, "")
 		return fmt.Errorf("will message on %q denied for %q: %w", will.Topic, clientID, err)
 	}
 	return nil

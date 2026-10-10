@@ -252,35 +252,26 @@ away.
 
 # Operations and robustness (not conformance)
 
-## An Authorizer has no way to say "I could not decide"
+## A resume must be able to refuse when the Authorizer is unavailable
 
-**Today:** `Authorize` returns an `error`, and `mayResume` reads any non-nil
-error as a denial. On a SUBSCRIBE that conflation is harmless — the client gets
-0x87 and retries. On a resume it is not: the filter is torn down, its
-unacknowledged messages are withdrawn, and with `PersistentSessions` the reduced
-set is written straight back to the durable record. One 500 from a policy
-service during a reconnect storm therefore unsubscribes a fleet, permanently,
-while every client is told `SessionPresent: true`.
+**Today:** `ErrAuthorizerUnavailable` is honoured on SUBSCRIBE, PUBLISH, the
+Will check at CONNECT, and `Broker.Reauthorize` (0x83 or "left as it was"). It is
+not honoured on resume: `mayResume` and `reauthoriseLive` still read any error as
+a denial, so one 500 from a policy service during a reconnect storm tears down
+each resuming client's stored filters, withdraws their unacknowledged messages,
+and with `PersistentSessions` writes the reduced set back, while every client is
+told `SessionPresent: true`. The `Authorizer` doc says so and tells an
+implementation to fail the connection from the `Authenticator` meanwhile.
 
-The `Authorizer` doc now says this plainly and tells an implementation to fail
-the connection from the `Authenticator` instead. That is guidance, not a
-mechanism.
+**Why it is not simply fixed:** by the time `resumeSubscriptions` runs, the
+session is already attached and registered; `finish` -> `releaseStoredSession`
+snapshots the installed subscriptions, so a refusal at that point would persist a
+partial set; and refusing right after `store.claim` leaves the claim dangling.
 
-**Shape:** an exported `ErrAuthorizerUnavailable` sentinel. `mayResume` answers
-`errors.Is` on it by refusing the CONNECT with `0x83 Implementation specific
-error`, leaving the session and the record untouched, so the client retries
-rather than silently losing its subscriptions. Fail-closed and non-destructive,
-which neither of today's two outcomes is.
-
-`Broker.Reauthorize` (v0.5.0) is a fourth: called during an outage, it removes every
-subscription it re-checks from a live connection. Since v0.6.0 it can also be triggered over NATS, on
-`_NATSMQTT5.reauthorize.<prefix>`, by anything allowed to publish there.
-
-There is now a third call site that conflates the two: `authoriseWill` answers
-any error with `0x87 Not authorized`, so a policy-service outage tells every
-client carrying a Will that it is not permitted. That outcome is already
-non-destructive — the check runs before the session is taken over — so only
-the Reason Code is wrong; the sentinel should map to `0x83` there too.
+**Shape:** decide before the session is attached. Run the re-authorisation of the
+stored filters ahead of `takeOverSession`/`claim` (as `authoriseWill` already
+runs), and on the sentinel refuse the CONNECT with `0x83`, leaving the old
+connection and the record untouched. Fail-closed and non-destructive.
 
 ## Telling a client which of its filters were dropped
 

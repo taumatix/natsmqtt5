@@ -115,6 +115,9 @@ func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID
 		}
 		if err := a.Authorize(ctx, req); err != nil {
 			c.logger.Debug("subscription denied", "filter", want.Filter, "error", err)
+			if errors.Is(err, ErrAuthorizerUnavailable) {
+				return nil, false, packet.ImplementationSpecificError
+			}
 			return nil, false, packet.NotAuthorized
 		}
 	}

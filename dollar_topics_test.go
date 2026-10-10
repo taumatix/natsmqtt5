@@ -198,7 +198,8 @@ func TestRestrictedBrokerDropsStoredDollarSubscriptionsOnResume_MQTT_5_0_4_7_2(t
 	second, connack := connectClient(t, addrB, durableConnect("dollar-resume", 300))
 	require.True(t, connack.SessionPresent)
 	pubB, _ := connectClient(t, addrB, connectOpts("pub-b"))
-	pubB.publish(&paho.Publish{Topic: "public/a", QoS: 1, Payload: []byte("fine")})
+	// QoS 0: a QoS 1 copy still unacknowledged at Disconnect is redelivered on the next resume.
+	pubB.publish(&paho.Publish{Topic: "public/a", QoS: 0, Payload: []byte("fine")})
 	assert.Equal(t, "fine", second.expectMessage().Payload, "the other filter survives")
 	require.NoError(t, second.Client.Disconnect(&paho.Disconnect{ReasonCode: 0}))
 	stopB()

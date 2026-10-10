@@ -96,6 +96,9 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 		}
 		if err := a.Authorize(ctx, req); err != nil {
 			c.logger.Debug("publish denied", "topic", topicName, "error", err)
+			if errors.Is(err, ErrAuthorizerUnavailable) {
+				return c.rejectPublish(p, packet.ImplementationSpecificError, "")
+			}
 			return c.rejectPublish(p, packet.NotAuthorized, "")
 		}
 	}
