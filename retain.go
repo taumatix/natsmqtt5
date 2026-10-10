@@ -55,6 +55,12 @@ func (r *retained) properties() *packet.Properties {
 	return &cp
 }
 
+// tombstone is the stream position and write time of a cleared topic's marker.
+type tombstone struct {
+	seq    uint64
+	stored time.Time
+}
+
 // retainedStore keeps the retained message for each topic.
 //
 // The durable copy lives in a JetStream stream configured with
@@ -75,6 +81,11 @@ type retainedStore struct {
 	mu sync.RWMutex
 	// byTopic is keyed by MQTT Topic Name.
 	byTopic map[string]*retained
+	// tombstones are the zero-length messages that record a cleared topic, keyed
+	// by Topic Name. They stay in the stream until sweep purges them.
+	tombstones map[string]tombstone
+	// tombstoneTTL is how long a tombstone is kept; zero or less keeps it forever.
+	tombstoneTTL time.Duration
 
 	cancel context.CancelFunc
 	// ready closes once the initial replay has caught up, so New does not
@@ -113,6 +124,9 @@ func newRetainedStore(ctx context.Context, js jetstream.JetStream, opts *resolve
 		logger:  logger,
 		byTopic: make(map[string]*retained),
 		ready:   make(chan struct{}),
+
+		tombstones:   make(map[string]tombstone),
+		tombstoneTTL: opts.RetainedTombstoneTTL,
 	}
 
 	runCtx, cancel := context.WithCancel(context.Background())
@@ -207,8 +221,16 @@ func (s *retainedStore) apply(msg jetstream.Msg) {
 	defer s.mu.Unlock()
 	if len(msg.Data()) == 0 {
 		delete(s.byTopic, name)
+		t := tombstone{stored: time.Now()}
+		if md, err := msg.Metadata(); err == nil {
+			t.seq, t.stored = md.Sequence.Stream, md.Timestamp
+		}
+		if t.seq != 0 {
+			s.tombstones[name] = t
+		}
 		return
 	}
+	delete(s.tombstones, name)
 	qos, _, _, props := fromNATS(&nats.Msg{Header: msg.Headers(), Data: msg.Data()})
 	r := &retained{
 		topicName: name,
@@ -264,8 +286,10 @@ func (s *retainedStore) store(ctx context.Context, subject, originClientID, id s
 	defer s.mu.Unlock()
 	if len(p.Payload) == 0 {
 		delete(s.byTopic, name)
+		s.tombstones[name] = tombstone{seq: ack.Sequence, stored: time.Now()}
 		return nil
 	}
+	delete(s.tombstones, name)
 	// The properties are read back from the message just written, not taken from
 	// the PUBLISH: this copy must equal the one the stream consumer builds from
 	// the same message, which carries only what toNATS keeps. A Topic Alias is a
@@ -327,6 +351,49 @@ func (s *retainedStore) sweep() {
 	s.mu.RUnlock()
 	if len(expired) > 0 {
 		s.discard(expired)
+	}
+	s.purgeTombstones(now)
+}
+
+// purgeTombstones deletes the markers of cleared topics older than the
+// tombstone TTL, so a workload that clears many distinct topics does not grow
+// the stream without bound. A broker that was cut off from NATS for longer than
+// the TTL can miss a clear whose marker is gone, and keeps that message until
+// it restarts or the topic is retained again.
+func (s *retainedStore) purgeTombstones(now time.Time) {
+	if s.tombstoneTTL <= 0 {
+		return
+	}
+	type old struct {
+		name string
+		t    tombstone
+	}
+	var due []old
+	s.mu.RLock()
+	for name, t := range s.tombstones {
+		if now.Sub(t.stored) >= s.tombstoneTTL {
+			due = append(due, old{name, t})
+		}
+	}
+	s.mu.RUnlock()
+	if len(due) == 0 {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), retainStoreTimeout)
+	defer cancel()
+	for _, d := range due {
+		// Another broker may have purged it first, which is as good.
+		if err := s.stream.DeleteMsg(ctx, d.t.seq); err != nil &&
+			!errors.Is(err, jetstream.ErrMsgNotFound) {
+			s.logger.Debug("purging a retained tombstone failed", "topic", d.name, "error", err)
+			continue
+		}
+		s.mu.Lock()
+		if s.tombstones[d.name] == d.t {
+			delete(s.tombstones, d.name)
+		}
+		s.mu.Unlock()
 	}
 }
 

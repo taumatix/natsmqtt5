@@ -6,6 +6,10 @@ import "time"
 // whose Session Expiry Interval has passed; see Options.SessionSweepInterval.
 const DefaultSessionSweepInterval = time.Minute
 
+// DefaultRetainedTombstoneTTL is how long a cleared retained topic's marker stays
+// in the stream; see Options.RetainedTombstoneTTL.
+const DefaultRetainedTombstoneTTL = 24 * time.Hour
+
 // sweepSessionsLoop discards the sessions nobody came back for. A session whose
 // client disconnected with a non-zero Session Expiry Interval keeps its NATS
 // subscriptions until the client returns; without this, a workload that churns
