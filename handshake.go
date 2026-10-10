@@ -483,6 +483,12 @@ func (c *conn) dropQueued(surviving []string) {
 // per-filter Reason Code to carry the refusal. The client is free to subscribe
 // again, and will get an honest 0x87 in the SUBACK when it does.
 func (c *conn) mayResume(ctx context.Context, filter string, qos packet.QoS) bool {
+	if c.broker.opts.RestrictDollarTopics && dollarFilter(filter) {
+		// A filter stored before the option was turned on (dollar.go).
+		c.logger.Warn("dropping a stored subscription to a $ topic",
+			"client_id", c.sess.clientID, "filter", filter)
+		return false
+	}
 	a := c.broker.opts.Authorizer
 	if a == nil {
 		return true

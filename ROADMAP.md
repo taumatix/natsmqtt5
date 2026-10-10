@@ -157,9 +157,9 @@ entry per member session, the consumer deleted by whoever leaves last). What rem
 `MIGRATION.md` and a release that logs a warning the first time a client uses a `$` topic. What
 remains of the entry today:
 
-- A subscription a persistent session stored before the option was turned on is resumed, so a
-  `$app/...` filter keeps receiving. Dropping it at resume, as a denied filter is, would finish
-  the restriction.
+- A restricted broker now drops a stored `$` filter when it resumes the session (2026-10-10). Not covered: a session
+  held in a restricted broker's memory cannot hold one, so that branch is untested by construction; and the in-flight
+  messages such a filter earned are withdrawn the way a denied filter's are, but no test drives that for `$`.
 - The broker publishes nothing of its own on `$SYS`; the option leaves that namespace unused
   rather than serving it.
 

@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eclipse/paho.golang/paho"
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -174,4 +175,41 @@ func TestReservedLevelsAreRefusedWithAndWithoutTheOption(t *testing.T) {
 			assert.Equal(t, []packet.ReasonCode{packet.TopicFilterInvalid}, c.subscribeCodes("$queue/#", packet.QoS1))
 		})
 	}
+}
+
+// A subscription a persistent session stored before the option was turned on
+// must not outlive it: the restricted broker that resumes the session drops the
+// "$" filter, keeps the others, and writes the reduced set back, so a later
+// unrestricted broker does not bring it back.
+func TestRestrictedBrokerDropsStoredDollarSubscriptionsOnResume_MQTT_5_0_4_7_2(t *testing.T) {
+	natsURL := startNATS(t)
+	persistent := func(o *natsmqtt5.Options) { o.PersistentSessions = true }
+
+	addrA, stopA := startStoppableBroker(t, natsURL, persistent)
+	first, _ := connectClient(t, addrA, durableConnect("dollar-resume", 300))
+	first.subscribe(
+		paho.SubscribeOptions{Topic: "$app/x", QoS: 1},
+		paho.SubscribeOptions{Topic: "public/#", QoS: 1},
+	)
+	require.NoError(t, first.Client.Disconnect(&paho.Disconnect{ReasonCode: 0}))
+	stopA()
+
+	addrB, stopB := startStoppableBroker(t, natsURL, persistent, restrictDollar)
+	second, connack := connectClient(t, addrB, durableConnect("dollar-resume", 300))
+	require.True(t, connack.SessionPresent)
+	pubB, _ := connectClient(t, addrB, connectOpts("pub-b"))
+	pubB.publish(&paho.Publish{Topic: "public/a", QoS: 1, Payload: []byte("fine")})
+	assert.Equal(t, "fine", second.expectMessage().Payload, "the other filter survives")
+	require.NoError(t, second.Client.Disconnect(&paho.Disconnect{ReasonCode: 0}))
+	stopB()
+
+	// An unrestricted broker would deliver "$app/x" if the record still held it.
+	addrC := startBroker(t, natsURL, persistent)
+	third, connack := connectClient(t, addrC, durableConnect("dollar-resume", 300))
+	require.True(t, connack.SessionPresent)
+	pubC, _ := connectClient(t, addrC, connectOpts("pub-c"))
+	pubC.publish(&paho.Publish{Topic: "$app/x", QoS: 1, Payload: []byte("leak")})
+	third.expectNoMessage()
+	pubC.publish(&paho.Publish{Topic: "public/b", QoS: 1, Payload: []byte("still fine")})
+	assert.Equal(t, "still fine", third.expectMessage().Payload)
 }
