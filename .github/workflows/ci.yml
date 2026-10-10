@@ -48,7 +48,11 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # staticcheck reads the compiler's export data and lags the newest Go ("export data
+      # version 5 is greater than maximum supported version 4" on `stable`), so it runs on
+      # the pinned toolchain only.
       - name: Staticcheck
+        if: matrix.go == '1.26'
         run: go run honnef.co/go/tools/cmd/staticcheck@2026.2.1 ./...
 
       - name: Build
