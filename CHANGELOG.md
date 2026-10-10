@@ -11,6 +11,9 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** the refresh that keeps a shared subscription's membership entry alive could write it back just after
+  the session unsubscribed, leaving a stale entry (and so the group and its backlog) until it lapsed. The refresh
+  now checks the subscription again after writing and leaves the group if it is gone.
 - **Added:** a resumed session that lost filters to the `Authorizer` is now told which. The CONNACK carries one
   `natsmqtt5-dropped-filter` User Property per dropped filter (`natsmqtt5.DroppedFilterProperty`), on both the
   in-memory and the stored-record resume. It is this broker's own, not MQTT v5, and is left out when the CONNACK

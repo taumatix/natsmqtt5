@@ -142,9 +142,6 @@ entry per member session, the consumer deleted by whoever leaves last). What rem
   entry lapses, `MaxSessionExpiry` plus a minute. The consumer's inactivity threshold is the
   backstop for both, so a group can keep collecting for that long. Making a surviving broker
   sweep entries whose session record is gone would close it.
-- The refresh that keeps a live session's entry can write it back just after the session left
-  (it read the subscription before the UNSUBSCRIBE and wrote after), leaving a stale entry until it
-  lapses, and the group lives that long. A compare-and-set on the instance would close it.
 - The race of a last leaver and a joiner is healed by the joiner's puller creating the consumer
   again, on its first failed pull (up to `sharedPullWait` later). A message published in that window
   is not in the new consumer, which starts at the next message.
