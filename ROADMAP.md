@@ -294,14 +294,16 @@ read. The same change found that `TestALiveCopyThatRacesTheConnectionsEndIsNever
 live copies to the queue's stored-copy subject, which no subscription matches, so it had never exercised the
 race; it does now.
 
-## Tombstone accumulation in the retained stream
+## Tombstone purge across a long NATS outage
 
-**Today:** clearing a retained message writes a zero-length message that stays
-in the stream as a tombstone. `MaxMsgsPerSubject: 1` keeps it to one per topic,
-so it is bounded, but a workload that creates and clears many distinct topics
-grows the stream without bound.
+**Today:** the periodic sweep deletes a cleared topic's tombstone after `Options.RetainedTombstoneTTL` (24 h). A broker
+cut off from NATS for longer than that can miss the clear and keep the cleared message until it restarts. Only the
+sweep of the broker that wrote or replayed the tombstone purges it, so one that started after the clear never sees it.
 
-**Shape:** a periodic purge of zero-length messages older than some age.
+**Shape:** a broker that reconnects to NATS rebuilds its retained view from the stream instead of trusting the
+consumer's resume, and a tombstone the local broker never saw is purged by the stream's own age limit
+(`MaxAge` is not usable: it would expire live retained messages). Needs a test that restarts NATS, which the 3-server
+harness entry above provides.
 
 ## CI has no linter
 

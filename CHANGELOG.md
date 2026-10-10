@@ -11,6 +11,10 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Added:** `Options.RetainedTombstoneTTL` (default 24 h, negative disables). Clearing a retained message leaves a
+  zero-length marker in the stream; the periodic sweep now deletes markers older than the TTL, so a workload that
+  retains and clears many distinct topics no longer grows the stream without bound. A broker cut off from NATS for
+  longer than the TTL can miss a clear and keep the cleared message until it restarts.
 - **Fixed:** a filter that appears after the resume check (a SUBSCRIBE from the connection being displaced, still
   decoding buffered packets) is no longer dropped when the `Authorizer` answers `ErrAuthorizerUnavailable` for it at
   resume. It was authorised when it was subscribed and no CONNECT is left to refuse, so it stays, as `Reauthorize`

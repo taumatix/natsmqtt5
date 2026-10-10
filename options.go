@@ -110,6 +110,14 @@ type Options struct {
 	// RetainedReplicas is the JetStream replica count for the retained-message
 	// stream. Defaults to 1.
 	RetainedReplicas int
+	// RetainedTombstoneTTL is how long the marker left in the retained stream
+	// by clearing a retained message (an empty-payload retained PUBLISH) is
+	// kept before the periodic sweep deletes it. Without the purge a workload
+	// that retains and clears many distinct topics grows the stream without
+	// bound. Defaults to DefaultRetainedTombstoneTTL; a negative value keeps
+	// tombstones forever. A broker cut off from NATS for longer than this can
+	// miss a clear and keep the cleared message until it restarts.
+	RetainedTombstoneTTL time.Duration
 
 	// PersistentSessions keeps session state in a JetStream key-value bucket
 	// instead of in the broker process, so a client reconnecting with Clean
@@ -380,6 +388,9 @@ func (o Options) resolve() (*resolved, error) {
 	}
 	if r.SessionSweepInterval <= 0 {
 		r.SessionSweepInterval = DefaultSessionSweepInterval
+	}
+	if r.RetainedTombstoneTTL == 0 {
+		r.RetainedTombstoneTTL = DefaultRetainedTombstoneTTL
 	}
 	if r.SessionCheckpointInterval == 0 {
 		r.SessionCheckpointInterval = DefaultSessionCheckpointInterval
