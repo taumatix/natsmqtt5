@@ -15,6 +15,11 @@ honestly be reconstructed now.
   the handshake was writing it (found by `-race` in `TestMQTT_3_1_2_25_ANoConnackFitsBelowFiveBytes`, 1 run in
   about 100). The server DISCONNECT is now skipped before the CONNACK without touching handshake state. The race
   came in with the unreleased fix above and was never in a release.
+||||||| Stash base
+- **Fixed:** with `RestrictDollarTopics` on, a persistent session that stored a `$app/...` subscription before the
+  option was turned on kept receiving it after resume. The restricted broker now drops a stored `$` filter when it
+  resumes the session (as it does a filter the Authorizer denies) and writes the reduced set back. Off by default
+  and no record format change.
 - **Fixed:** cancelling the context passed to `Serve` closed every client's socket at once, so a client got a bare TCP
   close instead of the DISCONNECT with reason 0x8B that `Close` sends; a client could also miss it if shutdown began
   in the instant after it received its CONNACK. Both now send the DISCONNECT. The spec allows either, so this
