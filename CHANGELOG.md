@@ -11,6 +11,10 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Added:** a default offline queue that could not be created at start-up is retried in the background (5 s, doubling
+  to a minute) instead of staying off until the broker restarts, and logged at info when it comes up. New
+  `Broker.OfflineQueueActive()` reports whether the broker is keeping messages for disconnected sessions. Nothing changes
+  for a queue that started, or one turned off with `DisableOfflineQueue`; an explicit `OfflineQueue` still fails start-up.
 - **Added:** `Options.SharedHoldLimit` (default 0, unlimited). A shared-subscription member that is connected but
   never acknowledges a message otherwise keeps it for as long as the connection lives; with the limit set, the
   message goes back to the group once it has been held that long (checked every third of the ack wait), and a

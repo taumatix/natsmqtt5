@@ -57,8 +57,10 @@ type Broker struct {
 	mu       sync.Mutex
 	sessions map[string]*session
 	// queue holds QoS 1 and 2 messages for disconnected sessions, when
-	// Options.OfflineQueue is set; see offline.go.
-	queue *offlineQueue
+	// Options.OfflineQueue is set; see offline.go. It is nil when the queue
+	// is off, and is set later than start-up when the default queue could
+	// not be created then (queueretry.go).
+	queue atomic.Pointer[offlineQueue]
 	// reauthSub answers other brokers' Reauthorize; see reauthorize.go.
 	reauthSub *nats.Subscription
 	conns     map[*conn]struct{}
@@ -133,22 +135,27 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 		}
 	}
 
+	queueRetryNeeded := false
 	if r.defaultQueue {
-		var err error
-		if b.queue, err = newOfflineQueue(ctx, b.js, r); err != nil {
+		q, err := newOfflineQueue(ctx, b.js, r)
+		if err != nil {
 			b.logger.Warn("running without the offline queue: QoS 1 and 2 messages published while a session "+
-				"is disconnected are dropped for it; set DisableOfflineQueue to silence this, or OfflineQueue to "+
-				"make it a startup failure", "error", err)
+				"is disconnected are dropped for it, until the broker manages to create it (retrying); set "+
+				"DisableOfflineQueue to silence this, or OfflineQueue to make it a startup failure", "error", err)
+			queueRetryNeeded = true
+		} else {
+			b.queue.Store(q)
 		}
 	}
 	if r.OfflineQueue {
-		var err error
-		if b.queue, err = newOfflineQueue(ctx, b.js, r); err != nil {
+		q, err := newOfflineQueue(ctx, b.js, r)
+		if err != nil {
 			b.closeSessionStore()
 			b.closeRetain()
 			b.closeNATS()
 			return nil, fmt.Errorf("natsmqtt5: setting up the offline queue: %w", err)
 		}
+		b.queue.Store(q)
 	}
 	if r.DurableWills {
 		var err error
@@ -176,15 +183,12 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 	}
 	b.wg.Add(1)
 	go b.sweepSessionsLoop(r.SessionSweepInterval)
-	if b.queue != nil {
+	if q := b.queue.Load(); q != nil {
+		b.startQueueLoops(q)
+	}
+	if queueRetryNeeded {
 		b.wg.Add(1)
-		// The interval is read here, on the caller's goroutine: read inside the
-		// loop it races with a later test changing sharedAckWait.
-		go b.holdLoop(sharedAckWait / 3)
-		if b.queue.members != nil {
-			b.wg.Add(1)
-			go b.refreshMembersLoop()
-		}
+		go b.retryQueueLoop(r)
 	}
 	return b, nil
 }

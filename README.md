@@ -227,7 +227,8 @@ v0.10.0; up to v0.9.1 the queue is off unless `OfflineQueue` is set. A broker ru
 `DisableRetained` and no `PersistentSessions` does not touch JetStream and has
 no queue. If the queue's stream cannot be created, because the JetStream account
 is out of streams or storage for instance, the broker logs a warning and runs
-without it. The settings:
+without it, retrying in the background (every 5 seconds, doubling to a minute) and
+logging at info when it comes up; `Broker.OfflineQueueActive` says whether it is on. The settings:
 
 ```go
 natsmqtt5.Options{OfflineQueueMaxAge: 24 * time.Hour} // on by default

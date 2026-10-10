@@ -224,7 +224,7 @@ func (b *Broker) checkpointSession(c *conn) error {
 	if rec == nil {
 		return nil
 	}
-	if b.queue != nil {
+	if b.queue.Load() != nil {
 		// With the queue off there is no replay, and nothing to say where it
 		// starts.
 		rec.AwayAt, rec.AwayFromSeq, rec.AwayLateSeq = pos.at, pos.fromSeq, 0

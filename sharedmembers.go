@@ -131,14 +131,15 @@ func (m *shareMembers) leave(ctx context.Context, group, clientID, instance stri
 // names the group across brokers. ok is false for a filter that is not shared.
 func (b *Broker) groupName(filter string) (name string, ok bool) {
 	share, _, err := topic.SplitShared(filter)
-	if err != nil || share == "" || b.queue == nil {
+	q := b.queue.Load()
+	if err != nil || share == "" || q == nil {
 		return "", false
 	}
 	subject, err := topic.FilterToSubject(filter)
 	if err != nil {
 		return "", false
 	}
-	trimmed, ok := topic.TrimPrefix(b.queue.prefix, topic.Prefix(b.opts.SubjectPrefix, subject))
+	trimmed, ok := topic.TrimPrefix(q.prefix, topic.Prefix(b.opts.SubjectPrefix, subject))
 	if !ok {
 		return "", false
 	}
@@ -151,7 +152,8 @@ func (b *Broker) groupName(filter string) (name string, ok bool) {
 // replaced the subscription, or another connection of the session installed
 // it) is still a member and nothing is done.
 func (b *Broker) leaveGroup(s *session, filter string) {
-	if b.queue == nil || b.queue.members == nil {
+	q := b.queue.Load()
+	if q == nil || q.members == nil {
 		return
 	}
 	if _, held := s.subscription(filter); held {
@@ -163,7 +165,7 @@ func (b *Broker) leaveGroup(s *session, filter string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), natsFlushTimeout)
 	defer cancel()
-	empty, err := b.queue.members.leave(ctx, group, s.clientID, s.instance)
+	empty, err := q.members.leave(ctx, group, s.clientID, s.instance)
 	if err != nil {
 		// Left to the entry's expiry and the consumer's inactivity threshold,
 		// which end the group late rather than never.
@@ -176,7 +178,7 @@ func (b *Broker) leaveGroup(s *session, filter string) {
 	}
 	// The held messages of this session were handed back before this, so the
 	// consumer deleted here takes them with it, as it does the undelivered ones.
-	if err := b.queue.stream.DeleteConsumer(ctx, group); err != nil && !errors.Is(err, jetstream.ErrConsumerNotFound) {
+	if err := q.stream.DeleteConsumer(ctx, group); err != nil && !errors.Is(err, jetstream.ErrConsumerNotFound) {
 		b.logger.Warn("could not delete the backlog of an ended shared subscription",
 			"filter", filter, "error", err)
 		return
@@ -196,16 +198,16 @@ func (b *Broker) leaveGroups(s *session, subs []*subscription) {
 
 // refreshMembers rewrites the entries of the sessions this broker holds, so
 // that only a session nobody serves any more lets its entry expire.
-func (b *Broker) refreshMembersLoop() {
+func (b *Broker) refreshMembersLoop(q *offlineQueue) {
 	defer b.wg.Done()
-	t := time.NewTicker(b.queue.members.refreshEvery())
+	t := time.NewTicker(q.members.refreshEvery())
 	defer t.Stop()
 	for {
 		select {
 		case <-b.shutdown:
 			return
 		case <-t.C:
-			b.refreshMembers()
+			b.refreshMembers(q)
 		}
 	}
 }
@@ -214,7 +216,7 @@ func (b *Broker) refreshMembersLoop() {
 // subscription and writing its entry. A test uses it to unsubscribe there.
 var beforeMemberRefreshWrite atomic.Pointer[func()]
 
-func (b *Broker) refreshMembers() {
+func (b *Broker) refreshMembers(q *offlineQueue) {
 	b.mu.Lock()
 	sessions := make([]*session, 0, len(b.sessions))
 	for _, s := range b.sessions {
@@ -234,7 +236,7 @@ func (b *Broker) refreshMembers() {
 				(*fn)()
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), natsFlushTimeout)
-			err := b.queue.members.join(ctx, group, s.clientID, s.instance)
+			err := q.members.join(ctx, group, s.clientID, s.instance)
 			cancel()
 			if err != nil {
 				b.logger.Debug("could not refresh a shared subscription's member", "filter", sub.filter, "error", err)

@@ -328,13 +328,14 @@ JetStream stored anything; the stored copy is the queue's. The README says so si
 sweep for the bucket (it must outlast the longest Will Delay Interval), and add a test that proves
 the README's statement about what the flush covers.
 
-## A default queue that failed at startup stays off
+## A default queue that failed at startup: what a session away in the gap is owed
 
-When the queue is on only by default and its stream cannot be created, the broker logs a warning
-and runs without it until it is restarted, while still answering Session Present 1. Nothing
-retries, and nothing but the log says it happened. Retrying in the background, and exposing
-whether the queue is active (a method on `Broker`, a line in the startup log at info level), would
-make the deviation visible and temporary.
+**Done (2026-10-11):** the broker retries a default queue it could not create, with a doubling wait from 5 s to a
+minute, logs at info when it comes up, and `Broker.OfflineQueueActive` says whether it is on. Left: a session that
+went away and came back while the queue was off still gets Session Present 1 with nothing replayed, as before; the
+reply could say 0 (and drop the session) while the queue is known to be off. That changes what a resuming client is
+told, so it wants a decision, not a guess. Also untested: shared-subscription hold-back and membership refresh after a
+late queue (they start with it, `queueretry.go`, but only the replay is driven by a test).
 
 ## A shared-subscription member pulls one message per round trip
 

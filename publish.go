@@ -122,7 +122,7 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 
 	msg := toNATS(full, c.sess.clientID, p)
 	msg.Header.Set(hdrMsgID, id)
-	if q := c.broker.queue; q != nil && p.QoS > packet.QoS0 {
+	if q := c.broker.queue.Load(); q != nil && p.QoS > packet.QoS0 {
 		// Queued first, and confirmed; see offlineQueue.keep for why the
 		// order matters. Refusing on failure lets the client try again rather
 		// than have the message reach only the sessions that are connected.
@@ -409,9 +409,9 @@ func (b *Broker) publishWillFor(clientID string, will *packet.Will) {
 	full := topic.Prefix(b.opts.SubjectPrefix, subject)
 	msg := toNATS(full, clientID, p)
 	msg.Header.Set(hdrMsgID, id)
-	if b.queue != nil && p.QoS > packet.QoS0 {
+	if q := b.queue.Load(); q != nil && p.QoS > packet.QoS0 {
 		kctx, cancel := context.WithTimeout(context.Background(), offlineKeepTimeout)
-		if err := b.queue.keep(kctx, b.js, subject, msg); err != nil {
+		if err := q.keep(kctx, b.js, subject, msg); err != nil {
 			// A Will has no one to refuse to; it still goes out live.
 			b.logger.Warn("queueing a will message failed", "topic", name, "error", err)
 		}

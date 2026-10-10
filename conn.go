@@ -406,7 +406,7 @@ func (c *conn) finish(cause error) {
 	// is owed; see session.awaitPredecessor.
 	defer c.markEnded()
 	var a *away
-	if c.broker.queue != nil && c.sess.expiry() > 0 {
+	if c.broker.queue.Load() != nil && c.sess.expiry() > 0 {
 		floor := c.awayFloor()
 		a = &floor
 	} else if c.loopStarted.Load() {
