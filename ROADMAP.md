@@ -106,6 +106,8 @@ the client's retry stores a second, with a new message id, and a session that wa
 allows that; a QoS 2 PUBREC refusal cannot be told apart by the client from "never received", so it also does.
 Not tested: that duplicate, and whether a retry could carry the first attempt's id (a `Nats-Msg-Id` on the
 queue publish would let JetStream drop it within its duplicate window).
+Deriving that id from the MQTT packet id is unsafe: a packet id is reused after its PUBACK, so a later, legitimate
+message could be dropped as a duplicate within the window. It would need an id the client controls per message.
 
 ## Will Messages are not covered by DurablePublish
 
