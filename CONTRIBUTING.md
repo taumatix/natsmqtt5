@@ -43,5 +43,5 @@ When a change touches a row of `conformance/mqtt5-statements.tsv`, update the ro
 - Anything bound to an external reference (the specification, `nats.go`, `nats-server`) is pinned in
   [UPSTREAM.md](UPSTREAM.md); update it when you move a pin.
 - Tests that take long are gated behind an environment variable and say which one in the skip message
-  (`NATSMQTT5_SLOW_TESTS=1`).
+  (`NATSMQTT5_SLOW_TESTS=1`). The `slow` CI job sets it and fails if the named test skips.
 - Never commit a credential, token or key.
