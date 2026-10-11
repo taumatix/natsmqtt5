@@ -351,14 +351,6 @@ handler, which holds back only that client's subscriptions) would move the limit
 pending limits rather than remove it. QoS 0, and messages published straight onto NATS, are
 dropped the same way with the queue on.
 
-## The slow-reader replay test only runs when asked
-
-`TestAReplayToASlowReaderIsNotCutOffAfterThirtySeconds` takes about 40 seconds (a 400-message
-backlog read at 90 ms a message with a Receive Maximum of 1), so it is skipped unless
-`NATSMQTT5_SLOW_TESTS` is set, and CI does not set it. Nothing else would notice a deadline coming
-back to the resume replay. Run it in a separate CI job (or nightly), or find a seam that makes the
-same point faster.
-
 ## Statements covered only by unit tests
 
 Found by the 2026-10-08 audit of the offline-queue, session and replay work (v0.9.1 to v0.10.0 and

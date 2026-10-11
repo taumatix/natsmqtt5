@@ -79,6 +79,24 @@ jobs:
       - name: Fuzz the topic mapping
         run: go test ./topic/ -run FuzzSubjectRoundTrip -fuzz FuzzSubjectRoundTrip -fuzztime 60s
 
+  slow:
+    # Tests gated behind NATSMQTT5_SLOW_TESTS take too long for every leg of the matrix above and
+    # skip there, so without this job nothing would notice a deadline coming back to the resume
+    # replay. smoke.sh fails if a named test skipped instead of passing.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+          check-latest: true
+
+      - name: Replay to a reader slower than thirty seconds
+        env:
+          NATSMQTT5_SLOW_TESTS: '1'
+        run: .github/scripts/smoke.sh TestAReplayToASlowReaderIsNotCutOffAfterThirtySeconds
+
   docker:
     # Builds the image and runs the quickstart from the README against it, so
     # a broken Dockerfile or compose file fails the pull request rather than
