@@ -177,3 +177,12 @@ func SetQueueRetryEvery(t interface {
 	queueRetryEvery, queueRetryMax = first, max
 	t.Cleanup(func() { queueRetryEvery, queueRetryMax = wasFirst, wasMax })
 }
+
+// SetStoredDeliveredBound changes how many delivered ids a session record keeps,
+// for the rest of the test, so a test need not deliver thousands of messages.
+func SetStoredDeliveredBound(t interface {
+	Cleanup(func())
+}, n int) {
+	was := storedDeliveredBound.Swap(int64(n))
+	t.Cleanup(func() { storedDeliveredBound.Store(was) })
+}

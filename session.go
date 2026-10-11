@@ -1144,6 +1144,13 @@ func (s *session) markAwayRestored(at time.Time, fromSeq, lateSeq uint64, rewoun
 // be larger. Dropping one can repeat that message on a restored replay.
 const maxStoredDelivered = 4096
 
+// storedDeliveredBound is the bound in force; only a test changes it.
+var storedDeliveredBound = func() *atomic.Int64 {
+	var n atomic.Int64
+	n.Store(maxStoredDelivered)
+	return &n
+}()
+
 // awayState is what the session record keeps of the last connection's absence
 // beyond its time: the replay's starting sequence and the ids delivered at or
 // above it, lowest sequence first. dropped counts ids left out for the bound.
@@ -1189,9 +1196,9 @@ func (s *session) deliveredFromLocked(fromSeq uint64, exclude map[uint64]bool) (
 		}
 	}
 	sort.Slice(delivered, func(i, j int) bool { return delivered[i].Seq < delivered[j].Seq })
-	if len(delivered) > maxStoredDelivered {
-		dropped = len(delivered) - maxStoredDelivered
-		delivered = delivered[:maxStoredDelivered]
+	if bound := int(storedDeliveredBound.Load()); len(delivered) > bound {
+		dropped = len(delivered) - bound
+		delivered = delivered[:bound]
 	}
 	return delivered, dropped
 }
@@ -1216,9 +1223,9 @@ func (s *session) deliveredSince(fromSeq, lateSeq uint64, since time.Time) (deli
 		}
 		return delivered[i].ID < delivered[j].ID
 	})
-	if len(delivered) > maxStoredDelivered {
-		dropped = len(delivered) - maxStoredDelivered
-		delivered = delivered[:maxStoredDelivered]
+	if bound := int(storedDeliveredBound.Load()); len(delivered) > bound {
+		dropped = len(delivered) - bound
+		delivered = delivered[:bound]
 	}
 	return delivered, dropped
 }
