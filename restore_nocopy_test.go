@@ -84,7 +84,7 @@ func TestAKilledBrokersRetainedMessageInFlightIsResent(t *testing.T) {
 	c.subscribe("kr/#", packet.QoS1)
 	first := c.expectPublish()
 	require.Equal(t, "retained", string(first.Payload))
-	time.Sleep(700 * time.Millisecond)
+	awaitCheckpointedInflight(t, natsURL, "killed-ret", first.PacketID, false)
 	child.kill9(t)
 
 	back := dialRaw(t, survivor)

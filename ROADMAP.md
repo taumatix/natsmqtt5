@@ -269,12 +269,15 @@ longer names. Low priority: it needs a very small `max_payload` or tens of thous
 **Today:** every test that slept 100 to 300 ms after a client's connection ended now waits on `waitDetached` (or
 `waitDetachedTimes` for a client id that connects more than once), which returns when the broker has logged the
 disconnect, after it released the session (2026-10-11: `restore_nocopy_test.go`, `spec_integration_test.go`,
-`restored_rewind_test.go`). What remains are sleeps that wait for something else: 700 to 1200 ms for checkpoints with a
-message in flight (`killed_broker_test.go`, `killed_inflight_test.go`, `restore_nocopy_test.go:79,86`), 1500 ms for a
+`restored_rewind_test.go`). What remains are sleeps that wait for something else. The checkpoint-with-a-message-in-flight sleeps are gone
+(2026-10-11: `awaitCheckpointedInflight` polls the stored record for the packet id, with its PUBREL out for QoS 2, in
+`killed_broker_test.go`, `killed_inflight_test.go`, `restore_nocopy_test.go`). Left: the 700 ms in
+`killed_broker_test.go` for a checkpoint of the position after the last exchange (the record has no field that says
+"this exchange is included", so it needs a checkpoint counter or a field), the 1 s in `restore_nocopy_test.go` and
+`oversize_inflight_test.go` that ages a message past the checkpoint skew (a clock condition, not an event), 1500 ms for a
 session's expiry to pass (`spec_integration_test.go`), the 100 ms in `restored_rewind_test.go` before the drop (waiting
 for a delivery to be in flight), and the 200 ms after a publish in `oversize_inflight_test.go`, which waits for a stored
-payload. Same flake risk; each needs a condition to wait on (a checkpoint counter or a record read) rather than a drop
-log. `TestSmokeSessionMovesBetweenBrokers` keeps its 200 ms: it is the back-off of a retry loop against brokers in
+payload. Same flake risk; each needs a condition to wait on rather than a drop log. `TestSmokeSessionMovesBetweenBrokers` keeps its 200 ms: it is the back-off of a retry loop against brokers in
 containers, whose logs the test cannot read.
 
 ## Tombstone purge across a long NATS outage

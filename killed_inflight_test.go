@@ -2,7 +2,6 @@ package natsmqtt5_test
 
 import (
 	"testing"
-	"time"
 
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/stretchr/testify/assert"
@@ -49,7 +48,7 @@ func TestAKilledBrokersUnacknowledgedQoS1MessageIsResentWithItsOriginalID(t *tes
 	sent := victim.expectPublish()
 	require.False(t, sent.Dup)
 
-	time.Sleep(700 * time.Millisecond) // the checkpoint with it in flight
+	awaitCheckpointedInflight(t, natsURL, "killed-qos1", sent.PacketID, false)
 	child.kill9(t)
 
 	back := dialRaw(t, survivor)
@@ -81,7 +80,7 @@ func TestAKilledBrokersQoS2MessageAwaitingPubcompIsContinuedWithPubrel(t *testin
 	rel := victim.expectPubrel()
 	require.Equal(t, sent.PacketID, rel.PacketID)
 
-	time.Sleep(700 * time.Millisecond)
+	awaitCheckpointedInflight(t, natsURL, "killed-qos2", sent.PacketID, true)
 	child.kill9(t)
 
 	back := dialRaw(t, survivor)
