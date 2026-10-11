@@ -365,9 +365,14 @@ most of them; these remain, each with why:
   publishers' copies to arrive out of order. The unit tests cover how the broker arrives at it
   (`restored_away_internal_test.go`). A stress test with many concurrent publishers, asserting no
   QoS 2 message is delivered twice across a drop and a restored resume, would cover it end to end.
-- **The cap on stored delivered ids** (`maxStoredDelivered`, 4096): past it a restored rewind can
-  repeat a QoS 2 message [MQTT-4.3.3-6]. Unit test only (`TestTheStoredIDsAreBounded`). It needs a
-  behind-by-thousands client dropped and restored on another broker.
+- **The cap on stored delivered ids** (`maxStoredDelivered`, 4096): past it a restored rewind repeats
+  a QoS 2 message [MQTT-4.3.3-6]. Driven end to end with the bound lowered to 20
+  (`TestAClientAheadOfMoreThanTheStoredIDBoundIsWarnedAndRepeatedOnlyPastIt`: a warning on release,
+  and exactly the ids past the bound repeated), because 4100 deliveries take minutes under `-race`;
+  that the bound is 4096 is `TestTheStoredIDsAreBounded`'s alone. The test shows which ids the cap
+  drops: the highest-sequence ones, which are the newest and the likeliest to be redelivered. Keeping
+  the newest instead would trade one repeat for another; the real fix is a record that is not
+  bounded by a count, which needs the ids held outside the session value.
 - **The offline queue on a broker without JetStream** is not there: a QoS 1 message published while a
   session is away is lost although the CONNACK said Session Present 1 [MQTT-3.1.2-23],
   [MQTT-4.5.0-1]. `TestABrokerWithoutJetStreamStillStartsWithNoQueue` pins it as the known
