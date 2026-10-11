@@ -92,18 +92,52 @@ func (k *killableBroker) kill9(t *testing.T) {
 // storedSession reads a session's record from the session bucket.
 func storedSession(t *testing.T, natsURL, clientID string) map[string]any {
 	t.Helper()
-	nc, err := nats.Connect(natsURL)
+	rec, err := readStoredSession(natsURL, clientID)
 	require.NoError(t, err)
+	return rec
+}
+
+func readStoredSession(natsURL, clientID string) (map[string]any, error) {
+	nc, err := nats.Connect(natsURL)
+	if err != nil {
+		return nil, err
+	}
 	defer nc.Close()
 	js, err := jetstream.New(nc)
-	require.NoError(t, err)
+	if err != nil {
+		return nil, err
+	}
 	kv, err := js.KeyValue(context.Background(), natsmqtt5.DefaultStreamPrefix+"_sessions")
-	require.NoError(t, err)
+	if err != nil {
+		return nil, err
+	}
 	entry, err := kv.Get(context.Background(), base64.RawURLEncoding.EncodeToString([]byte(clientID)))
-	require.NoError(t, err)
+	if err != nil {
+		return nil, err
+	}
 	var rec map[string]any
-	require.NoError(t, json.Unmarshal(entry.Value(), &rec))
-	return rec
+	return rec, json.Unmarshal(entry.Value(), &rec)
+}
+
+// awaitCheckpointedInflight waits until the session's stored record lists packet
+// id as in flight (with its PUBREL out, when rel), which is when a broker killed
+// now leaves its successor something to resend.
+func awaitCheckpointedInflight(t *testing.T, natsURL, clientID string, id uint16, rel bool) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		rec, err := readStoredSession(natsURL, clientID)
+		if err != nil {
+			return false
+		}
+		list, _ := rec["Inflight"].([]any)
+		for _, e := range list {
+			m, _ := e.(map[string]any)
+			if m["ID"] == float64(id) && (!rel || m["Rel"] == true) {
+				return true
+			}
+		}
+		return false
+	}, 10*time.Second, 20*time.Millisecond, "the broker never checkpointed packet %d as in flight", id)
 }
 
 // receiveQoS2 reads one QoS 2 PUBLISH and completes the exchange.
@@ -182,7 +216,7 @@ func TestAKilledBrokersBehindClientGetsWhatItHadNotAcknowledged(t *testing.T) {
 	pub.publish(&paho.Publish{Topic: "kb/2", QoS: 1, Payload: []byte("2")})
 	second := victim.expectPublish()
 	require.Equal(t, "kb/2", second.Topic)
-	time.Sleep(1200 * time.Millisecond) // several checkpoints with kb/2 in flight
+	awaitCheckpointedInflight(t, natsURL, "killed-behind", second.PacketID, false)
 
 	child.kill9(t)
 	pub.publish(&paho.Publish{Topic: "kb/3", QoS: 1, Payload: []byte("3")})
