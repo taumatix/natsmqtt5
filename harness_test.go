@@ -113,6 +113,7 @@ func startBrokerHandle(t *testing.T, natsURL string, customise ...func(*natsmqtt
 		once.Do(func() {
 			cancel()
 			require.NoError(t, b.Close())
+			natsmqtt5.Reap(b)
 			select {
 			case err := <-served:
 				require.NoError(t, err)
