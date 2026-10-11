@@ -98,8 +98,9 @@ func withoutJetStream(o *natsmqtt5.Options) {
 // does [MQTT-3.2.2-3], and 0 again once the process that held the state is gone
 // [MQTT-3.2.2-3, "otherwise"].
 func TestWithoutJetStreamSessionPresentIsTruthful(t *testing.T) {
+	var logs syncBuffer
 	natsURL := startNATSWithoutJetStream(t)
-	addrA, stopA := startStoppableBroker(t, natsURL, withoutJetStream)
+	addrA, stopA := startStoppableBroker(t, natsURL, withoutJetStream, loggingBroker(t, &logs))
 
 	_, present := sessionPresentOnConnect(t, addrA, "nojs-1", true, 300)
 	assert.False(t, present, "Clean Start 1 gives Session Present 0 [MQTT-3.2.2-2]")
@@ -108,7 +109,7 @@ func TestWithoutJetStreamSessionPresentIsTruthful(t *testing.T) {
 	assert.False(t, present, "no state for the Client Identifier: Session Present 0 [MQTT-3.2.2-3]")
 	first.subscribe("n/#", packet.QoS1)
 	first.send(&packet.Disconnect{})
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "nojs-2")
 
 	back, present := sessionPresentOnConnect(t, addrA, "nojs-2", false, 300)
 	assert.True(t, present, "the broker holds the session in memory: Session Present 1 [MQTT-3.2.2-3, MQTT-3.1.2-5]")
@@ -118,10 +119,10 @@ func TestWithoutJetStreamSessionPresentIsTruthful(t *testing.T) {
 	assert.Equal(t, "n/x", back.expectPublish().Topic)
 
 	back.send(&packet.Disconnect{})
-	time.Sleep(100 * time.Millisecond)
+	waitDetachedTimes(t, &logs, "nojs-2", 2)
 	stopA()
 
-	addrB := startBroker(t, natsURL, withoutJetStream)
+	addrB := startBroker(t, natsURL, withoutJetStream, loggingBroker(t, &logs))
 	_, present = sessionPresentOnConnect(t, addrB, "nojs-2", false, 300)
 	assert.False(t, present,
 		"a broker that was restarted holds nothing without JetStream: Session Present 0 [MQTT-3.2.2-3]")
@@ -130,12 +131,13 @@ func TestWithoutJetStreamSessionPresentIsTruthful(t *testing.T) {
 // A session whose Session Expiry Interval is 0 ends with its connection
 // [MQTT-3.1.2-23, contrapositive], and the broker says so.
 func TestWithoutJetStreamAZeroExpirySessionEndsWithItsConnection(t *testing.T) {
-	addr := startBroker(t, startNATSWithoutJetStream(t), withoutJetStream)
+	var logs syncBuffer
+	addr := startBroker(t, startNATSWithoutJetStream(t), withoutJetStream, loggingBroker(t, &logs))
 	c, present := sessionPresentOnConnect(t, addr, "nojs-zero", false, 0)
 	require.False(t, present)
 	c.subscribe("z/#", packet.QoS1)
 	c.send(&packet.Disconnect{})
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "nojs-zero")
 
 	_, present = sessionPresentOnConnect(t, addr, "nojs-zero", false, 0)
 	assert.False(t, present, "Session Present 0 for a session that ended with its connection [MQTT-3.2.2-3]")
@@ -160,13 +162,14 @@ func TestWithoutJetStreamPersistentSessionsAreRefused(t *testing.T) {
 // takes its place, and the CONNACK says there is no session [MQTT-3.2.2-3].
 func expiredSessionIsDiscarded(t *testing.T, customise ...func(*natsmqtt5.Options)) {
 	t.Helper()
-	addr := startBroker(t, startNATS(t), customise...)
+	var logs syncBuffer
+	addr := startBroker(t, startNATS(t), append(customise[:len(customise):len(customise)], loggingBroker(t, &logs))...)
 
 	away, present := sessionPresentOnConnect(t, addr, "expired-1", false, 1)
 	require.False(t, present)
 	away.subscribe("e/#", packet.QoS1)
 	away.send(&packet.Disconnect{})
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "expired-1")
 
 	pub, _ := connectClient(t, addr, connectOpts("pub-expired"))
 	pub.publish(&paho.Publish{Topic: "e/1", QoS: 1, Payload: []byte("1")})
@@ -191,12 +194,13 @@ func TestAnExpiredPersistentSessionIsDiscardedAndItsQueuedMessagesWithIt(t *test
 // comes back [MQTT-4.1.0-2]: Session Present 0, and no work handed to it until
 // it subscribes again.
 func TestAnExpiredSharedMemberComesBackWithoutASession(t *testing.T) {
-	addr := startBroker(t, startNATS(t))
+	var logs syncBuffer
+	addr := startBroker(t, startNATS(t), loggingBroker(t, &logs))
 	member, present := sessionPresentOnConnect(t, addr, "share-expired", false, 1)
 	require.False(t, present)
 	member.subscribe("$share/g/jobs/#", packet.QoS1)
 	member.send(&packet.Disconnect{})
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "share-expired")
 
 	pub, _ := connectClient(t, addr, connectOpts("pub-share-expired"))
 	pub.publish(&paho.Publish{Topic: "jobs/1", QoS: 1, Payload: []byte("1")})
@@ -228,11 +232,12 @@ func (c *rawClient) receiveQoS2UntilPubrel(topic, payload string) uint16 {
 // A QoS 2 message published while its subscriber was away arrives as QoS 2 with
 // DUP 0, and the exchange completes in the order the specification gives.
 func TestAQoS2MessageFromTheOfflineQueueCompletesTheHandshake(t *testing.T) {
-	addr := startBroker(t, startNATS(t))
+	var logs syncBuffer
+	addr := startBroker(t, startNATS(t), loggingBroker(t, &logs))
 	away, _ := sessionPresentOnConnect(t, addr, "q2-offline", false, 300)
 	away.subscribe("g/#", packet.QoS2)
 	away.send(&packet.Disconnect{})
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "q2-offline")
 
 	pub, _ := connectClient(t, addr, connectOpts("pub-q2-offline"))
 	pub.publish(&paho.Publish{Topic: "g/1", QoS: 2, Payload: []byte("once")})
@@ -249,7 +254,8 @@ func TestAQoS2MessageFromTheOfflineQueueCompletesTheHandshake(t *testing.T) {
 // and the offline queue's replay, which starts before the connection dropped,
 // must not deliver it a second time as new.
 func TestAReplayDoesNotRepeatAQoS2MessageThatWasPastPubrec(t *testing.T) {
-	addr := startBroker(t, startNATS(t))
+	var logs syncBuffer
+	addr := startBroker(t, startNATS(t), loggingBroker(t, &logs))
 	c, _ := sessionPresentOnConnect(t, addr, "q2-resume", false, 300)
 	c.subscribe("g/#", packet.QoS2)
 
@@ -257,7 +263,7 @@ func TestAReplayDoesNotRepeatAQoS2MessageThatWasPastPubrec(t *testing.T) {
 	pub.publish(&paho.Publish{Topic: "g/1", QoS: 2, Payload: []byte("once")})
 	id := c.receiveQoS2UntilPubrel("g/1", "once")
 	c.drop()
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "q2-resume")
 
 	back, present := sessionPresentOnConnect(t, addr, "q2-resume", false, 300)
 	require.True(t, present)
@@ -319,13 +325,14 @@ func queuedCopy(t *testing.T, natsURL string, seq uint64) (id, payload string) {
 // the time it was released [MQTT-3.1.2-23, MQTT-4.5.0-1]. The record here is
 // cut down to exactly the fields v0.10.0 wrote.
 func TestASessionRecordWithoutTheReplayPositionIsResumedFromItsReleaseTime(t *testing.T) {
+	var logs syncBuffer
 	natsURL := startNATS(t)
-	addrA, stopA := startStoppableBroker(t, natsURL, persistentWithQueue)
+	addrA, stopA := startStoppableBroker(t, natsURL, persistentWithQueue, loggingBroker(t, &logs))
 
 	away, _ := sessionPresentOnConnect(t, addrA, "old-record", false, 300)
 	away.subscribe("o/#", packet.QoS2)
 	away.send(&packet.Disconnect{})
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "old-record")
 
 	pub, _ := connectClient(t, addrA, connectOpts("pub-old-record"))
 	pub.publish(&paho.Publish{Topic: "o/1", QoS: 1, Payload: []byte("1")})
@@ -345,7 +352,7 @@ func TestASessionRecordWithoutTheReplayPositionIsResumedFromItsReleaseTime(t *te
 		}
 	})
 
-	addrB := startBroker(t, natsURL, persistentWithQueue)
+	addrB := startBroker(t, natsURL, persistentWithQueue, loggingBroker(t, &logs))
 	back, present := sessionPresentOnConnect(t, addrB, "old-record", false, 300)
 	require.True(t, present, "an older record is a session [MQTT-3.2.2-3]")
 
@@ -362,13 +369,14 @@ func TestASessionRecordWithoutTheReplayPositionIsResumedFromItsReleaseTime(t *te
 // queued messages the broker is not going to deliver [MQTT-3.2.2-3]. The fresh session is a
 // session in its own right afterwards.
 func TestASessionRecordOfAnUnknownVersionStartsTheSessionFresh(t *testing.T) {
+	var logs syncBuffer
 	natsURL := startNATS(t)
-	addrA, stopA := startStoppableBroker(t, natsURL, persistentWithQueue)
+	addrA, stopA := startStoppableBroker(t, natsURL, persistentWithQueue, loggingBroker(t, &logs))
 
 	away, _ := sessionPresentOnConnect(t, addrA, "future-record", false, 300)
 	away.subscribe("f/#", packet.QoS1)
 	away.send(&packet.Disconnect{})
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "future-record")
 	pub, _ := connectClient(t, addrA, connectOpts("pub-future-record"))
 	pub.publish(&paho.Publish{Topic: "f/1", QoS: 1, Payload: []byte("owed to the old session")})
 	stopA()
@@ -378,7 +386,7 @@ func TestASessionRecordOfAnUnknownVersionStartsTheSessionFresh(t *testing.T) {
 		rec["Version"] = 2
 	})
 
-	addrB := startBroker(t, natsURL, persistentWithQueue)
+	addrB := startBroker(t, natsURL, persistentWithQueue, loggingBroker(t, &logs))
 	back, present := sessionPresentOnConnect(t, addrB, "future-record", false, 300)
 	assert.False(t, present, "a record this broker cannot read is not a session [MQTT-3.2.2-3]")
 	back.expectNothing()
@@ -388,7 +396,7 @@ func TestASessionRecordOfAnUnknownVersionStartsTheSessionFresh(t *testing.T) {
 	back.expectNothing()
 
 	back.send(&packet.Disconnect{})
-	time.Sleep(100 * time.Millisecond)
+	waitDetachedTimes(t, &logs, "future-record", 2)
 	_, present = sessionPresentOnConnect(t, addrB, "future-record", false, 300)
 	assert.True(t, present, "the session started fresh is a session from then on")
 }
@@ -405,9 +413,10 @@ func TestASessionRecordOfAnUnknownVersionStartsTheSessionFresh(t *testing.T) {
 // written the way the releasing broker writes it, from the real queue sequences
 // and ids of two real messages: owed is below the start, delivered is above it.
 func restoredRewind(t *testing.T, listDelivered bool) (second *packet.Publish) {
+	var logs syncBuffer
 	t.Helper()
 	natsURL := startNATS(t)
-	addrA, stopA := startStoppableBroker(t, natsURL, persistentWithQueue)
+	addrA, stopA := startStoppableBroker(t, natsURL, persistentWithQueue, loggingBroker(t, &logs))
 
 	c, _ := sessionPresentOnConnect(t, addrA, "q2-rewind", false, 300)
 	c.subscribe("g/#", packet.QoS2)
@@ -420,7 +429,7 @@ func restoredRewind(t *testing.T, listDelivered bool) (second *packet.Publish) {
 	c.send(&packet.Puback{Ack: packet.Ack{PacketID: zero.PacketID}})
 	c.receiveQoS2UntilPubrel("g/1", "delivered")
 	c.drop()
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "q2-rewind")
 	stopA()
 
 	_, owedPayload := queuedCopy(t, natsURL, 1)
@@ -441,7 +450,7 @@ func restoredRewind(t *testing.T, listDelivered bool) (second *packet.Publish) {
 		}
 	})
 
-	addrB := startBroker(t, natsURL, persistentWithQueue)
+	addrB := startBroker(t, natsURL, persistentWithQueue, loggingBroker(t, &logs))
 	back, present := sessionPresentOnConnect(t, addrB, "q2-rewind", false, 300)
 	require.True(t, present)
 	first := back.expectPublish()

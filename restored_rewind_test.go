@@ -22,9 +22,10 @@ import (
 // another broker used to replay from the moment of release, so it lost them; the
 // record now carries the lowest queue sequence the client had not been sent.
 func TestARestoredSessionReplaysFromWhatItWasOwedNotFromTheDisconnect(t *testing.T) {
+	var logs syncBuffer
 	natsURL := startNATS(t)
-	addrA, stopA := startStoppableBroker(t, natsURL, persistentWithQueue)
-	addrB := startBroker(t, natsURL, persistentWithQueue)
+	addrA, stopA := startStoppableBroker(t, natsURL, persistentWithQueue, loggingBroker(t, &logs))
+	addrB := startBroker(t, natsURL, persistentWithQueue, loggingBroker(t, &logs))
 
 	c := dialRaw(t, addrA)
 	cp := rawConnect("rewind-moving", 300)
@@ -43,7 +44,7 @@ func TestARestoredSessionReplaysFromWhatItWasOwedNotFromTheDisconnect(t *testing
 	require.Equal(t, "w/2", c.expectPublish().Topic)
 	time.Sleep(100 * time.Millisecond)
 	c.drop()
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "rewind-moving")
 
 	// Broker A goes away too, so everything B knows comes from the record.
 	stopA()
@@ -73,14 +74,15 @@ func TestARestoredSessionReplaysFromWhatItWasOwedNotFromTheDisconnect(t *testing
 // released session into what a killed broker leaves, since the harness has no
 // way to end a broker without its cleanup.
 func TestASessionLeftAttachedByAKilledBrokerIsReplayedFromTheQueue(t *testing.T) {
+	var logs syncBuffer
 	natsURL := startNATS(t)
-	addrA, stopA := startStoppableBroker(t, natsURL, persistentWithQueue)
+	addrA, stopA := startStoppableBroker(t, natsURL, persistentWithQueue, loggingBroker(t, &logs))
 
 	c := dialRaw(t, addrA)
 	c.connect(rawConnect("rewind-killed", 300))
 	c.subscribe("k/#", packet.QoS1)
 	c.send(&packet.Disconnect{})
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "rewind-killed")
 
 	pub, _ := connectClient(t, addrA, connectOpts("pub-rewind-killed"))
 	pub.publish(&paho.Publish{Topic: "k/1", QoS: 1, Payload: []byte("1")})
@@ -89,7 +91,7 @@ func TestASessionLeftAttachedByAKilledBrokerIsReplayedFromTheQueue(t *testing.T)
 
 	leaveAsAKilledBrokerWould(t, natsURL, "rewind-killed")
 
-	addrB := startBroker(t, natsURL, persistentWithQueue)
+	addrB := startBroker(t, natsURL, persistentWithQueue, loggingBroker(t, &logs))
 	back := dialRaw(t, addrB)
 	require.True(t, back.connect(rawConnect("rewind-killed", 300)).SessionPresent)
 	for _, want := range []string{"k/1", "k/2"} {
