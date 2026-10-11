@@ -264,18 +264,18 @@ keys).
 comparison with the last record's `Spill`); let the sweep delete a live owner's keys that its record no
 longer names. Low priority: it needs a very small `max_payload` or tens of thousands of messages unacknowledged.
 
-## Other tests still sleep for a drop to be recorded
+## Other tests still sleep for a checkpoint or a publish
 
-**Today:** the five tests that slept 200 ms wait on `waitDetached` now (2026-10-09), and so do the eleven
-sites that slept 100 to 300 ms after a `drop()` in `restore_inflight_test.go` and `oversize_inflight_test.go`
-(2026-10-10). About twenty other sites sleep 100 to 700 ms after a `drop()` before stopping a broker or reading
-the record (`restore_nocopy_test.go`, `restored_rewind_test.go`, `spec_integration_test.go`, `killed_*_test.go`,
-and the 200 ms sleeps after a publish in `oversize_inflight_test.go`, which wait for a stored payload and not a
-drop). Same flake risk, same fix. `TestSmokeSessionMovesBetweenBrokers`
-keeps its 200 ms: it is the back-off of a retry loop against brokers in containers, whose logs the test cannot
-read. The same change found that `TestALiveCopyThatRacesTheConnectionsEndIsNeverLost` had been publishing its
-live copies to the queue's stored-copy subject, which no subscription matches, so it had never exercised the
-race; it does now.
+**Today:** every test that slept 100 to 300 ms after a client's connection ended now waits on `waitDetached` (or
+`waitDetachedTimes` for a client id that connects more than once), which returns when the broker has logged the
+disconnect, after it released the session (2026-10-11: `restore_nocopy_test.go`, `spec_integration_test.go`,
+`restored_rewind_test.go`). What remains are sleeps that wait for something else: 700 to 1200 ms for checkpoints with a
+message in flight (`killed_broker_test.go`, `killed_inflight_test.go`, `restore_nocopy_test.go:79,86`), 1500 ms for a
+session's expiry to pass (`spec_integration_test.go`), the 100 ms in `restored_rewind_test.go` before the drop (waiting
+for a delivery to be in flight), and the 200 ms after a publish in `oversize_inflight_test.go`, which waits for a stored
+payload. Same flake risk; each needs a condition to wait on (a checkpoint counter or a record read) rather than a drop
+log. `TestSmokeSessionMovesBetweenBrokers` keeps its 200 ms: it is the back-off of a retry loop against brokers in
+containers, whose logs the test cannot read.
 
 ## Tombstone purge across a long NATS outage
 

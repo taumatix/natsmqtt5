@@ -33,7 +33,8 @@ import (
 // went out with, though the retained store may have moved on since.
 func TestARetainedMessageInFlightIsResentByAnotherBroker(t *testing.T) {
 	natsURL := startNATS(t)
-	addrA, stopA := startStoppableBroker(t, natsURL, persistent)
+	var logs syncBuffer
+	addrA, stopA := startStoppableBroker(t, natsURL, persistent, loggingBroker(t, &logs))
 	addrB := startBroker(t, natsURL, persistent)
 
 	pub, _ := connectClient(t, addrA, connectOpts("pub-restore-ret"))
@@ -48,7 +49,7 @@ func TestARetainedMessageInFlightIsResentByAnotherBroker(t *testing.T) {
 	require.Equal(t, "as it was", string(first.Payload))
 	require.True(t, first.Retain)
 	c.drop()
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "restore-ret")
 	stopA()
 
 	// The retained message changes while nobody holds the session.
@@ -101,7 +102,8 @@ func TestAKilledBrokersRetainedMessageInFlightIsResent(t *testing.T) {
 func TestWithoutTheOfflineQueueARestoredSessionResendsFromTheRecord(t *testing.T) {
 	natsURL := startNATS(t)
 	noQueue := func(o *natsmqtt5.Options) { o.PersistentSessions, o.DisableOfflineQueue = true, true }
-	addrA, stopA := startStoppableBroker(t, natsURL, noQueue)
+	var logs syncBuffer
+	addrA, stopA := startStoppableBroker(t, natsURL, noQueue, loggingBroker(t, &logs))
 	addrB := startBroker(t, natsURL, noQueue)
 
 	c := dialRaw(t, addrA)
@@ -112,7 +114,7 @@ func TestWithoutTheOfflineQueueARestoredSessionResendsFromTheRecord(t *testing.T
 	pub.publish(&paho.Publish{Topic: "rs/nq/two", QoS: 2, Payload: []byte("two")})
 	sent := []*packet.Publish{c.expectPublish(), c.expectPublish()}
 	c.drop()
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "restore-noqueue")
 	stopA()
 
 	back := dialRaw(t, addrB)
@@ -133,7 +135,8 @@ func TestWithoutTheOfflineQueueARestoredSessionResendsFromTheRecord(t *testing.T
 func TestWithoutTheOfflineQueueAPayloadTooLargeForTheRecordIsStillResent(t *testing.T) {
 	natsURL := startNATS(t)
 	noQueue := func(o *natsmqtt5.Options) { o.PersistentSessions, o.DisableOfflineQueue = true, true }
-	addrA, stopA := startStoppableBroker(t, natsURL, noQueue)
+	var logs syncBuffer
+	addrA, stopA := startStoppableBroker(t, natsURL, noQueue, loggingBroker(t, &logs))
 	addrB := startBroker(t, natsURL, noQueue)
 
 	c := dialRaw(t, addrA)
@@ -147,7 +150,7 @@ func TestWithoutTheOfflineQueueAPayloadTooLargeForTheRecordIsStillResent(t *test
 	require.Equal(t, "rs/big/large", first.Topic)
 	small := c.expectPublish()
 	c.drop()
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "restore-big")
 	stopA()
 
 	back := dialRaw(t, addrB)
@@ -167,7 +170,8 @@ func TestWithoutTheOfflineQueueAPayloadTooLargeForTheRecordIsStillResent(t *test
 // session, from the queue copy the record names.
 func TestASharedSubscriptionsMessageInFlightIsResentByAnotherBroker(t *testing.T) {
 	natsURL := startNATS(t)
-	addrA, stopA := startStoppableBroker(t, natsURL, persistent)
+	var logs syncBuffer
+	addrA, stopA := startStoppableBroker(t, natsURL, persistent, loggingBroker(t, &logs))
 	addrB := startBroker(t, natsURL, persistent)
 
 	c := dialRaw(t, addrA)
@@ -178,7 +182,7 @@ func TestASharedSubscriptionsMessageInFlightIsResentByAnotherBroker(t *testing.T
 	first := c.expectPublish()
 	require.Equal(t, "job", string(first.Payload))
 	c.drop()
-	time.Sleep(100 * time.Millisecond)
+	waitDetached(t, &logs, "restore-shared")
 	stopA()
 
 	back := dialRaw(t, addrB)

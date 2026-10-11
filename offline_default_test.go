@@ -144,12 +144,20 @@ func TestAskingForTheQueueAndDisablingItIsRefused(t *testing.T) {
 // session, which it logs once the connection's teardown is done.
 func waitDetached(t *testing.T, logs *syncBuffer, clientID string) {
 	t.Helper()
+	waitDetachedTimes(t, logs, clientID, 1)
+}
+
+// waitDetachedTimes waits for the n-th time a connection of clientID has ended, for a client that
+// connects more than once on brokers sharing logs.
+func waitDetachedTimes(t *testing.T, logs *syncBuffer, clientID string, n int) {
+	t.Helper()
 	require.Eventually(t, func() bool {
+		seen := 0
 		for _, line := range strings.Split(logs.String(), "\n") {
 			if strings.Contains(line, `msg="mqtt client disconnected"`) && strings.Contains(line, "client_id="+clientID+" ") {
-				return true
+				seen++
 			}
 		}
-		return false
-	}, 5*time.Second, 5*time.Millisecond, "the broker never detached %s", clientID)
+		return seen >= n
+	}, 5*time.Second, 5*time.Millisecond, "the broker never detached %s (%d)", clientID, n)
 }
