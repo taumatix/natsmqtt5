@@ -109,6 +109,20 @@ func Kill(b *Broker) {
 	}
 }
 
+// Reap ends the goroutines of a broker that Kill left running. Kill marks the
+// broker closed, so Close returns at once and never signals shutdown; without
+// this, a killed broker's refresh and sweep loops tick on into later tests.
+func Reap(b *Broker) {
+	b.mu.Lock()
+	select {
+	case <-b.shutdown:
+	default:
+		close(b.shutdown)
+	}
+	b.mu.Unlock()
+	b.wg.Wait()
+}
+
 // SetSharedAckWait changes how long JetStream waits for a sign of life from the
 // member holding a shared subscription's message, for the rest of the test. Set
 // it before the broker starts.

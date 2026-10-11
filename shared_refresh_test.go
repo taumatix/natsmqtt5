@@ -2,6 +2,7 @@ package natsmqtt5_test
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -50,4 +51,25 @@ func TestARefreshDoesNotRestoreAMemberThatLeft_MQTT_5_0_4_8_2(t *testing.T) {
 
 	require.Equal(t, 0, memberEntries(t, natsURL), "the refresh wrote back the entry of a session that left")
 	requireConsumers(t, natsURL, 0)
+}
+
+// Kill leaves a broker's background loops running, as a process that is gone
+// would not; the harness must end them with the test, or a later test sees the
+// dead broker's refresh fire its hook (macOS CI, 2026-10-11).
+func TestAKilledBrokerStopsRefreshingWhenItsTestEndsAndItsHandleIsStopped(t *testing.T) {
+	natsmqtt5.SetShareMemberSlack(t, time.Second)
+	natsURL := startNATS(t)
+	short := func(o *natsmqtt5.Options) { o.MaxSessionExpiry = time.Second } // a refresh every 0.67 s
+	a, addr, stop := startBrokerHandle(t, natsURL, short)
+
+	m1 := dialRaw(t, addr)
+	m1.connect(rawConnect("m1", 1))
+	m1.subscribe(group, packet.QoS1)
+	natsmqtt5.Kill(a)
+	stop()
+
+	var fired atomic.Int32
+	natsmqtt5.SetBeforeMemberRefreshWrite(t, func() { fired.Add(1) })
+	time.Sleep(1500 * time.Millisecond)
+	require.Zero(t, fired.Load(), "the killed broker's refresh loop outlived the broker")
 }
