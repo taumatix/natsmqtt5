@@ -237,6 +237,23 @@ func (c *conn) flushNATS(ctx context.Context) error {
 // bindNATS creates the NATS subscriptions behind an MQTT filter. A filter
 // ending in '#' needs a second one on the parent subject, because MQTT's '#'
 // matches the parent level and NATS's '>' does not (MQTT-5.0 §4.7.1.2).
+// deliverable returns the subscription in force for a bound filter, or nil when
+// none is live. latest and live are two reads: a replacement landing between them
+// retires the one latest returned after it was read as current, so a dead result
+// is resolved again. installSubscription stores replacedBy and the cell before it
+// clears live, so a second resolution sees the successor.
+func deliverable(cell *atomic.Pointer[subscription]) *subscription {
+	cur := cell.Load().latest()
+	for !cur.live.Load() {
+		next := cell.Load().latest()
+		if next == cur {
+			return nil
+		}
+		cur = next
+	}
+	return cur
+}
+
 func (c *conn) bindNATS(sub *subscription) error {
 	// The handler resolves the connection at delivery time rather than
 	// capturing the one that created the subscription. A session that is
@@ -260,8 +277,8 @@ func (c *conn) bindNATS(sub *subscription) error {
 		// The newest subscription for the filter delivers: a client that
 		// subscribed again has replaced this one, and the message must reach it
 		// anyway [MQTT-3.8.4-4].
-		cur := cell.Load().latest()
-		if !cur.live.Load() {
+		cur := deliverable(cell)
+		if cur == nil {
 			// Bound but not installed, or already removed: no connection has
 			// been cleared to receive through it.
 			return

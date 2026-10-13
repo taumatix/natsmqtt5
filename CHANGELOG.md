@@ -11,6 +11,12 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** a SUBSCRIBE that replaced an existing subscription could still make a message being delivered at that instant
+  vanish [MQTT-3.8.4-4], a narrower window left by the v0.11.1 fix. The delivery handler found the old subscription current,
+  then found it retired, and dropped the message instead of passing it to the replacement. It now resolves the
+  subscription again when the one it found is no longer live. Seen once in CI (`TestSubscribe_MQTT_3_8_4_4`, QoS 0, message
+  60 of 300) and reproduced in a unit test against the real `installSubscription`; not measured for QoS 1 and 2.
+
 ## [0.12.1] - 2026-10-13
 
 - **Fixed:** a shutdown (Serve's context cancelled, or `Close`) that began just after a client had read its CONNACK could
