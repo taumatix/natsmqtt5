@@ -11,6 +11,12 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** a shutdown (Serve's context cancelled, or `Close`) that began just after a client had read its CONNACK could
+  close the connection without the DISCONNECT 0x8B it is owed, because the connection was only marked connected after the
+  CONNACK write returned and the shutdown path skipped the DISCONNECT in that gap. It now waits for the CONNACK write
+  first. Found by one CI failure of `TestShutdownAfterCancelledServeSendsDisconnect` on v0.12.0's merge commit; the
+  early check that opened the window came in with #120 and is in v0.12.0, not in v0.11.3.
+
 ## [0.12.0] - 2026-10-13
 
 - **Added:** a default offline queue that could not be created at start-up is retried in the background (5 s, doubling

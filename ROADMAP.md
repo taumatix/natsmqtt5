@@ -14,14 +14,6 @@ names it. Entries are checked against the code each time the review is re-run (l
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
-## `TestShutdownAfterCancelledServeSendsDisconnect` failed once on `main`
-
-On the v0.12.0 merge commit one ubuntu/Go 1.26 job failed it: a client read EOF where the shutdown DISCONNECT
-(0x8B) was owed (`shutdown_disconnect_test.go:44`). The re-run passed, as did 300 local `-race` rounds. Either the
-broker still has a window in which Close wins the race and drops a connection bare, or the test's 5 s read is too
-tight on a loaded runner. Reproduce under CPU load first (parallel `-race -count` with a busy loop), then fix the
-broker or say in the test why the window is acceptable. Shipped in v0.12.0 unresolved.
-
 ## The replay's time rewind is a bound, not a guarantee
 
 **Today:** a replay reaches back `OfflineQueueRewind` (10 s by default) before the moment a session was released,

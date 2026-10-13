@@ -22,6 +22,10 @@ import (
 // limit.
 const deliveryQueueDepth = 2048
 
+// afterConnackWrite, when set, runs once the CONNACK has gone out and before the
+// connection counts as connected. A test uses it to start a shutdown there.
+var afterConnackWrite atomic.Pointer[func()]
+
 // delivery is a message on its way to a client, after the subscription that
 // matched it has been resolved.
 type delivery struct {
@@ -533,9 +537,17 @@ func (c *conn) writeReportingDiscard(p packet.Packet) (discarded bool, err error
 // packet may follow it on this connection [MQTT-3.14.4-1].
 func (c *conn) writePacket(p packet.Packet, final bool) (discarded bool, err error) {
 	if final && !c.connected.Load() {
-		// Before anything the handshake is still writing (clientMaxPacketSize),
-		// and re-checked under writeMu below: connected only ever turns true.
-		return false, nil
+		// Not yet connected, or the CONNACK is being written right now: connected
+		// turns true under writeMu after the write, so the client can hold its
+		// CONNACK while this still reads false. Wait for any such write; only then
+		// is false final, and clientMaxPacketSize (written before the CONNACK) safe
+		// to read.
+		c.writeMu.Lock()
+		connected := c.connected.Load()
+		c.writeMu.Unlock()
+		if !connected {
+			return false, nil
+		}
 	}
 	raw, err := packet.Encode(p)
 	if err != nil {
@@ -591,6 +603,9 @@ func (c *conn) writePacket(p packet.Packet, final bool) (discarded bool, err err
 		return false, fmt.Errorf("writing %s: %w", p.Type(), err)
 	}
 	if ack, ok := p.(*packet.Connack); ok && ack.ReasonCode == packet.Success {
+		if fn := afterConnackWrite.Load(); fn != nil {
+			(*fn)()
+		}
 		c.connected.Store(true)
 	}
 	return false, nil
