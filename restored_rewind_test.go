@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/nats-io/nats.go"
@@ -42,7 +41,6 @@ func TestARestoredSessionReplaysFromWhatItWasOwedNotFromTheDisconnect(t *testing
 	c.send(&packet.Puback{Ack: packet.Ack{PacketID: first.PacketID}})
 	// w/2 is now in flight and unacknowledged; w/3 and w/4 wait behind the quota.
 	require.Equal(t, "w/2", c.expectPublish().Topic)
-	time.Sleep(100 * time.Millisecond)
 	c.drop()
 	waitDetached(t, &logs, "rewind-moving")
 

@@ -201,7 +201,6 @@ func TestAnInflightRetainedPublishNearMaxPayloadIsRestored(t *testing.T) {
 	big := bytes.Repeat([]byte("z"), maxPayload-maxPayload/8+1024)
 	pub, _ := connectClient(t, addrA, connectOpts("pub-near-max"))
 	pub.publish(&paho.Publish{Topic: "nm/a", QoS: 1, Retain: true, Payload: big})
-	time.Sleep(200 * time.Millisecond)
 
 	c := dialRaw(t, addrA)
 	c.connect(rawConnect("near-max", 300))
@@ -255,7 +254,6 @@ func TestAnAcknowledgedMessagesPayloadIsDeletedAndAnotherSessionsIsKept(t *testi
 	big := bytes.Repeat([]byte("q"), 100<<10)
 	pub, _ := connectClient(t, addrA, connectOpts("pub-share"))
 	pub.publish(&paho.Publish{Topic: "sh/a", QoS: 1, Retain: true, Payload: big})
-	time.Sleep(200 * time.Millisecond)
 
 	one, two := dialRaw(t, addrA), dialRaw(t, addrA)
 	one.connect(rawConnect("share-one", 300))
@@ -298,7 +296,6 @@ func TestACleanStartDeletesThePayloadsOfTheSessionItReplaces(t *testing.T) {
 
 	pub, _ := connectClient(t, addr, connectOpts("pub-cs"))
 	pub.publish(&paho.Publish{Topic: "cs/a", QoS: 1, Retain: true, Payload: bytes.Repeat([]byte("z"), 100<<10)})
-	time.Sleep(200 * time.Millisecond)
 
 	old := dialRaw(t, addr)
 	old.connect(rawConnect("cs-client", 300))
@@ -331,7 +328,6 @@ func TestASessionThatEndsWithItsConnectionDeletesItsPayloads(t *testing.T) {
 
 	pub, _ := connectClient(t, addr, connectOpts("pub-ex0"))
 	pub.publish(&paho.Publish{Topic: "ex0/a", QoS: 1, Retain: true, Payload: bytes.Repeat([]byte("y"), 100<<10)})
-	time.Sleep(200 * time.Millisecond)
 
 	c := dialRaw(t, addr)
 	c.connect(rawConnect("ex0-client", 0))
