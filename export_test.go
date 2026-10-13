@@ -186,3 +186,12 @@ func SetStoredDeliveredBound(t interface {
 	was := storedDeliveredBound.Swap(int64(n))
 	t.Cleanup(func() { storedDeliveredBound.Store(was) })
 }
+
+// SetAfterConnackWrite runs fn after a CONNACK has been written and before the
+// connection counts as connected, for the rest of the test.
+func SetAfterConnackWrite(t interface {
+	Cleanup(func())
+}, fn func()) {
+	afterConnackWrite.Store(&fn)
+	t.Cleanup(func() { afterConnackWrite.Store(nil) })
+}

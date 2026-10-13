@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/taumatix/natsmqtt5"
@@ -72,4 +73,34 @@ func TestCancelledServeContextSendsDisconnect(t *testing.T) {
 	d, ok := c.read().(*packet.Disconnect)
 	require.True(t, ok, "want a DISCONNECT")
 	require.Equal(t, packet.ServerShuttingDown, d.ReasonCode)
+}
+
+// A client that has its CONNACK is owed the shutdown DISCONNECT even when the
+// shutdown starts before the broker has marked the connection connected: the CONNACK
+// is written first and the mark follows. The seam holds the connection in that gap
+// while Serve's context is cancelled.
+func TestShutdownBetweenConnackAndConnectedStillSendsDisconnect(t *testing.T) {
+	url := startNATS(t)
+	b, err := natsmqtt5.New(natsmqtt5.Options{
+		NATSURL: url,
+		Listen:  "127.0.0.1:0",
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = b.Close() })
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() { served <- b.Serve(ctx) }()
+
+	natsmqtt5.SetAfterConnackWrite(t, func() {
+		cancel()
+		time.Sleep(300 * time.Millisecond)
+	})
+	c := dialRaw(t, b.ListenAddr().String())
+	c.connect(rawConnect("in-the-gap", 0))
+
+	d, ok := c.read().(*packet.Disconnect)
+	require.True(t, ok, "want a DISCONNECT, not a bare close")
+	require.Equal(t, packet.ServerShuttingDown, d.ReasonCode)
+	require.NoError(t, <-served)
 }
