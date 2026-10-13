@@ -11,6 +11,8 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-13
+
 - **Fixed:** a shutdown (Serve's context cancelled, or `Close`) that began just after a client had read its CONNACK could
   close the connection without the DISCONNECT 0x8B it is owed, because the connection was only marked connected after the
   CONNACK write returned and the shutdown path skipped the DISCONNECT in that gap. It now waits for the CONNACK write
@@ -882,7 +884,8 @@ mapping `nats-server` uses for its own MQTT support.
 [#13]: https://github.com/taumatix/natsmqtt5/pull/13
 [#19]: https://github.com/taumatix/natsmqtt5/pull/19
 [#24]: https://github.com/taumatix/natsmqtt5/pull/24
-[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/taumatix/natsmqtt5/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/taumatix/natsmqtt5/compare/v0.11.3...v0.12.0
 [0.11.3]: https://github.com/taumatix/natsmqtt5/compare/v0.11.2...v0.11.3
 [0.11.2]: https://github.com/taumatix/natsmqtt5/compare/v0.11.1...v0.11.2
