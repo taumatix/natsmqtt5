@@ -11,6 +11,8 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-13
+
 - **Added:** a default offline queue that could not be created at start-up is retried in the background (5 s, doubling
   to a minute) instead of staying off until the broker restarts, and logged at info when it comes up. New
   `Broker.OfflineQueueActive()` reports whether the broker is keeping messages for disconnected sessions. Nothing changes
@@ -874,7 +876,8 @@ mapping `nats-server` uses for its own MQTT support.
 [#13]: https://github.com/taumatix/natsmqtt5/pull/13
 [#19]: https://github.com/taumatix/natsmqtt5/pull/19
 [#24]: https://github.com/taumatix/natsmqtt5/pull/24
-[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.11.3...HEAD
+[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/taumatix/natsmqtt5/compare/v0.11.3...v0.12.0
 [0.11.3]: https://github.com/taumatix/natsmqtt5/compare/v0.11.2...v0.11.3
 [0.11.2]: https://github.com/taumatix/natsmqtt5/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/taumatix/natsmqtt5/compare/v0.11.0...v0.11.1
