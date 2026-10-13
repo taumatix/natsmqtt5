@@ -243,12 +243,13 @@ func inflightKeys(t *testing.T, natsURL string) []string {
 // another that was sent the same message under the same Packet Identifier
 // [MQTT-4.4.0-1].
 func TestAnAcknowledgedMessagesPayloadIsDeletedAndAnotherSessionsIsKept(t *testing.T) {
+	var logs syncBuffer
 	natsURL := startNATS(t)
 	fast := func(o *natsmqtt5.Options) {
 		o.PersistentSessions, o.DisableOfflineQueue = true, true
 		o.SessionCheckpointInterval = 100 * time.Millisecond
 	}
-	addrA, stopA := startStoppableBroker(t, natsURL, fast)
+	addrA, stopA := startStoppableBroker(t, natsURL, fast, loggingBroker(t, &logs))
 	addrB := startBroker(t, natsURL, fast)
 
 	big := bytes.Repeat([]byte("q"), 100<<10)
@@ -271,7 +272,7 @@ func TestAnAcknowledgedMessagesPayloadIsDeletedAndAnotherSessionsIsKept(t *testi
 		5*time.Second, 50*time.Millisecond, "the acknowledged message's payload is deleted")
 
 	two.drop()
-	time.Sleep(200 * time.Millisecond)
+	waitDetached(t, &logs, "share-two")
 	stopA()
 	back := dialRaw(t, addrB)
 	require.True(t, back.connect(rawConnect("share-two", 300)).SessionPresent)
@@ -287,12 +288,13 @@ func TestAnAcknowledgedMessagesPayloadIsDeletedAndAnotherSessionsIsKept(t *testi
 // reconnects with Clean Start has no use for the ones the old session held, and
 // nothing else would remove them before the bucket's TTL.
 func TestACleanStartDeletesThePayloadsOfTheSessionItReplaces(t *testing.T) {
+	var logs syncBuffer
 	natsURL := startNATS(t)
 	fast := func(o *natsmqtt5.Options) {
 		o.PersistentSessions, o.DisableOfflineQueue = true, true
 		o.SessionCheckpointInterval = 100 * time.Millisecond
 	}
-	addr := startBroker(t, natsURL, fast)
+	addr := startBroker(t, natsURL, fast, loggingBroker(t, &logs))
 
 	pub, _ := connectClient(t, addr, connectOpts("pub-cs"))
 	pub.publish(&paho.Publish{Topic: "cs/a", QoS: 1, Retain: true, Payload: bytes.Repeat([]byte("z"), 100<<10)})
@@ -304,7 +306,7 @@ func TestACleanStartDeletesThePayloadsOfTheSessionItReplaces(t *testing.T) {
 	require.Eventually(t, func() bool { return len(inflightKeys(t, natsURL)) == 1 },
 		5*time.Second, 50*time.Millisecond, "the session keeps its payload")
 	old.drop()
-	time.Sleep(300 * time.Millisecond)
+	waitDetached(t, &logs, "cs-client")
 	require.Len(t, inflightKeys(t, natsURL), 1, "a session that is only away keeps it")
 
 	fresh := dialRaw(t, addr)
