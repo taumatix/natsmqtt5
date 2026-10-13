@@ -14,6 +14,15 @@ names it. Entries are checked against the code each time the review is re-run (l
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
+## `TestSubscribe_MQTT_3_8_4_4` lost a QoS 0 message once on macOS
+
+On the v0.12.1 merge commit the macOS/Go 1.26 job failed `QoS 0 loses nothing and repeats nothing`
+(`subscribe_replace_test.go:143`): message 60 of 300 was missing while the subscription was replaced. The re-run passed.
+[MQTT-3.8.4-4] is a MUST, so first decide whether this is a real gap at the replacement (a delivery between the old
+subscription's removal and the new one's start) or the QoS 0 path legitimately dropping under load (QoS 0 may be
+lost on a slow link, but not by the broker's own replacement). Reproduce with `-count` under CPU load; if it is the
+broker, fix and keep the test strict; if it is load, say so in the test and bound it.
+
 ## The replay's time rewind is a bound, not a guarantee
 
 **Today:** a replay reaches back `OfflineQueueRewind` (10 s by default) before the moment a session was released,
