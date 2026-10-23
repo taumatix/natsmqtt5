@@ -355,6 +355,78 @@ func (s *retainedStore) sweep() {
 		s.discard(expired)
 	}
 	s.purgeTombstones(now)
+	s.reconcile()
+}
+
+// reconcile drops what this broker still holds although the stream no longer does. The
+// consumer resumes after the last message it saw, so a clear whose tombstone was purged
+// while the broker was cut off from NATS never reaches it; the stream holds one message
+// per topic, so a local view with more entries than the stream has messages must hold
+// some the stream has dropped. Counting is one request; only a mismatch pays for
+// looking each entry up.
+func (s *retainedStore) reconcile() {
+	ctx, cancel := context.WithTimeout(context.Background(), retainStoreTimeout)
+	defer cancel()
+
+	s.mu.RLock()
+	local := len(s.byTopic) + len(s.tombstones)
+	s.mu.RUnlock()
+	if local == 0 {
+		return
+	}
+	info, err := s.stream.Info(ctx)
+	if err != nil || uint64(local) <= info.State.Msgs {
+		return
+	}
+
+	s.mu.RLock()
+	entries := make([]*retained, 0, len(s.byTopic))
+	for _, r := range s.byTopic {
+		if r.seq != 0 {
+			entries = append(entries, r)
+		}
+	}
+	s.mu.RUnlock()
+	for _, r := range entries {
+		if _, err := s.stream.GetMsg(ctx, r.seq); !errors.Is(err, jetstream.ErrMsgNotFound) {
+			continue // present, or unknown: leave it
+		}
+		// Replaced by a newer message the consumer has yet to deliver: that one will
+		// arrive and take its place. Anything else is a topic the stream has cleared.
+		subject, err := s.codec.nameToSubject(r.topicName)
+		if err != nil {
+			continue
+		}
+		last, err := s.stream.GetLastMsgForSubject(ctx, retainedSubject(s.prefix, subject))
+		if err == nil && len(last.Data) > 0 {
+			continue
+		}
+		if err != nil && !errors.Is(err, jetstream.ErrMsgNotFound) {
+			continue
+		}
+		s.mu.Lock()
+		if s.byTopic[r.topicName] == r {
+			delete(s.byTopic, r.topicName)
+			s.logger.Debug("dropped a retained message the stream had cleared", "topic", r.topicName)
+		}
+		s.mu.Unlock()
+	}
+	s.mu.RLock()
+	tombs := make(map[string]tombstone, len(s.tombstones))
+	for name, t := range s.tombstones {
+		tombs[name] = t
+	}
+	s.mu.RUnlock()
+	for name, t := range tombs {
+		if _, err := s.stream.GetMsg(ctx, t.seq); !errors.Is(err, jetstream.ErrMsgNotFound) {
+			continue
+		}
+		s.mu.Lock()
+		if s.tombstones[name] == t {
+			delete(s.tombstones, name)
+		}
+		s.mu.Unlock()
+	}
 }
 
 // purgeTombstones deletes the markers of cleared topics older than the

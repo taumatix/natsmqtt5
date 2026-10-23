@@ -273,18 +273,18 @@ session's expiry to pass (`spec_integration_test.go`), (2026-10-13: the two in `
 broker stores a retained message before it acknowledges, so the PUBACK already was the condition.) Same flake risk; each needs a condition to wait on rather than a drop log. `TestSmokeSessionMovesBetweenBrokers` keeps its 200 ms: it is the back-off of a retry loop against brokers in
 containers, whose logs the test cannot read.
 
-## Tombstone purge across a long NATS outage: the stale-view case is not reproduced
+## Retained view: a stale entry that cancels an unseen one
 
-**Done:** a cluster test (`TestClusterARetainedClearMissedDuringAnOutageIsAppliedAfterTheTombstoneIsPurged`) isolates a
-broker's NATS server, clears a retained topic on the majority, lets the tombstone age past `RetainedTombstoneTTL`,
-purges it, heals, and asserts the cut-off broker stops serving the cleared message. It passes on NATS 2.15: the
-ordered consumer catches up through the stream rather than missing the clear. The purge also logged a server error 10043
-("sequence N not found") for a sequence another broker had already deleted; that is now treated as already purged.
+**Done:** a broker cut off from NATS past `RetainedTombstoneTTL` missed a clear whose tombstone was then purged and
+kept serving the cleared message (reproduced about once in two runs by
+`TestClusterARetainedClearMissedDuringAnOutageIsAppliedAfterTheTombstoneIsPurged`). The sweep now compares the local
+view's size with the stream's message count and, on a surplus, drops entries the stream no longer holds. The purge also
+treats the server's error 10043 ("sequence N not found") as already purged.
 
-**Left:** the case the original entry feared (a broker that stays connected to a NATS server whose stream state was
-rebuilt, or a consumer reset that restarts past the tombstone) is not exercised. If a user reports a stale retained
-message after an outage, extend the test with a full-cluster restart (`StopServer` on all three) before building the
-resync described in the old entry (rebuild the retained view on reconnect).
+**Left:** the check is a count, so one stale entry cancelled by one message the consumer has not delivered yet goes
+unnoticed until the consumer catches up; and a stale entry whose topic was since retained again by another broker is
+corrected only when the consumer delivers that message. A reconnect-triggered full rebuild would close both, at the
+price of a replay per reconnect; build it if a user reports a stale retained message.
 
 ## The weekly scans fail where no pass reads them
 
