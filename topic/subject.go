@@ -26,7 +26,22 @@ func NameToSubject(name string) (string, error) {
 	if err := ValidateName(name); err != nil {
 		return "", err
 	}
-	return convert(name, false), nil
+	return convert(name, false, false), nil
+}
+
+// NameToSubjectEscaped is NameToSubject for a topic that may contain the
+// characters a NATS subject cannot carry. Each is written as '/' and a letter,
+// a sequence the nats-server mapping never produces (it writes '/' only before
+// '.', before another '/', or at the end): '*' is "/s", '>' is "/g", space is
+// "/p", tab "/t", line feed "/n", carriage return "/r", form feed "/f" and DEL
+// "/d". A topic with none of them maps to exactly the subject NameToSubject
+// gives it; one with any does not, which is the interoperability the option
+// trades away.
+func NameToSubjectEscaped(name string) (string, error) {
+	if err := ValidateNameEscaped(name); err != nil {
+		return "", err
+	}
+	return convert(name, false, true), nil
 }
 
 // FilterToSubject converts a Topic Filter to a NATS subject, translating '+'
@@ -44,13 +59,60 @@ func FilterToSubject(filter string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return convert(inner, true), nil
+	return convert(inner, true, false), nil
+}
+
+// FilterToSubjectEscaped is FilterToSubject for a filter whose levels may
+// contain the characters NameToSubjectEscaped escapes. A '+' or '#' that is a
+// wildcard still becomes '*' or '>'; a '*' or '>' inside a level is an
+// ordinary character and is escaped.
+func FilterToSubjectEscaped(filter string) (string, error) {
+	if err := ValidateFilterEscaped(filter); err != nil {
+		return "", err
+	}
+	_, inner, err := SplitShared(filter)
+	if err != nil {
+		return "", err
+	}
+	return convert(inner, true, true), nil
 }
 
 // SubjectToName converts a NATS subject produced by NameToSubject back to the
 // MQTT Topic Name it came from. The conversion is exact: for any name that
 // NameToSubject accepts, SubjectToName(NameToSubject(name)) == name.
-func SubjectToName(subject string) string {
+func SubjectToName(subject string) string { return subjectToName(subject, false) }
+
+// SubjectToNameEscaped is SubjectToName for a subject NameToSubjectEscaped
+// produced: for any name it accepts, SubjectToNameEscaped(NameToSubjectEscaped(name)) == name.
+func SubjectToNameEscaped(subject string) string { return subjectToName(subject, true) }
+
+// escapes maps the letter after '/' to the character it stands for.
+var escapes = map[byte]byte{'s': '*', 'g': '>', 'p': ' ', 't': '\t', 'n': '\n', 'r': '\r', 'f': '\f', 'd': 0x7f}
+
+// escaped is the letter that follows '/' for a character, or 0.
+func escaped(c byte) byte {
+	switch c {
+	case '*':
+		return 's'
+	case '>':
+		return 'g'
+	case ' ':
+		return 'p'
+	case '\t':
+		return 't'
+	case '\n':
+		return 'n'
+	case '\r':
+		return 'r'
+	case '\f':
+		return 'f'
+	case 0x7f:
+		return 'd'
+	}
+	return 0
+}
+
+func subjectToName(subject string, esc bool) string {
 	var b strings.Builder
 	b.Grow(len(subject))
 	end := len(subject) - 1
@@ -67,6 +129,11 @@ func SubjectToName(subject string) string {
 				case '/':
 					b.WriteByte('.')
 					i++
+				default:
+					if c, ok := escapes[subject[i+1]]; ok && esc {
+						b.WriteByte(c)
+						i++
+					}
 				}
 			}
 		case '.':
@@ -78,7 +145,7 @@ func SubjectToName(subject string) string {
 	return b.String()
 }
 
-func convert(mt string, wildcards bool) string {
+func convert(mt string, wildcards, escape bool) string {
 	var b strings.Builder
 	b.Grow(len(mt) + 8)
 	end := len(mt) - 1
@@ -95,6 +162,13 @@ func convert(mt string, wildcards bool) string {
 			}
 		case '.':
 			b.WriteString("//")
+		case '*', '>', ' ', '\t', '\n', '\r', '\f', 0x7f:
+			if l := escaped(c); escape && l != 0 {
+				b.WriteByte('/')
+				b.WriteByte(l)
+			} else {
+				b.WriteByte(c)
+			}
 		case '+':
 			if wildcards {
 				b.WriteByte('*')

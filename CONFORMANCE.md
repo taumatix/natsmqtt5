@@ -72,7 +72,7 @@ shows the broker refusing or not advertising it the way the specification requir
 
 The broker does not promise more than this list. Optional behaviour a SHOULD asks for and the
 broker lacks is on the roadmap (for example `$` topics by default, a client over its Receive
-Maximum, topics with whitespace).
+Maximum). Topics with whitespace, `*` or `>` are refused unless `Options.EscapeNATSWildcards` is set.
 
 ## What it found, as history
 

@@ -53,7 +53,7 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 	if err != nil {
 		return err
 	}
-	if err := topic.ValidateName(topicName); err != nil {
+	if err := c.broker.codec.validateName(topicName); err != nil {
 		return c.rejectPublish(p, packet.TopicNameInvalid, err.Error())
 	}
 	if c.broker.opts.RestrictDollarTopics && dollarName(topicName) {
@@ -103,7 +103,7 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 		}
 	}
 
-	subject, err := topic.NameToSubject(topicName)
+	subject, err := c.broker.codec.nameToSubject(topicName)
 	if err != nil {
 		return c.rejectPublish(p, packet.TopicNameInvalid, err.Error())
 	}
@@ -383,7 +383,7 @@ func (b *Broker) publishAdoptedWill(clientID string, will *packet.Will) {
 
 func (b *Broker) publishWillFor(clientID string, will *packet.Will) {
 	name := will.Topic
-	subject, err := topic.NameToSubject(name)
+	subject, err := b.codec.nameToSubject(name)
 	if err != nil {
 		b.logger.Warn("dropping a will message with an unusable topic",
 			"client_id", clientID, "topic", name, "error", err)

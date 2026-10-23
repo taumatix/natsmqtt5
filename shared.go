@@ -309,7 +309,7 @@ func (c *conn) deliverShared(it *sharedItem) (bool, error) {
 		return false, nil
 	}
 	subject, ok := topic.TrimPrefix(c.broker.opts.SubjectPrefix, it.msg.Subject)
-	name := topic.SubjectToName(subject)
+	name := c.broker.codec.subjectToName(subject)
 	if !ok || !topic.Match(it.sub.filter, name) {
 		// The consumer's filter is coarser than MQTT's, as a NATS subscription
 		// is (MQTT-5.0 §4.7.2): no member of this group wants it.

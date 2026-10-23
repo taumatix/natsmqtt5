@@ -140,7 +140,7 @@ func (b *Broker) restoreEntry(ctx context.Context, clientID string, st storedInf
 		props.SubscriptionIdentifiers = []int{st.SubID}
 	}
 	d := &delivery{
-		topic:   topic.SubjectToName(subject),
+		topic:   b.codec.subjectToName(subject),
 		payload: msg.Data,
 		qos:     st.QoS,
 		retain:  st.Retain,

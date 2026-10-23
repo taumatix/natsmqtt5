@@ -94,7 +94,7 @@ func (c *conn) handleSubscribe(ctx context.Context, p *packet.Subscribe) error {
 // needs [MQTT-3.3.1-10] — and the Reason Code: the granted QoS on success, or
 // a failure code from MQTT-5.0 Table 3-8.
 func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID int) (*subscription, bool, packet.ReasonCode) {
-	if err := topic.ValidateFilter(want.Filter); err != nil {
+	if err := c.broker.codec.validateFilter(want.Filter); err != nil {
 		c.logger.Debug("rejecting a subscription", "filter", want.Filter, "error", err)
 		return nil, false, packet.TopicFilterInvalid
 	}
@@ -122,7 +122,7 @@ func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID
 		}
 	}
 
-	subject, err := topic.FilterToSubject(want.Filter)
+	subject, err := c.broker.codec.filterToSubject(want.Filter)
 	if err != nil {
 		return nil, false, packet.TopicFilterInvalid
 	}
@@ -381,7 +381,7 @@ func (c *conn) onNATSMessage(sub *subscription, msg *nats.Msg) {
 	if !ok {
 		return
 	}
-	name := topic.SubjectToName(subject)
+	name := c.broker.codec.subjectToName(subject)
 
 	// NATS wildcards are coarser than MQTT's in one direction: the extra
 	// parent subscription for '#' and the '$' rule both need a check against

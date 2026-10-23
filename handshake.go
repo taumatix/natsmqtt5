@@ -561,7 +561,7 @@ func (c *conn) rebuild(st storedSubscription) (*subscription, error) {
 	if err != nil {
 		return nil, err
 	}
-	subject, err := topic.FilterToSubject(st.Filter)
+	subject, err := c.broker.codec.filterToSubject(st.Filter)
 	if err != nil {
 		return nil, err
 	}
@@ -605,7 +605,7 @@ func (c *conn) checkWill(cp *packet.Connect) error {
 			fmt.Sprintf("the Will's Response Topic %q contains a wildcard", wp.ResponseTopic))
 		return fmt.Errorf("will response topic %q contains a wildcard", wp.ResponseTopic)
 	}
-	if err := topic.ValidateName(cp.Will.Topic); err != nil {
+	if err := c.broker.codec.validateName(cp.Will.Topic); err != nil {
 		c.refuse(packet.TopicNameInvalid, err.Error())
 		return fmt.Errorf("will topic %q: %w", cp.Will.Topic, err)
 	}

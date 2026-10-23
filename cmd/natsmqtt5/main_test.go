@@ -197,3 +197,17 @@ func TestRestrictDollarTopicsFlag(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, cfg.broker.RestrictDollarTopics)
 }
+
+func TestEscapeNATSWildcardsFlag(t *testing.T) {
+	cfg, err := parseConfig([]string{"-escape-nats-wildcards"}, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.EscapeNATSWildcards)
+
+	cfg, err = parseConfig(nil, env(map[string]string{"NATSMQTT5_ESCAPE_NATS_WILDCARDS": "true"}), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.EscapeNATSWildcards)
+
+	cfg, err = parseConfig(nil, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.False(t, cfg.broker.EscapeNATSWildcards)
+}

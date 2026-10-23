@@ -11,6 +11,10 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Added:** `Options.EscapeNATSWildcards` (off by default). A topic may then contain `*`, `>`, a space, tab, line feed,
+  carriage return, form feed or DEL: each is stored in the NATS subject as `/s`, `/g`, `/p`, `/t`, `/n`, `/r`, `/f`, `/d`,
+  and a literal `*` level is no longer a NATS wildcard. Topics without those characters map to the same subject as
+  before. `-escape-nats-wildcards` sets it. New `topic.*Escaped` functions carry the mapping.
 - **Added:** `Options.OutboundTopicAliases` (off by default). The broker sends Topic Aliases to a client that offered a
   Topic Alias Maximum: a topic of 8 bytes or more that repeats is sent as an alias with an empty name, up to the
   client's maximum, the least recently used alias reassigned when the table is full. The table lives with the network
