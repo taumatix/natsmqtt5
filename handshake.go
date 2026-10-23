@@ -90,6 +90,11 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 	if props.MaximumPacketSize != nil {
 		c.clientMaxPacketSize = *props.MaximumPacketSize
 	}
+	// The client's Topic Alias Maximum is what permits the broker to send aliases
+	// at all; 0 or absent means none.
+	if c.broker.opts.OutboundTopicAliases && props.TopicAliasMaximum != nil && *props.TopicAliasMaximum > 0 {
+		c.outAlias = newOutAliases(*props.TopicAliasMaximum)
+	}
 
 	// The broker advertises no authentication method, so a client asking for
 	// enhanced authentication must be turned away with 0x8C rather than left

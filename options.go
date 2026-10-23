@@ -297,6 +297,13 @@ type Options struct {
 	// TopicAliasMaximum is advertised in CONNACK. Zero disables inbound topic
 	// aliases; leave it unset for DefaultTopicAliasMaximum.
 	TopicAliasMaximum *uint16
+	// OutboundTopicAliases lets the broker send Topic Aliases to a client that
+	// offered a Topic Alias Maximum in its CONNECT (MQTT-5.0 §3.3.2.3.4), up to
+	// that maximum, least recently used first. It saves bandwidth on long topic
+	// names that repeat. Off by default; a client that offers no maximum is
+	// never sent one either way. A resend after a reconnect carries the full
+	// name again, since the table belongs to the network connection.
+	OutboundTopicAliases bool
 	// MaximumPacketSize caps an inbound packet. Defaults to
 	// DefaultMaximumPacketSize.
 	MaximumPacketSize uint32

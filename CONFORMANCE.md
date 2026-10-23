@@ -63,8 +63,8 @@ shows the broker refusing or not advertising it the way the specification requir
   not support (§3.1.2.10, §4.12). The AUTH statements cannot be reached.
 - **QoS 2 on shared subscriptions.** A QoS 2 request on a `$share/` filter is granted QoS 1,
   reported in the SUBACK, which [MQTT-3.8.4-7] permits.
-- **Server-to-client Topic Aliases.** The broker never sends one; the Client's Topic Alias Maximum
-  is what permits it and a Server may use none.
+- **Server-to-client Topic Aliases** are off unless `Options.OutboundTopicAliases` is set; the
+  Client's Topic Alias Maximum is what permits them and a Server may use none.
 - **Statements whose wording a request cannot violate** (for example, "the Server MUST NOT send X
   unless the Client asked for it" when the broker never sends X), which the table also marks
   NOT-APPLICABLE with the reason and the test that shows the premise.

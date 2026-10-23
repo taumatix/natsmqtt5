@@ -186,13 +186,12 @@ out SCRAM and Kerberos.
 **Shape:** an `Auther` interface driving the AUTH exchange in MQTT-5.0 §4.12,
 plus re-authentication on an established connection.
 
-## Outbound topic aliases
+## Outbound topic aliases: on by default, and measured
 
-**Today:** the broker accepts topic aliases from clients but never sends them,
-which is permitted and costs bandwidth on long topic names.
-
-**Shape:** a per-connection alias table bounded by the client's Topic Alias
-Maximum, with a least-recently-used policy.
+**Today:** `Options.OutboundTopicAliases` ships off (2026-10-23): a client that offers a Topic Alias Maximum is sent
+aliases when it is on. **Left:** whether it should default on (a behaviour change for clients that advertise a
+maximum but handle aliases badly, so a decision, with a CHANGELOG line), and a measurement of the bytes it saves
+on a realistic topic mix, which would also tell whether `minAliasedTopic` (8) is the right threshold.
 
 ## QoS 2 on shared subscriptions
 

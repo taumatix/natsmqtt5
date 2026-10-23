@@ -92,6 +92,9 @@ type conn struct {
 	// clientMaxPacketSize is the client's Maximum Packet Size, or 0 for no
 	// limit. A packet over it is discarded rather than sent [MQTT-3.1.2-25].
 	clientMaxPacketSize uint32
+	// outAlias is the Topic Aliases this connection has set towards the client,
+	// or nil when the client offered none or Options.OutboundTopicAliases is off.
+	outAlias *outAliases
 	// topicAliasMax is the Topic Alias Maximum this connection was told, which
 	// is the broker's unless the CONNACK had to leave it out to fit the client's
 	// Maximum Packet Size (fitConnack): then the client was told nothing, which
@@ -598,6 +601,9 @@ func (c *conn) writePacket(p packet.Packet, final bool) (discarded bool, err err
 			return false, nil
 		}
 		c.disconnectSent = true
+	}
+	if pub, ok := p.(*packet.Publish); ok {
+		raw = c.aliasPublish(pub, raw)
 	}
 	if _, err := c.nc.Write(raw); err != nil {
 		return false, fmt.Errorf("writing %s: %w", p.Type(), err)
