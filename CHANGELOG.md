@@ -11,6 +11,11 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Added:** `Options.OutboundTopicAliases` (off by default). The broker sends Topic Aliases to a client that offered a
+  Topic Alias Maximum: a topic of 8 bytes or more that repeats is sent as an alias with an empty name, up to the
+  client's maximum, the least recently used alias reassigned when the table is full. The table lives with the network
+  connection, so a resend after a reconnect carries the full name; a first use that would take a packet over the
+  client's Maximum Packet Size is sent plain.
 - **Added:** MQTT over WebSocket. `Broker.WebSocketHandler()` returns an `http.Handler` that upgrades a request
   (subprotocol `mqtt`, binary frames) and hands the connection to the same state machine as a TCP one;
   `Options.WebSocketOriginPatterns` allows browser origins other than the request's host. A new dependency,

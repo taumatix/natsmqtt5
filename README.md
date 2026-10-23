@@ -548,7 +548,7 @@ one with fewer features:
 - **No enhanced authentication (`AUTH` packets).** A CONNECT carrying an
   Authentication Method is refused with `0x8C Bad authentication method`, which
   is the conforming answer from a server that does not support it.
-- **The broker never sends topic aliases**, though it accepts them from clients.
+- **The broker sends topic aliases only if asked to.** It accepts them from clients always; `Options.OutboundTopicAliases` makes it send them to a client that offered a Topic Alias Maximum (off by default).
 - **`Message Expiry Interval` counts whole seconds.** A message is deleted once it
   has waited its whole interval, and one still live goes out with the interval less
   the whole seconds it waited (2 s with 1.3 s waited leaves 1), on every delivery
