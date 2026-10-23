@@ -135,11 +135,14 @@ func TestAResentMessageCarriesItsNameOnANewConnection(t *testing.T) {
 	second := dialRaw(t, addr)
 	ack := second.connect(cp)
 	require.True(t, ack.SessionPresent)
-	for range 2 {
-		again := second.expectPublish()
-		assert.True(t, again.Dup, "a resend")
-		assert.Equal(t, "alias/topic-one", again.Topic, "the new connection has no alias to rely on")
-	}
+	again := second.expectPublish()
+	assert.True(t, again.Dup, "a resend")
+	assert.Equal(t, "alias/topic-one", again.Topic, "the new connection has no alias to rely on")
+	assert.Equal(t, uint16(1), aliasOf(again), "it starts its own table")
+	again = second.expectPublish()
+	assert.True(t, again.Dup, "a resend")
+	assert.Empty(t, again.Topic, "and the second resend uses the alias just set")
+	assert.Equal(t, uint16(1), aliasOf(again))
 }
 
 // A new alias adds three bytes; a message that fits the client's Maximum Packet Size
