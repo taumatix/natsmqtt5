@@ -76,6 +76,7 @@ type retainedStore struct {
 	js     jetstream.JetStream
 	stream jetstream.Stream
 	prefix string
+	codec  subjectCodec
 	logger *slog.Logger
 
 	mu sync.RWMutex
@@ -121,6 +122,7 @@ func newRetainedStore(ctx context.Context, js jetstream.JetStream, opts *resolve
 		js:      js,
 		stream:  stream,
 		prefix:  opts.SubjectPrefix,
+		codec:   subjectCodec{opts.EscapeNATSWildcards},
 		logger:  logger,
 		byTopic: make(map[string]*retained),
 		ready:   make(chan struct{}),
@@ -215,7 +217,7 @@ func (s *retainedStore) apply(msg jetstream.Msg) {
 	if !ok {
 		return
 	}
-	name := topic.SubjectToName(subject)
+	name := s.codec.subjectToName(subject)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -281,7 +283,7 @@ func (s *retainedStore) store(ctx context.Context, subject, originClientID, id s
 	// Update the local view immediately rather than waiting for the consumer
 	// to loop it back, so a subscribe on this broker right after a retained
 	// publish cannot miss it.
-	name := topic.SubjectToName(subject)
+	name := s.codec.subjectToName(subject)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(p.Payload) == 0 {

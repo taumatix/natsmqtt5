@@ -304,6 +304,19 @@ type Options struct {
 	// never sent one either way. A resend after a reconnect carries the full
 	// name again, since the table belongs to the network connection.
 	OutboundTopicAliases bool
+	// EscapeNATSWildcards lets a topic contain '*', '>', spaces and the other
+	// whitespace characters, which MQTT allows but a NATS subject cannot carry,
+	// so the broker refuses them by default. When set, each is stored in the
+	// NATS subject as '/' and a letter ("/s" for '*', "/g" for '>', "/p" for a
+	// space, "/t", "/n", "/r", "/f" and "/d" for tab, line feed, carriage
+	// return, form feed and DEL). The encoder never writes '/' before a letter,
+	// so the escape is unambiguous, and a topic that has none of those
+	// characters maps to the same subject as before. The cost is
+	// interoperability: a NATS-native client sees the escaped form, and
+	// nats-server's own MQTT listener, which refuses these topics, does not
+	// read it. Decide before you have data: turning it on or off later leaves
+	// existing retained, queued and in-flight messages under the other mapping.
+	EscapeNATSWildcards bool
 	// MaximumPacketSize caps an inbound packet. Defaults to
 	// DefaultMaximumPacketSize.
 	MaximumPacketSize uint32

@@ -135,7 +135,7 @@ func (b *Broker) groupName(filter string) (name string, ok bool) {
 	if err != nil || share == "" || q == nil {
 		return "", false
 	}
-	subject, err := topic.FilterToSubject(filter)
+	subject, err := b.codec.filterToSubject(filter)
 	if err != nil {
 		return "", false
 	}

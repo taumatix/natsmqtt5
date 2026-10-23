@@ -53,8 +53,15 @@ func reserved(s string) bool {
 
 // ValidateName checks a Topic Name, as carried in a PUBLISH
 // (MQTT-5.0 §4.7.3). Wildcards are forbidden [MQTT-4.7.0-1].
-func ValidateName(name string) error {
-	if err := validateCommon(name); err != nil {
+func ValidateName(name string) error { return validateName(name, false) }
+
+// ValidateNameEscaped is ValidateName for a broker that escapes the characters
+// a NATS subject cannot carry (see NameToSubjectEscaped): '*', '>', whitespace
+// and DEL are allowed.
+func ValidateNameEscaped(name string) error { return validateName(name, true) }
+
+func validateName(name string, escaped bool) error {
+	if err := validateCommon(name, escaped); err != nil {
 		return err
 	}
 	if strings.ContainsAny(name, "+#") {
@@ -69,8 +76,14 @@ func ValidateName(name string) error {
 // ValidateFilter checks a Topic Filter, as carried in SUBSCRIBE and
 // UNSUBSCRIBE (MQTT-5.0 §4.7.1, §4.8.2). Shared subscription filters are
 // accepted and their {filter} part validated.
-func ValidateFilter(filter string) error {
-	if err := validateCommon(filter); err != nil {
+func ValidateFilter(filter string) error { return validateFilter(filter, false) }
+
+// ValidateFilterEscaped is ValidateFilter for a broker that escapes the
+// characters a NATS subject cannot carry; see ValidateNameEscaped.
+func ValidateFilterEscaped(filter string) error { return validateFilter(filter, true) }
+
+func validateFilter(filter string, escaped bool) error {
+	if err := validateCommon(filter, escaped); err != nil {
 		return err
 	}
 	if strings.HasPrefix(filter, SharedPrefix) {
@@ -90,7 +103,7 @@ func ValidateFilter(filter string) error {
 	return validateFilterLevels(filter)
 }
 
-func validateCommon(s string) error {
+func validateCommon(s string, escaped bool) error {
 	// "All Topic Names and Topic Filters MUST be at least one character long"
 	// [MQTT-4.7.3-1].
 	if s == "" {
@@ -104,6 +117,9 @@ func validateCommon(s string) error {
 	if strings.ContainsRune(s, 0) {
 		return invalid("contains U+0000 [MQTT-4.7.3-2]")
 	}
+	if escaped {
+		return nil
+	}
 	// The NATS subject mapping cannot carry these: whitespace would split the
 	// NATS protocol control line, and DEL is a pivot marker in the server's
 	// subject tree. nats-server rejects them for the same reason.
@@ -116,7 +132,7 @@ func validateCommon(s string) error {
 	// and receives topics it must not see. We reject them instead: a loud
 	// error beats silent mis-delivery. Escaping them would fix the topic but
 	// break subject-level interop with nats-server for every topic that uses
-	// one, so it is deferred to a later version behind an option.
+	// one, so it is behind an option (the *Escaped functions).
 	if i := strings.IndexAny(s, "*>"); i >= 0 {
 		return invalid("contains %q at offset %d, which this broker cannot carry in a NATS subject unambiguously", s[i], i)
 	}

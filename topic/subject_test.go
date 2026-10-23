@@ -197,3 +197,39 @@ func FuzzSubjectRoundTrip(f *testing.F) {
 			"topic %q converted to subject %q must convert back unchanged", name, subject)
 	})
 }
+
+func TestEscapedMappingRoundTripsEveryTopicThatNeedsIt(t *testing.T) {
+	names := []string{
+		"a*", "*", ">", "a>b", "a b", " ", "a\tb\nc\rd\fe\x7ff", "a*/", "*/", "/*", "//*", "a.*.b",
+		"a/*/>", "x/s", "x/sg", "/s", "a b/c d/", "a.b c/", "*>*>", "sp ace/s*", "é *",
+	}
+	for _, n := range names {
+		subj, err := NameToSubjectEscaped(n)
+		require.NoError(t, err, n)
+		for _, bad := range []string{"*", ">", " ", "\t", "\n", "\r", "\f", "\x7f"} {
+			assert.NotContains(t, subj, bad, "subject for %q must be a legal NATS token", n)
+		}
+		assert.Equal(t, n, SubjectToNameEscaped(subj), "round trip of %q via %q", n, subj)
+	}
+}
+
+func TestEscapedMappingLeavesTopicsWithoutThoseCharactersAlone(t *testing.T) {
+	for _, n := range []string{"a/b", "a.b", "a//b", "a/", "/a", "a/b.c/", "sensors/s/g/p"} {
+		plain, err := NameToSubject(n)
+		require.NoError(t, err)
+		esc, err := NameToSubjectEscaped(n)
+		require.NoError(t, err)
+		assert.Equal(t, plain, esc, n)
+	}
+}
+
+func TestEscapedFilterKeepsWildcardsAndEscapesLiterals(t *testing.T) {
+	got, err := FilterToSubjectEscaped("a b/+/*/#")
+	require.NoError(t, err)
+	assert.Equal(t, "a/pb.*./s.>", got)
+
+	_, err = FilterToSubject("a*")
+	assert.Error(t, err, "without the option a literal '*' is still refused")
+	_, err = FilterToSubjectEscaped("a#b")
+	assert.Error(t, err, "the MQTT wildcards stay wildcards")
+}

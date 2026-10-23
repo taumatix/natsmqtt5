@@ -22,7 +22,8 @@ import (
 //
 // A Broker is safe for concurrent use.
 type Broker struct {
-	opts *resolved
+	opts  *resolved
+	codec subjectCodec
 
 	nc     *nats.Conn
 	ownsNC bool
@@ -93,6 +94,7 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 
 	b := &Broker{
 		opts:     r,
+		codec:    subjectCodec{r.EscapeNATSWildcards},
 		logger:   r.logger,
 		sessions: make(map[string]*session),
 		conns:    make(map[*conn]struct{}),

@@ -565,11 +565,19 @@ one with fewer features:
   immediately after subscribing could be dropped, which is a loss the client
   has no way to notice.
 - **Topics containing a space, a tab, `*`, `>` or `DEL` are refused** with
-  `0x90 Topic Name invalid`. MQTT permits them; a NATS subject cannot carry
-  them. `nats-server` lets `*` and `>` through, which silently turns an MQTT
+  `0x90 Topic Name invalid` unless `Options.EscapeNATSWildcards` is set. MQTT
+  permits them; a NATS subject cannot carry them. `nats-server` lets `*` and `>` through, which silently turns an MQTT
   subscription to `a/*/b` into a NATS wildcard that receives topics it must not
-  see. Failing loudly is the deliberate choice here; see
-  [ROADMAP.md](ROADMAP.md) for the escaping option.
+  see. Failing loudly is the default. `Options.EscapeNATSWildcards` (`-escape-nats-wildcards` /
+  `NATSMQTT5_ESCAPE_NATS_WILDCARDS=true`) accepts them
+  instead and writes each into the subject as `/` and a letter (`*` is `/s`, `>`
+  is `/g`, space is `/p`, tab, line feed, carriage return, form feed and DEL are
+  `/t` `/n` `/r` `/f` `/d`), a sequence the `nats-server` mapping never
+  produces. Topics without those characters keep exactly the subject they had;
+  the ones with them are no longer readable as the same subject by
+  `nats-server`'s own MQTT listener, so choose before you have data: switching
+  later leaves stored retained, queued and in-flight messages under the other
+  mapping.
 
 ## Correctness
 

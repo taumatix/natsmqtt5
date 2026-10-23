@@ -226,18 +226,13 @@ off (`SetReadLimit(-1)`), relying on the packet reader's own size check, so a ho
 frame is streamed rather than rejected up front. **Shape:** the flag, one wss test, and a limit derived from
 the maximum packet size.
 
-## Escaping `*` and `>` in topics
+## Escaping `*` and `>`: a way to move
 
-**Today:** a topic containing `*`, `>` or whitespace (MQTT 5 §4.7.3 allows the space character) is refused with
-`0x90 Topic Name invalid`, because the `nats-server` subject mapping does not
-escape them and letting them through turns an MQTT subscription into a NATS
-wildcard.
-
-**Trade-off:** an escaping scheme fixes those topics but breaks subject-level
-interoperability with `nats-server` for exactly the topics it escapes. It
-should therefore be opt-in — `Options.EscapeNATSWildcards` — and off by
-default, so the interop promise holds unless a deployment explicitly trades it
-away.
+**Today:** `Options.EscapeNATSWildcards` (and `-escape-nats-wildcards`) works.
+Turning it on or off with data in the retained, queue and in-flight streams
+leaves those messages under the other mapping, with no tool to rewrite them.
+Whether a migration is wanted at all is a decision for a deployment that needs
+it.
 
 # Operations and robustness (not conformance)
 

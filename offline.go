@@ -59,6 +59,7 @@ type offlineQueue struct {
 	prefix string
 	// rewind is Options.OfflineQueueRewind, resolved.
 	rewind time.Duration
+	codec  subjectCodec
 	// infoMu serialises stream.Info, which writes a cached copy into the
 	// shared stream handle and so races between two connections replaying at
 	// once (found by -race on CI, once the queue became the default).
@@ -84,7 +85,8 @@ func newOfflineQueue(ctx context.Context, js jetstream.JetStream, opts *resolved
 	if err != nil {
 		return nil, err
 	}
-	q := &offlineQueue{stream: stream, prefix: opts.SubjectPrefix, rewind: opts.OfflineQueueRewind}
+	q := &offlineQueue{stream: stream, prefix: opts.SubjectPrefix, rewind: opts.OfflineQueueRewind,
+		codec: subjectCodec{opts.EscapeNATSWildcards}}
 	if q.members, err = newShareMembers(ctx, js, opts); err != nil {
 		// The backlog still works; it just outlives its last member by the
 		// consumer's inactivity threshold, as it did before there was a count.
@@ -125,7 +127,7 @@ func (q *offlineQueue) replayFilters(subs []*subscription) []string {
 		if sub.share != "" {
 			continue
 		}
-		subject, err := topic.FilterToSubject(sub.filter)
+		subject, err := q.codec.filterToSubject(sub.filter)
 		if err != nil {
 			return nil
 		}
@@ -327,7 +329,7 @@ func (c *conn) deliverQueued(id string, msg *nats.Msg) error {
 	if !ok {
 		return nil
 	}
-	name := topic.SubjectToName(subject)
+	name := c.broker.codec.subjectToName(subject)
 	matched := false
 	for _, sub := range c.sess.subscriptions() {
 		if sub.share != "" || !topic.Match(sub.filter, name) {
