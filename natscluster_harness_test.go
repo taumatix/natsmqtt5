@@ -23,8 +23,9 @@ func TestClusterHarnessControls(t *testing.T) {
 
 	// Stopped and restarted: the cluster keeps a quorum and the node comes back.
 	c.StopServer(2, false)
-	_, err = js.Publish("h.a", []byte("1"))
-	require.NoError(t, err)
+	// A stream whose leader was on the stopped node needs an election before it takes writes.
+	require.Eventually(t, func() bool { _, err := js.Publish("h.a", []byte("1")); return err == nil },
+		60*time.Second, time.Second, "the stream never took a write with one node down")
 	c.StartServer(2)
 
 	// Isolated: a client of the cut node cannot write a replicated stream; the other two can.
