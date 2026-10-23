@@ -62,19 +62,18 @@ isolated server was the leader of the Will bucket or not, chosen by chance; a pa
 server with a majority and cuts the *broker* off is the existing proxy test), and a partition longer than
 `retryFor` with the broker still cut off, which waits for the store for as long as it takes by design.
 
-## A NATS restart fences every client, even a short one
+## Large Wills in the index
 
-**Today:** a NATS server restart under two brokers is driven (`will_watch_restart_test.go`): the index recovers and a
-Will stored afterwards is adopted. That restart took longer than twice `WillCheckInterval` in the test, so both
-brokers closed all their clients, as designed; a real restart of a replicated server may or may not. The index's
-memory is measured (`TestWillIndexHeapPerRecord`, 2026-10-10): about 330 bytes per record plus the Will's payload and
-properties, 16 MiB at 50,000 records of a 7-byte payload. A Will with a large payload (the protocol allows 64 KiB)
-makes that the dominant term, so a deployment of many large Wills would hold them all in every broker; that is
-unmeasured against a real cluster.
+**Done:** against a real three-server cluster (2026-10-24), a rolling graceful restart of all three servers under the
+default `WillCheckInterval`, with brokers that know all three URLs, closes no client and publishes no Will, and
+neither does a 2-second kill of the only server a broker uses (`will_restart_cluster_test.go`). A restart longer than
+twice the interval does fence, as designed.
 
-**Shape:** decide whether a restart that finishes inside `WillCheckInterval` times two should cost no connection at all,
-which it does not for a broker that sees the reconnect late. If large Wills matter, hold only owner, revision and due
-time in the index and read the record when one is to be adopted.
+**Today:** the index's memory is measured (`TestWillIndexHeapPerRecord`): about 330 bytes per record plus the Will's
+payload and properties, 16 MiB at 50,000 records of a 7-byte payload. A Will with a large payload (the protocol
+allows 64 KiB) makes the payload the dominant term, so a deployment of many large Wills holds them all in every broker.
+
+**Shape:** hold only owner, revision and due time in the index and read the record when one is to be adopted.
 
 ## Durable Wills on by default
 
