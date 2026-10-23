@@ -468,9 +468,7 @@ func (c *conn) scheduleWill() {
 		delay = expiry
 	}
 	if delay == 0 {
-		if wills.fire(lease) {
-			c.broker.publishWill(sess, will)
-		}
+		wills.fire(lease, func() { c.broker.publishWill(sess, will) })
 		return
 	}
 
@@ -502,9 +500,7 @@ func (c *conn) scheduleWill() {
 			// that has since ended in a disconnect of its own.
 			return
 		}
-		if wills.fire(lease) {
-			c.broker.publishWill(sess, will)
-		}
+		wills.fire(lease, func() { c.broker.publishWill(sess, will) })
 	}()
 }
 

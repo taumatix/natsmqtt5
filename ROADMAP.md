@@ -51,19 +51,16 @@ version that shipped first.
 
 # Tier 2: MUST statements on rare or optional paths
 
-## Self-fencing is proven for a silent link, not for an isolated NATS server
+## Self-fencing on a cluster: what is left
 
-**Today:** a broker that cannot reach NATS for twice `WillCheckInterval` closes
-its clients (`willStore.selfLoop`). `nats_partition_test.go` proves it with a
-proxy that stops forwarding between the broker and a single server. Two paths
-are reasoned about and not tested: a broker whose server is alive but cut off
-from its cluster (only the Will-bucket read in `reachable` notices), and a
-fenced broker's own disconnect path, which waits out the Will-store timeouts
-and then publishes its own copy of the Will once NATS returns, relying on the
-record's compare-and-swap to keep it to one publication.
-
-**Shape:** a test on a three-server cluster that isolates the server one broker
-uses, and one that heals a long partition and counts the Will publications.
+**Done (2026-10-23):** `TestClusterWillOfAClientOnAnIsolatedNATSServerIsPublishedOnceAfterItsConnectionCloses` isolates
+the server a broker uses from the other two (three real servers in containers, `natscluster_test.go`), watches the
+client's socket close before the survivor publishes, heals, and counts one publication. It found that the fenced
+broker's own disconnect path published the Will again when the removal of the record timed out; `fire` now retries
+the removal until the store answers. Left: the partition shapes the harness can make and the test does not (the
+isolated server was the leader of the Will bucket or not, chosen by chance; a partition that leaves the broker's
+server with a majority and cuts the *broker* off is the existing proxy test), and a partition longer than
+`retryFor` with the broker still cut off, which waits for the store for as long as it takes by design.
 
 ## A NATS restart fences every client, even a short one
 
@@ -311,13 +308,24 @@ messages do, and NATS still picks members whose client is away, whose share is
 dropped. Leaving the queue group while the session has no connection would stop
 that, as long as the last member leaving does not leave the group with nobody.
 
-## A delivery goroutine stuck in a user callback blocks finish and the catch-up floor
+## `finish` and `awayFloor` wait for the delivery goroutine with no bound
 
-**Today:** `finish` (`conn.go` around 365) and `awayFloor` (`catchup.go` around 185) wait on
-`<-c.loopDone` with no timeout, so a delivery goroutine stuck in a user callback (an Authorizer, a
-hook) blocks the connection's cleanup, and a resume on the same client, forever. **Shape:** wait
-with a bound, log, and carry on as the resume path already does for the old connection's delivery
-goroutine. Test: a callback that blocks, then a takeover.
+**Today:** `finish` (`conn.go`) and `awayFloor` (`catchup.go`) wait on `<-c.loopDone` with no timeout, so a
+delivery goroutine that never returns blocks the connection's cleanup, and with it a resume on the same client
+(`awaitPredecessor` waits for the reader and `awaitPredecessorLoop` bounds its own wait at `predecessorWait`,
+10 s, so the resume path itself does not hang on the goroutine). Checked 2026-10-23: the premise this entry used to
+have, a user callback holding the goroutine, is false. The delivery goroutine (`deliverLoop`, `subscribe.go`) calls
+neither the `Authenticator` nor the `Authorizer`; those run on the reader and in `Reauthorize`. What can hold it is
+a socket write (`c.close()` interrupts that), the receive-quota wait, and a NATS or JetStream call made without a
+deadline. A bounded wait in `finish` is not a fix by itself: `awayFloor` and `detach` read `pending` and the
+in-flight bookkeeping after `loopDone` closes precisely because the goroutine owns them and has stopped, so reading
+them after a timeout would race.
+
+**Shape:** audit each JetStream and NATS call on the delivery path (the QoS 2 record writes, the stream reads, the
+shared pull) for a context with a deadline, and give any that lacks one the same bound the Will bucket has; then a
+test that blocks one such call (a frozen NATS server from the cluster harness, `Freeze`) and shows the connection
+still finishes. Only if a call cannot be bounded, hand the goroutine's state over through a mutex so a bounded wait
+is safe.
 
 ## DurablePublish and the Will bucket: what each guarantees
 

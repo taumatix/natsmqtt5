@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -116,6 +117,13 @@ type willStore struct {
 	// success, so a silent owner has closed its connections by then and the Will
 	// of a client still connected is not published.
 	fenceAfter, selfEvery, selfTimeout, waitOut time.Duration
+	// retryFor is how long fire keeps trying to remove a record before it publishes anyway
+	// (only when this broker is not cut off): twice waitOut, the horizon by which a
+	// survivor that could see the record has adopted it, plus one operation.
+	retryFor time.Duration
+	// cutOff is true from the moment this broker fences itself until it next reaches the
+	// cluster.
+	cutOff atomic.Bool
 	// silentSince is when each owner was first seen not answering. Only
 	// adoptOrphans touches it.
 	silentSince map[string]time.Time
@@ -173,6 +181,7 @@ func newWillStore(ctx context.Context, js jetstream.JetStream, nc *nats.Conn, op
 	w.selfEvery = every / 2
 	w.selfTimeout = min(ownerPingTimeout, every)
 	w.waitOut = w.fenceAfter + w.selfEvery + 2*w.selfTimeout
+	w.retryFor = 2*w.waitOut + willOpTimeout
 	if w.ping, err = nc.Subscribe(brokerPingSubject(opts.SubjectPrefix, owner), replyEmpty); err != nil {
 		return nil, fmt.Errorf("subscribing to the Will liveness subject: %w", err)
 	}
@@ -248,25 +257,63 @@ func (w *willStore) ended(l *willLease, dueAt time.Time) bool {
 	return true
 }
 
-// fire reports whether the caller may publish the Will. It removes the record
-// with a compare-and-swap, and only the broker that wins the removal publishes,
-// which is what makes the publication happen once however many brokers saw the
-// record. A store failure other than losing the race errs towards publishing:
-// a Will announced twice is a lesser fault than one never announced.
-func (w *willStore) fire(l *willLease) bool {
+// fire publishes the Will, by calling publish, once this broker has won the removal of
+// its record with a compare-and-swap. Only the winner publishes, which is what makes the
+// publication happen once however many brokers saw the record.
+//
+// A removal that fails for another reason than losing the race leaves it unknown whether
+// a survivor has adopted the record, so publishing at once could announce the Will twice
+// (a broker cut off from its cluster is exactly the one whose record a survivor adopts).
+// The removal is retried until the store answers: a conflict means the adopter has it,
+// success means this broker publishes. A broker that has fenced itself keeps trying until
+// the store is back, since the survivors hold the Will meanwhile; one that has not, so the
+// store alone is failing and nothing else will publish, gives up after retryFor and
+// publishes, a Will announced twice being a lesser fault than one never announced.
+func (w *willStore) fire(l *willLease, publish func()) {
 	if w == nil || l == nil {
-		return true
+		publish()
+		return
 	}
 	err := w.remove(l)
 	if err == nil {
-		return true
+		publish()
+		return
 	}
 	if isRevisionConflict(err) {
-		return false
+		return
 	}
-	w.logger.Warn("could not remove a Will Message record; publishing anyway",
+	w.logger.Warn("could not remove a Will Message record; retrying before publishing",
 		"client_id", l.rec.ClientID, "error", err)
-	return true
+	go w.fireLater(l, publish)
+}
+
+// fireLater is fire's retry loop.
+func (w *willStore) fireLater(l *willLease, publish func()) {
+	giveUp := time.Now().Add(w.retryFor)
+	t := time.NewTicker(w.selfEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+		case <-w.closing:
+			// The record stays, owned by a broker about to be gone, for a survivor to adopt.
+			return
+		}
+		err := w.remove(l)
+		switch {
+		case err == nil:
+			publish()
+			return
+		case isRevisionConflict(err):
+			return
+		}
+		if time.Now().After(giveUp) && !w.cutOff.Load() {
+			w.logger.Warn("could not remove a Will Message record; publishing anyway",
+				"client_id", l.rec.ClientID, "error", err)
+			publish()
+			return
+		}
+	}
 }
 
 // drop removes the record of a Will that will not be published.
@@ -336,9 +383,7 @@ func (w *willStore) settle(ctx context.Context, clientID string, resumed bool) {
 			w.logger.Debug("cancelled a Will Message: the session was resumed", "client_id", clientID)
 			continue
 		}
-		if w.fire(l) {
-			w.publish(clientID, l.rec.Will)
-		}
+		w.fire(l, func() { w.publish(clientID, l.rec.Will) })
 	}
 }
 
@@ -457,11 +502,13 @@ func (w *willStore) selfLoop(ctx context.Context) {
 		started := time.Now()
 		if w.reachable(ctx) {
 			lastOK = started
+			w.cutOff.Store(false)
 			continue
 		}
 		if time.Since(lastOK) >= w.fenceAfter && ctx.Err() == nil {
 			w.logger.Warn("cut off from NATS: closing client connections so that their Will Messages can be published",
 				"cut_off_for", time.Since(lastOK).Round(time.Millisecond))
+			w.cutOff.Store(true)
 			w.fence()
 		}
 	}
@@ -583,9 +630,7 @@ func (w *willStore) publishWhenDue(l *willLease) {
 			return
 		}
 	}
-	if w.fire(l) {
-		w.publish(l.rec.ClientID, l.rec.Will)
-	}
+	w.fire(l, func() { w.publish(l.rec.ClientID, l.rec.Will) })
 }
 
 // ownerAlive reports whether the broker instance answers, asking twice before

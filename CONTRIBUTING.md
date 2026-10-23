@@ -5,6 +5,22 @@ Fixes and features go through a pull request with CI green. `go build ./...`, `g
 additive within a major version ([CHANGELOG.md](CHANGELOG.md)); a user-visible change adds a line
 under `## [Unreleased]`.
 
+## Tests that need a NATS cluster
+
+A failure the embedded server cannot produce (a server cut off from its cluster, one member
+restarted, the whole cluster down for a long time) is tested against three real servers in
+containers, started by `natscluster_test.go`. They skip unless asked for:
+
+    NATSMQTT5_CLUSTER_TESTS=1 go test -run '^TestCluster' -count=1 -v .
+
+It needs Apple's `container` or `docker` on `PATH` (`NATSMQTT5_CLUSTER_RUNTIME` forces one;
+`NATSMQTT5_CLUSTER_IMAGE` changes the NATS image, a public `nats:2-alpine` by default), and
+`NATSMQTT5_CLUSTER_LOG=1` prints the brokers' own log. Name such a test `TestCluster...`: CI's
+`cluster` job runs every test with that prefix and fails if one skipped. `startNATSCluster(t)`
+returns a handle with `URL(i)`, `URLs()`, `StopServer`/`StartServer` (SIGKILL or SIGTERM), `Freeze`/`Thaw`
+(SIGSTOP/SIGCONT) and `Isolate`/`Heal` (a blackhole route between one node and the other two, so
+every process stays alive); the containers publish on 127.0.0.1 only and are removed when the test ends.
+
 ## Every statement has an integration test
 
 natsmqtt5 aims to be a conforming MQTT 5.0 server ([CONFORMANCE.md](CONFORMANCE.md)), so a change
