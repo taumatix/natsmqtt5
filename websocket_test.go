@@ -3,6 +3,8 @@ package natsmqtt5_test
 import (
 	"bytes"
 	"context"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,7 +40,27 @@ func connectWS(t *testing.T, url string, cp *paho.Connect, customise ...func(*pa
 	require.NoError(t, err)
 	require.Equal(t, "mqtt", ws.Subprotocol())
 	ws.SetReadLimit(-1)
-	nc := websocket.NetConn(context.Background(), ws, websocket.MessageBinary)
+	wsConn := websocket.NetConn(context.Background(), ws, websocket.MessageBinary)
+
+	// Paho writes one packet as several Write calls and does not lock them against its
+	// keep-alive PINGREQ, which is safe on a TCP socket (one writev) and not on a
+	// connection where each Write is a frame. So Paho gets a real loopback TCP connection
+	// and a relay forwards its byte stream into WebSocket binary messages, cut wherever
+	// TCP happened to cut it, as a browser's would be.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	go func() {
+		defer ln.Close()
+		relayEnd, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		go func() { _, _ = io.Copy(wsConn, relayEnd); _ = wsConn.Close() }()
+		_, _ = io.Copy(relayEnd, wsConn)
+		_ = relayEnd.Close()
+	}()
+	nc, err := net.Dial("tcp", ln.Addr().String())
+	require.NoError(t, err)
 
 	tc := &testClient{
 		t:           t,
@@ -119,7 +141,7 @@ func TestAWebSocketSessionResumesOverTCPAndKeepsItsOfflineMessages(t *testing.T)
 	web := connectWS(t, url, cp)
 	_, err := web.Subscribe(context.Background(), &paho.Subscribe{Subscriptions: []paho.SubscribeOptions{{Topic: "resume/#", QoS: 1}}})
 	require.NoError(t, err)
-	_ = web.nc.Close() // the WebSocket closing handshake may report an error; the broker sees the link go
+	web.dropConnection()
 
 	plain, _ := connectClient(t, tcpAddr, connectOpts("tcp-pub"))
 	_, err = plain.Publish(context.Background(), &paho.Publish{Topic: "resume/a", QoS: 1, Payload: []byte("while away")})
