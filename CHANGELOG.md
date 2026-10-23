@@ -11,6 +11,10 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Added:** MQTT over WebSocket. `Broker.WebSocketHandler()` returns an `http.Handler` that upgrades a request
+  (subprotocol `mqtt`, binary frames) and hands the connection to the same state machine as a TCP one;
+  `Options.WebSocketOriginPatterns` allows browser origins other than the request's host. A new dependency,
+  `github.com/coder/websocket`. MQTT-6.0.0-1, -2 and -4 move from not-applicable to tested.
 - **Fixed:** a SUBSCRIBE that replaced an existing subscription could still make a message being delivered at that instant
   vanish [MQTT-3.8.4-4], a narrower window left by the v0.11.1 fix. The delivery handler found the old subscription current,
   then found it retired, and dropped the message instead of passing it to the replacement. It now resolves the

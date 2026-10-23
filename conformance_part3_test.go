@@ -1063,11 +1063,10 @@ func TestConformance_MQTT_4_13_2_1_AnErrorReasonCodeAlwaysClosesTheConnection(t 
 
 // ---- §6 WebSocket ---------------------------------------------------------
 
-// [MQTT-6.0.0-1], [MQTT-6.0.0-2] and [MQTT-6.0.0-4] bind a Server that offers a
-// WebSocket transport. This broker offers none (ROADMAP.md), so they are not
-// applicable; the one observable fact, that an HTTP upgrade request sent to the
-// TCP listener does not produce an mqtt WebSocket, is shown here.
-func TestConformance_MQTT_6_0_0_NoWebSocketIsOffered(t *testing.T) {
+// [MQTT-6.0.0-1], [MQTT-6.0.0-2] and [MQTT-6.0.0-4] are tested in websocket_test.go against
+// Broker.WebSocketHandler. The TCP listener stays MQTT over TCP only: an HTTP upgrade request
+// sent to it does not produce a WebSocket.
+func TestTheTCPListenerDoesNotUpgradeToWebSocket(t *testing.T) {
 	addr := p3Broker(t)
 	c := dialRaw(t, addr)
 	c.writeRaw([]byte("GET /mqtt HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +

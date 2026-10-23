@@ -3,6 +3,7 @@ module github.com/taumatix/natsmqtt5
 go 1.26.0
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/eclipse/paho.golang v0.23.0
 	github.com/nats-io/nats-server/v2 v2.15.0
 	github.com/nats-io/nats.go v1.54.0
