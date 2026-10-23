@@ -697,6 +697,9 @@ func (c *conn) close() {
 
 // tlsState returns the TLS handshake state, or nil on a plaintext connection.
 func (c *conn) tlsState() *tls.ConnectionState {
+	if wc, ok := c.nc.(*webSocketConn); ok {
+		return wc.tlsConnectionState()
+	}
 	tc, ok := c.nc.(*tls.Conn)
 	if !ok {
 		return nil

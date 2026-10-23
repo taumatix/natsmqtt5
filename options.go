@@ -91,6 +91,13 @@ type Options struct {
 	Listener net.Listener
 	// TLSConfig, when non-nil, wraps the listener in TLS.
 	TLSConfig *tls.Config
+	// WebSocketOriginPatterns lists the Origin hosts (path.Match patterns,
+	// e.g. "app.example.com" or "*.example.com") a browser may connect from
+	// through Broker.WebSocketHandler, besides the request's own host. A
+	// request without an Origin header (any non-browser client) is always
+	// accepted. Use "*" only if the broker's own authentication is what
+	// protects it.
+	WebSocketOriginPatterns []string
 
 	// SubjectPrefix namespaces every NATS subject the broker publishes MQTT
 	// traffic on, keeping it clear of NATS system subjects. Defaults to

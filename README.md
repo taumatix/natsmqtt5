@@ -51,6 +51,8 @@ MQTT v5 clients ──TCP/TLS──▶ natsmqtt5 ──▶ your existing NATS se
   published while a session is disconnected are delivered when it resumes, as
   MQTT 5 requires. On by default whenever JetStream is in use; see
   [Offline queue](#offline-queue).
+- **Speaks MQTT over WebSocket as well as TCP and TLS.** `Broker.WebSocketHandler()` is an
+  `http.Handler`; see [MQTT over WebSocket](#mqtt-over-websocket).
 - **Embeds as a library.** `natsmqtt5.New` returns a `*Broker` you run inside
   your own process, sharing your `*nats.Conn` if you want.
 
@@ -131,6 +133,24 @@ func main() {
 	}
 }
 ```
+
+### MQTT over WebSocket
+
+Browsers and many hosted deployments reach MQTT only through WebSocket. Mount the broker's handler on
+any `http.Server`, plain or TLS; the connection joins the same broker, sessions and subscriptions as the
+TCP listener:
+
+```go
+mux := http.NewServeMux()
+mux.Handle("/mqtt", broker.WebSocketHandler())
+go http.ListenAndServe(":8083", mux) // or ListenAndServeTLS
+```
+
+The handler negotiates the `mqtt` subprotocol and closes a client that offers none, and closes one that
+sends a text frame (MQTT-5.0 section 6). A browser's `Origin` must match the request's host or one of
+`Options.WebSocketOriginPatterns`. `Broker.Close` disconnects WebSocket clients with 0x8B like any other;
+shutting the `http.Server` down does not, because it cannot reach a hijacked connection. The TLS state and
+remote address an `Authenticator` sees are those of the HTTP request.
 
 Authentication and authorization are two small interfaces:
 
