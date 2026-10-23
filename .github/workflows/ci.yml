@@ -97,6 +97,36 @@ jobs:
           NATSMQTT5_SLOW_TESTS: '1'
         run: .github/scripts/smoke.sh TestAReplayToASlowReaderIsNotCutOffAfterThirtySeconds
 
+  cluster:
+    # The tests that need a three-server NATS cluster (an isolated server, a restart, a long
+    # outage) run the servers in containers; natscluster_test.go drives docker here and Apple's
+    # `container` on a Mac. They are gated behind NATSMQTT5_CLUSTER_TESTS so the matrix above
+    # skips them, and smoke.sh fails the job if one skipped instead of passing.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+          check-latest: true
+
+      - name: Run the cluster tests
+        env:
+          NATSMQTT5_CLUSTER_TESTS: '1'
+          NATSMQTT5_CLUSTER_RUNTIME: docker
+          GOFLAGS: -timeout=40m
+        run: |
+          names=$(go test -list '^TestCluster' . | grep '^TestCluster')
+          .github/scripts/smoke.sh $names
+
+      - name: No container left behind
+        if: always()
+        run: |
+          left=$(docker ps -aq --filter name=natsmqtt5-ct-)
+          if [ -n "$left" ]; then echo "containers left behind: $left" >&2; exit 1; fi
+
   docker:
     # Builds the image and runs the quickstart from the README against it, so
     # a broken Dockerfile or compose file fails the pull request rather than

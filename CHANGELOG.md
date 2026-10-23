@@ -11,6 +11,12 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** a broker cut off from its cluster no longer announces a Will a surviving broker has already adopted. When the
+  removal of a Will's record failed for a reason other than losing the race (the store unreachable, as it is from the
+  minority side of a partition), the broker published the Will at once; it now retries the removal until the store answers
+  and publishes only if it wins, so the adopter's publication is the only one. A broker that has not fenced itself, with the
+  store failing alone, still publishes after about twice the survivors' adoption wait. Found with the new three-server
+  cluster harness (`natscluster_test.go`, `TestCluster...`, gated behind `NATSMQTT5_CLUSTER_TESTS`).
 - **Added:** `Options.EscapeNATSWildcards` (off by default). A topic may then contain `*`, `>`, a space, tab, line feed,
   carriage return, form feed or DEL: each is stored in the NATS subject as `/s`, `/g`, `/p`, `/t`, `/n`, `/r`, `/f`, `/d`,
   and a literal `*` level is no longer a NATS wildcard. Topics without those characters map to the same subject as
