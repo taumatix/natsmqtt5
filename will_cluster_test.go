@@ -16,14 +16,20 @@ import (
 // deployment on a three-server cluster would have it.
 func clusterWills(o *natsmqtt5.Options) {
 	fastWills(o)
-	o.SessionReplicas = 3
-	o.RetainedReplicas = 3
-	o.OfflineQueueReplicas = 3
+	clusterReplicas(o)
 	// Patient enough to ride out a Raft election: isolating a server that leads the Will
 	// bucket leaves the survivors unable to read it for a few seconds, and a broker that
 	// cannot read it for twice this interval closes its clients, as designed. The
 	// 150 ms of fastWills would fence the survivors too.
 	o.WillCheckInterval = 4 * time.Second
+}
+
+// clusterReplicas replicates every bucket and stream three ways and, with
+// NATSMQTT5_CLUSTER_LOG set, prints the broker's log.
+func clusterReplicas(o *natsmqtt5.Options) {
+	o.SessionReplicas = 3
+	o.RetainedReplicas = 3
+	o.OfflineQueueReplicas = 3
 	if os.Getenv("NATSMQTT5_CLUSTER_LOG") != "" { // the brokers' own log, for a failing run
 		o.Logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}

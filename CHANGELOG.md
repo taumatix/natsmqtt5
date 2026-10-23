@@ -11,6 +11,7 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** the retained tombstone purge treats the server's "sequence not found" (error 10043) as already purged; before, a tombstone another broker had deleted stayed in the local table and was retried on every sweep. Covered by a cluster test that also shows a broker cut off past the tombstone TTL converges on a clear it missed.
 - **Fixed:** a broker cut off from its cluster no longer announces a Will a surviving broker has already adopted. When the
   removal of a Will's record failed for a reason other than losing the race (the store unreachable, as it is from the
   minority side of a partition), the broker published the Will at once; it now retries the removal until the store answers

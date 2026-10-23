@@ -387,7 +387,7 @@ func (s *retainedStore) purgeTombstones(now time.Time) {
 	for _, d := range due {
 		// Another broker may have purged it first, which is as good.
 		if err := s.stream.DeleteMsg(ctx, d.t.seq); err != nil &&
-			!errors.Is(err, jetstream.ErrMsgNotFound) {
+			!msgGone(err) {
 			s.logger.Debug("purging a retained tombstone failed", "topic", d.name, "error", err)
 			continue
 		}
@@ -418,7 +418,7 @@ func (s *retainedStore) discard(expired []*retained) {
 		}
 		// Another broker may have deleted it first, which is as good.
 		if err := s.stream.DeleteMsg(ctx, r.seq); err != nil &&
-			!errors.Is(err, jetstream.ErrMsgNotFound) {
+			!msgGone(err) {
 			s.logger.Debug("deleting an expired retained message failed", "topic", r.topicName, "error", err)
 		}
 	}
@@ -434,4 +434,15 @@ func (s *retainedStore) close() {
 	if s.cancel != nil {
 		s.cancel()
 	}
+}
+
+// msgGone reports that a delete found nothing to delete. A clustered server answers a
+// delete of a sequence that is already gone with error 10043 ("sequence N not found"),
+// not the 10037 the client library maps to ErrMsgNotFound.
+func msgGone(err error) bool {
+	if errors.Is(err, jetstream.ErrMsgNotFound) {
+		return true
+	}
+	var api *jetstream.APIError
+	return errors.As(err, &api) && api.ErrorCode == 10043
 }
