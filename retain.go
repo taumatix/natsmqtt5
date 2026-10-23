@@ -355,6 +355,78 @@ func (s *retainedStore) sweep() {
 		s.discard(expired)
 	}
 	s.purgeTombstones(now)
+	s.reconcile()
+}
+
+// reconcile drops what this broker still holds although the stream no longer does. The
+// consumer resumes after the last message it saw, so a clear whose tombstone was purged
+// while the broker was cut off from NATS never reaches it; the stream holds one message
+// per topic, so a local view with more entries than the stream has messages must hold
+// some the stream has dropped. Counting is one request; only a mismatch pays for
+// looking each entry up.
+func (s *retainedStore) reconcile() {
+	ctx, cancel := context.WithTimeout(context.Background(), retainStoreTimeout)
+	defer cancel()
+
+	s.mu.RLock()
+	local := len(s.byTopic) + len(s.tombstones)
+	s.mu.RUnlock()
+	if local == 0 {
+		return
+	}
+	info, err := s.stream.Info(ctx)
+	if err != nil || uint64(local) <= info.State.Msgs {
+		return
+	}
+
+	s.mu.RLock()
+	entries := make([]*retained, 0, len(s.byTopic))
+	for _, r := range s.byTopic {
+		if r.seq != 0 {
+			entries = append(entries, r)
+		}
+	}
+	s.mu.RUnlock()
+	for _, r := range entries {
+		if _, err := s.stream.GetMsg(ctx, r.seq); !errors.Is(err, jetstream.ErrMsgNotFound) {
+			continue // present, or unknown: leave it
+		}
+		// Replaced by a newer message the consumer has yet to deliver: that one will
+		// arrive and take its place. Anything else is a topic the stream has cleared.
+		subject, err := s.codec.nameToSubject(r.topicName)
+		if err != nil {
+			continue
+		}
+		last, err := s.stream.GetLastMsgForSubject(ctx, retainedSubject(s.prefix, subject))
+		if err == nil && len(last.Data) > 0 {
+			continue
+		}
+		if err != nil && !errors.Is(err, jetstream.ErrMsgNotFound) {
+			continue
+		}
+		s.mu.Lock()
+		if s.byTopic[r.topicName] == r {
+			delete(s.byTopic, r.topicName)
+			s.logger.Debug("dropped a retained message the stream had cleared", "topic", r.topicName)
+		}
+		s.mu.Unlock()
+	}
+	s.mu.RLock()
+	tombs := make(map[string]tombstone, len(s.tombstones))
+	for name, t := range s.tombstones {
+		tombs[name] = t
+	}
+	s.mu.RUnlock()
+	for name, t := range tombs {
+		if _, err := s.stream.GetMsg(ctx, t.seq); !errors.Is(err, jetstream.ErrMsgNotFound) {
+			continue
+		}
+		s.mu.Lock()
+		if s.tombstones[name] == t {
+			delete(s.tombstones, name)
+		}
+		s.mu.Unlock()
+	}
 }
 
 // purgeTombstones deletes the markers of cleared topics older than the
@@ -387,7 +459,7 @@ func (s *retainedStore) purgeTombstones(now time.Time) {
 	for _, d := range due {
 		// Another broker may have purged it first, which is as good.
 		if err := s.stream.DeleteMsg(ctx, d.t.seq); err != nil &&
-			!errors.Is(err, jetstream.ErrMsgNotFound) {
+			!msgGone(err) {
 			s.logger.Debug("purging a retained tombstone failed", "topic", d.name, "error", err)
 			continue
 		}
@@ -418,7 +490,7 @@ func (s *retainedStore) discard(expired []*retained) {
 		}
 		// Another broker may have deleted it first, which is as good.
 		if err := s.stream.DeleteMsg(ctx, r.seq); err != nil &&
-			!errors.Is(err, jetstream.ErrMsgNotFound) {
+			!msgGone(err) {
 			s.logger.Debug("deleting an expired retained message failed", "topic", r.topicName, "error", err)
 		}
 	}
@@ -434,4 +506,15 @@ func (s *retainedStore) close() {
 	if s.cancel != nil {
 		s.cancel()
 	}
+}
+
+// msgGone reports that a delete found nothing to delete. A clustered server answers a
+// delete of a sequence that is already gone with error 10043 ("sequence N not found"),
+// not the 10037 the client library maps to ErrMsgNotFound.
+func msgGone(err error) bool {
+	if errors.Is(err, jetstream.ErrMsgNotFound) {
+		return true
+	}
+	var api *jetstream.APIError
+	return errors.As(err, &api) && api.ErrorCode == 10043
 }

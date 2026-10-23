@@ -273,16 +273,18 @@ session's expiry to pass (`spec_integration_test.go`), (2026-10-13: the two in `
 broker stores a retained message before it acknowledges, so the PUBACK already was the condition.) Same flake risk; each needs a condition to wait on rather than a drop log. `TestSmokeSessionMovesBetweenBrokers` keeps its 200 ms: it is the back-off of a retry loop against brokers in
 containers, whose logs the test cannot read.
 
-## Tombstone purge across a long NATS outage
+## Retained view: a stale entry that cancels an unseen one
 
-**Today:** the periodic sweep deletes a cleared topic's tombstone after `Options.RetainedTombstoneTTL` (24 h). A broker
-cut off from NATS for longer than that can miss the clear and keep the cleared message until it restarts. Only the
-sweep of the broker that wrote or replayed the tombstone purges it, so one that started after the clear never sees it.
+**Done:** a broker cut off from NATS past `RetainedTombstoneTTL` missed a clear whose tombstone was then purged and
+kept serving the cleared message (reproduced about once in two runs by
+`TestClusterARetainedClearMissedDuringAnOutageIsAppliedAfterTheTombstoneIsPurged`). The sweep now compares the local
+view's size with the stream's message count and, on a surplus, drops entries the stream no longer holds. The purge also
+treats the server's error 10043 ("sequence N not found") as already purged.
 
-**Shape:** a broker that reconnects to NATS rebuilds its retained view from the stream instead of trusting the
-consumer's resume, and a tombstone the local broker never saw is purged by the stream's own age limit
-(`MaxAge` is not usable: it would expire live retained messages). Needs a test that restarts NATS, which the 3-server
-harness entry above provides.
+**Left:** the check is a count, so one stale entry cancelled by one message the consumer has not delivered yet goes
+unnoticed until the consumer catches up; and a stale entry whose topic was since retained again by another broker is
+corrected only when the consumer delivers that message. A reconnect-triggered full rebuild would close both, at the
+price of a replay per reconnect; build it if a user reports a stale retained message.
 
 ## The weekly scans fail where no pass reads them
 
