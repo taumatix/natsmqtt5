@@ -11,6 +11,7 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Changed:** dependencies: nats.go v1.54.0 to v1.55.0, nats-server (tests) v2.15.0 to v2.15.1, and patch bumps of golang.org/x/{crypto,net,sys,text} and klauspost/compress. No API change.
 - **Fixed:** a broker cut off from NATS for longer than `RetainedTombstoneTTL` kept serving a retained message another broker had cleared, because the tombstone was purged before it could read it. The sweep now notices that its retained view holds more entries than the stream has messages and drops those the stream no longer holds. The tombstone purge also treats the server's "sequence not found" (error 10043) as already purged. Found with the three-server cluster harness.
 - **Fixed:** a broker cut off from its cluster no longer announces a Will a surviving broker has already adopted. When the
   removal of a Will's record failed for a reason other than losing the race (the store unreachable, as it is from the
