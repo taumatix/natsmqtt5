@@ -2,7 +2,6 @@ package natsmqtt5_test
 
 import (
 	"bytes"
-	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -27,8 +26,13 @@ type cutProxy struct {
 	refuse   atomic.Bool
 	stayDown atomic.Bool
 	cut      atomic.Int64
-	mu       sync.Mutex
-	conns    []net.Conn
+	// swallowAfterAck makes the armed cut stop forwarding client-to-NATS bytes instead of closing, so
+	// whatever the broker writes next is lost on a socket that still looks alive. sever closes it later.
+	swallowAfterAck atomic.Bool
+	swallow         atomic.Bool
+	swallowed       atomic.Int64
+	mu              sync.Mutex
+	conns           []net.Conn
 }
 
 func newCutProxy(t *testing.T, natsURL string) *cutProxy {
@@ -66,7 +70,23 @@ func newCutProxy(t *testing.T, natsURL string) *cutProxy {
 			p.mu.Lock()
 			p.conns = append(p.conns, in, out)
 			p.mu.Unlock()
-			go func() { _, _ = io.Copy(out, in); _ = out.Close() }()
+			go func() {
+				buf := make([]byte, 32*1024)
+				for {
+					n, err := in.Read(buf)
+					if n > 0 {
+						if p.swallow.Load() {
+							p.swallowed.Add(int64(n))
+						} else if _, werr := out.Write(buf[:n]); werr != nil {
+							break
+						}
+					}
+					if err != nil {
+						break
+					}
+				}
+				_ = out.Close()
+			}()
 			go func() {
 				buf := make([]byte, 32*1024)
 				for {
@@ -78,6 +98,10 @@ func newCutProxy(t *testing.T, natsURL string) *cutProxy {
 						if bytes.Contains(buf[:n], []byte(`"stream"`)) && bytes.Contains(buf[:n], []byte(`"seq"`)) &&
 							p.armed.CompareAndSwap(true, false) {
 							p.cut.Add(1)
+							if p.swallowAfterAck.Load() {
+								p.swallow.Store(true)
+								continue
+							}
 							p.refuse.Store(p.stayDown.Load())
 							_ = in.Close()
 							_ = out.Close()
@@ -96,6 +120,52 @@ func newCutProxy(t *testing.T, natsURL string) *cutProxy {
 }
 
 func (p *cutProxy) url() string { return "nats://" + p.ln.Addr().String() }
+
+// sever closes every connection the proxy holds and lets new ones through again.
+func (p *cutProxy) sever() {
+	p.swallow.Store(false)
+	p.mu.Lock()
+	for _, c := range p.conns {
+		_ = c.Close()
+	}
+	p.mu.Unlock()
+}
+
+// The connection to NATS accepts the live publish and loses it: the write succeeds on a socket whose far end
+// is already gone, so the NATS client has nothing buffered to send again, then reconnects and its flush is
+// answered. That must not be a PUBACK: the message never reached NATS and the client has to send it again.
+func TestDurablePublishIsRefusedWhenTheLivePublishWasLostWithTheConnection(t *testing.T) {
+	natsURL := startNATS(t)
+	proxy := newCutProxy(t, natsURL)
+	proxy.swallowAfterAck.Store(true)
+	broker, addr, _ := startBrokerHandle(t, proxy.url(), func(o *natsmqtt5.Options) { o.DurablePublish = true })
+	other := startBroker(t, natsURL)
+
+	natsmqtt5.SetPublishFlushGate(broker, func() {
+		deadline := time.Now().Add(10 * time.Second)
+		for proxy.swallowed.Load() == 0 && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		proxy.sever()
+		natsmqtt5.AwaitNATSReconnect(broker, 10*time.Second)
+	})
+	t.Cleanup(func() { natsmqtt5.SetPublishFlushGate(broker, nil) })
+
+	sub, _ := connectClient(t, other, connectOpts("dp-lost-sub"))
+	sub.subscribe(paho.SubscribeOptions{Topic: "dp/lost", QoS: 1})
+
+	pub := dialRaw(t, addr)
+	pub.connect(rawConnect("dp-lost-pub", 0))
+	proxy.armed.Store(true)
+	rawPublishQoS(pub, packet.QoS1, 1, "dp/lost", "gone")
+	ack, ok := pub.readWithin(20 * time.Second).(*packet.Puback)
+	require.True(t, ok)
+	require.EqualValues(t, 1, proxy.cut.Load(), "the proxy cut the connection once")
+	require.Positive(t, proxy.swallowed.Load(), "the live publish was written into the lost connection")
+	assert.Equal(t, packet.ImplementationSpecificError, ack.ReasonCode,
+		"an acknowledged publish whose live copy was lost would never reach the subscriber")
+	sub.expectNoMessage()
+}
 
 // The connection to NATS is cut after the queue stream stored the message and before the live publish was
 // flushed. The client library buffers the publish across the reconnect and the flush completes once it is

@@ -19,6 +19,30 @@ func SetResendGate(b *Broker, f func(id uint16)) {
 	b.resendGate.Store(&f)
 }
 
+// SetPublishFlushGate makes a durable publish call f between handing the live
+// publish to the NATS client and flushing it, which is where the connection
+// can be lost with the publish already written to it. nil removes it.
+func SetPublishFlushGate(b *Broker, f func()) {
+	if f == nil {
+		b.publishFlushGate.Store(nil)
+		return
+	}
+	b.publishFlushGate.Store(&f)
+}
+
+// AwaitNATSReconnect waits until the broker's NATS connection has reconnected
+// at least once and is connected again.
+func AwaitNATSReconnect(b *Broker, within time.Duration) bool {
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if b.nc.Stats().Reconnects >= 1 && b.nc.IsConnected() {
+			return true
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return false
+}
+
 // SetResumeGate makes a resume call f(filter) for each stored filter after the
 // Authorizer has passed it and before it is rebuilt, which is where a second
 // CONNECT can take the session over. nil removes it.
