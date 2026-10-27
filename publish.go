@@ -134,9 +134,18 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 			return c.rejectPublish(p, packet.ImplementationSpecificError, "the message could not be queued")
 		}
 	}
+	// A publish handed to a connected NATS client is written to the socket at
+	// once. If the connection drops before the server read it, the client has
+	// nothing buffered to send again, yet its flush is still answered after the
+	// reconnect. A publish made while the client is already reconnecting waits in
+	// its buffer and is sent first, so only the connected case needs the check.
+	connected, reconnects := c.broker.nc.IsConnected(), c.broker.nc.Stats().Reconnects
 	if err := c.broker.nc.PublishMsg(msg); err != nil {
 		c.logger.Warn("publishing to NATS failed", "subject", full, "error", err)
 		return c.rejectPublish(p, packet.ImplementationSpecificError, "the NATS server rejected the message")
+	}
+	if f := c.broker.publishFlushGate.Load(); f != nil {
+		(*f)()
 	}
 	if c.broker.opts.DurablePublish && p.QoS > packet.QoS0 {
 		// The queue copy is stored; now wait until the NATS server has
@@ -148,6 +157,10 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 		if err != nil {
 			c.logger.Warn("NATS did not confirm a durable publish", "subject", full, "error", err)
 			return c.rejectPublish(p, packet.ImplementationSpecificError, "the NATS server did not confirm the message")
+		}
+		if connected && c.broker.nc.Stats().Reconnects != reconnects {
+			c.logger.Warn("NATS reconnected while a durable publish was in flight", "subject", full)
+			return c.rejectPublish(p, packet.ImplementationSpecificError, "the NATS connection was lost before the message was confirmed")
 		}
 	}
 
