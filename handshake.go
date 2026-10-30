@@ -99,7 +99,7 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 	// The broker advertises no authentication method, so a client asking for
 	// enhanced authentication must be turned away with 0x8C rather than left
 	// waiting for an AUTH that will never come (MQTT-5.0 §4.12).
-	if props.AuthenticationMethod != "" {
+	if props.AuthenticationMethod != "" && c.broker.opts.Auther == nil {
 		c.refuse(packet.BadAuthenticationMethod,
 			"this broker does not support enhanced authentication")
 		return fmt.Errorf("unsupported authentication method %q", props.AuthenticationMethod)
@@ -139,7 +139,19 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 	}
 
 	identity, username := "", cp.Username
-	if a := c.broker.opts.Authenticator; a != nil {
+	var finalAuthData []byte
+	if props.AuthenticationMethod != "" {
+		step, err := c.enhancedAuth(ctx, cp, props)
+		if err != nil {
+			return err
+		}
+		identity, finalAuthData = step.Identity, step.Data
+		c.authIdentity = identity
+		if step.AssignClientID != "" {
+			clientID = step.AssignClientID
+			assigned = clientID
+		}
+	} else if a := c.broker.opts.Authenticator; a != nil {
 		res, err := a.Authenticate(ctx, &AuthRequest{
 			ClientID:   cp.ClientID,
 			Username:   cp.Username,
@@ -293,6 +305,11 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 		SessionPresent: resumed,
 		ReasonCode:     packet.Success,
 		Properties:     c.connackProperties(assigned, sess.expiry(), props),
+	}
+	if c.authMethod != "" {
+		// [MQTT-4.12.0-5]: fitConnack never drops these, so the method survives.
+		ack.Properties.AuthenticationMethod = c.authMethod
+		ack.Properties.AuthenticationData = finalAuthData
 	}
 	c.fitConnack(ack)
 	return c.write(ack)

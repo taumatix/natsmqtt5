@@ -563,9 +563,13 @@ one with fewer features:
   [MQTT-3.8.4-7] permits. Exactly-once delivery to *one* member of a group needs
   per-member ownership of a half-finished PUBREC/PUBREL exchange, and
   JetStream's unit of ownership is a consumer, not a queue-group member.
-- **No enhanced authentication (`AUTH` packets).** A CONNECT carrying an
-  Authentication Method is refused with `0x8C Bad authentication method`, which
-  is the conforming answer from a server that does not support it.
+- **Enhanced authentication is opt-in.** With `Options.Auther` set, a CONNECT naming an
+  Authentication Method runs the AUTH-packet exchange of MQTT-5.0 §4.12 (challenge, response,
+  CONNACK) and a client may re-authenticate on the open connection (AUTH 0x19); a failed
+  re-authentication ends in a DISCONNECT. `hmacAuther` in `example_test.go` is a complete
+  reference method. Without an `Auther` a CONNECT carrying a method is refused with
+  `0x8C Bad authentication method`, as before. The `Authenticator` is not asked for such a
+  CONNECT; the `Authorizer` sees the identity the exchange returns.
 - **The broker sends topic aliases only if asked to.** It accepts them from clients always; `Options.OutboundTopicAliases` makes it send them to a client that offered a Topic Alias Maximum (off by default).
 - **`Message Expiry Interval` counts whole seconds.** A message is deleted once it
   has waited its whole interval, and one still live goes out with the interval less

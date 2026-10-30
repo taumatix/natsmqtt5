@@ -282,6 +282,11 @@ type Options struct {
 	// Authorizer, when non-nil, decides whether a session may publish to or
 	// subscribe to a topic. When nil everything is permitted.
 	Authorizer Authorizer
+	// Auther, when non-nil, offers enhanced authentication: the AUTH-packet
+	// exchange of MQTT-5.0 §4.12 for a CONNECT that names an Authentication
+	// Method, and re-authentication on an established connection. When nil such a
+	// CONNECT is refused with 0x8C (Bad authentication method).
+	Auther Auther
 
 	// ReceiveMaximum is advertised in CONNACK and bounds the client's in-flight
 	// QoS 1 and QoS 2 publications. A client that has more QoS 2 PUBLISH packets

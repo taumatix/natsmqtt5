@@ -29,14 +29,14 @@ from the table between the markers and checked against it
 
 | Class | Meaning | Count |
 |---|---|---|
-| TESTED | a test drives the broker (or the codec) and cites the statement | 203 |
-| NOT-APPLICABLE | behind a feature the broker does not offer, or cannot be violated by a request | 10 |
+| TESTED | a test drives the broker (or the codec) and cites the statement | 209 |
+| NOT-APPLICABLE | behind a feature the broker does not offer, or cannot be violated by a request | 4 |
 | CLIENT-ONLY | binds only a Client, and no test of the broker cites it | 39 |
 
 | Verdict | Count |
 |---|---|
-| met | 203 |
-| n/a | 49 |
+| met | 209 |
+| n/a | 43 |
 | VIOLATED | 0 |
 | UNSURE | 0 |
 
@@ -58,9 +58,6 @@ These are features the specification lets a Server leave out. A statement behind
 NOT-APPLICABLE, and the row names the feature's [ROADMAP.md](ROADMAP.md) entry and a test that
 shows the broker refusing or not advertising it the way the specification requires.
 
-- **Enhanced authentication (AUTH packets).** A CONNECT with an Authentication Method is refused
-  with 0x8C Bad authentication method, which the specification gives for a method the Server does
-  not support (§3.1.2.10, §4.12). The AUTH statements cannot be reached.
 - **QoS 2 on shared subscriptions.** A QoS 2 request on a `$share/` filter is granted QoS 1,
   reported in the SUBACK, which [MQTT-3.8.4-7] permits.
 - **Server-to-client Topic Aliases** are off unless `Options.OutboundTopicAliases` is set; the
