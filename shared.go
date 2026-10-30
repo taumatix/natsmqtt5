@@ -204,9 +204,38 @@ func (c *conn) pull(sub *subscription) {
 		case <-c.done:
 			return
 		}
-		m, err := c.fetchOne(sub)
-		if m == nil {
+		// Any further room is taken without waiting, so a backlog comes in one
+		// round trip per quota's worth rather than one per message, and the
+		// member still never holds more than its client could be sent.
+		slots := 1
+		for slots < sharedMaxBatch {
+			select {
+			case c.quota <- struct{}{}:
+				slots++
+				continue
+			default:
+			}
+			break
+		}
+		var msgs []jetstream.Msg
+		var err error
+		if slots > 1 {
+			msgs, err = c.fetchNoWait(sub, slots)
+		}
+		if len(msgs) == 0 {
+			// Nothing waiting (or a single slot): wait for one message.
+			for ; slots > 1; slots-- {
+				c.releaseQuota()
+			}
+			var m jetstream.Msg
+			if m, err = c.fetchOne(sub); m != nil {
+				msgs = []jetstream.Msg{m}
+			}
+		}
+		for ; slots > len(msgs); slots-- {
 			c.releaseQuota()
+		}
+		if len(msgs) == 0 {
 			if err != nil {
 				c.healBacklog(sub)
 				select {
@@ -217,44 +246,62 @@ func (c *conn) pull(sub *subscription) {
 			}
 			continue
 		}
-
-		header := m.Headers()
-		var seq uint64
-		if meta, err := m.Metadata(); err == nil {
-			header = setArrived(header, meta.Timestamp)
-			seq = meta.Sequence.Stream
-		}
-		it := &sharedItem{
-			seq:  seq,
-			sub:  sub,
-			msg:  &nats.Msg{Subject: c.broker.queue.Load().liveSubject(m.Subject()), Header: header, Data: m.Data()},
-			ack:  m.Reply(),
-			done: make(chan bool, 1),
-		}
-		var taken bool
-		select {
-		case c.shared <- it:
-			// The delivery goroutine answers every item it takes, even on a
-			// connection that is closing: once a PUBLISH is in flight the
-			// session owns the message, and handing it to another member too
-			// would deliver it twice.
-			taken = <-it.done
-		case <-c.done:
-			c.releaseQuota()
-		}
-		if taken {
-			// A QoS 1 message in flight stays unacknowledged until the PUBACK, so
-			// that it can go to another member if this session ends first
-			// (MQTT-5.0 §4.8.2). Anything else is settled: QoS 0 has no
-			// acknowledgement, and a message no member wants is done with.
-			if !it.held {
-				_ = m.Ack()
+		for i, m := range msgs {
+			if !c.pullOne(sub, m) {
+				// The connection ended with messages still in hand: others can have them.
+				for _, rest := range msgs[i+1:] {
+					_ = rest.Nak()
+					c.releaseQuota()
+				}
+				return
 			}
-		} else {
-			// Not this member's after all: another can have it now.
-			_ = m.Nak()
 		}
 	}
+}
+
+// pullOne hands one pulled message, whose quota slot the caller holds, to the
+// delivery goroutine and settles it. It reports false when the connection ended
+// before the delivery goroutine took it.
+func (c *conn) pullOne(sub *subscription, m jetstream.Msg) bool {
+	header := m.Headers()
+	var seq uint64
+	if meta, err := m.Metadata(); err == nil {
+		header = setArrived(header, meta.Timestamp)
+		seq = meta.Sequence.Stream
+	}
+	it := &sharedItem{
+		seq:  seq,
+		sub:  sub,
+		msg:  &nats.Msg{Subject: c.broker.queue.Load().liveSubject(m.Subject()), Header: header, Data: m.Data()},
+		ack:  m.Reply(),
+		done: make(chan bool, 1),
+	}
+	var taken bool
+	select {
+	case c.shared <- it:
+		// The delivery goroutine answers every item it takes, even on a
+		// connection that is closing: once a PUBLISH is in flight the
+		// session owns the message, and handing it to another member too
+		// would deliver it twice.
+		taken = <-it.done
+	case <-c.done:
+		c.releaseQuota()
+		_ = m.Nak()
+		return false
+	}
+	if taken {
+		// A QoS 1 message in flight stays unacknowledged until the PUBACK, so
+		// that it can go to another member if this session ends first
+		// (MQTT-5.0 §4.8.2). Anything else is settled: QoS 0 has no
+		// acknowledgement, and a message no member wants is done with.
+		if !it.held {
+			_ = m.Ack()
+		}
+	} else {
+		// Not this member's after all: another can have it now.
+		_ = m.Nak()
+	}
+	return true
 }
 
 // healBacklog makes the member's backlog again after a pull failed. The usual
@@ -293,6 +340,37 @@ func (c *conn) fetchOne(sub *subscription) (jetstream.Msg, error) {
 		got = m
 	}
 	if err := batch.Error(); got == nil && err != nil &&
+		!errors.Is(err, nats.ErrTimeout) && !errors.Is(err, jetstream.ErrNoMessages) {
+		c.logger.Debug("pulling from a shared subscription's backlog failed", "filter", sub.filter, "error", err)
+		return nil, err
+	}
+	return got, nil
+}
+
+// sharedMaxBatch bounds how many messages one pull asks for. The free room
+// under the client's Receive Maximum bounds it further.
+const sharedMaxBatch = 64
+
+// sharedFetchHook, when set by a test, sees the size asked of each batch pull
+// and the number of messages it returned.
+var sharedFetchHook func(asked, got int)
+
+// fetchNoWait takes up to n messages that are waiting now, without waiting for
+// more. It returns none when the backlog is empty.
+func (c *conn) fetchNoWait(sub *subscription, n int) ([]jetstream.Msg, error) {
+	batch, err := sub.backlog.FetchNoWait(n)
+	if err != nil {
+		c.logger.Debug("pulling from a shared subscription's backlog failed", "filter", sub.filter, "error", err)
+		return nil, err
+	}
+	var got []jetstream.Msg
+	for m := range batch.Messages() {
+		got = append(got, m)
+	}
+	if hook := sharedFetchHook; hook != nil {
+		hook(n, len(got))
+	}
+	if err := batch.Error(); len(got) == 0 && err != nil &&
 		!errors.Is(err, nats.ErrTimeout) && !errors.Is(err, jetstream.ErrNoMessages) {
 		c.logger.Debug("pulling from a shared subscription's backlog failed", "filter", sub.filter, "error", err)
 		return nil, err

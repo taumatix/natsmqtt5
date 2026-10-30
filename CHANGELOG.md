@@ -19,6 +19,21 @@ honestly be reconstructed now.
 - **Changed:** with `DurableWills`, the Will index each broker keeps holds only a reference per record (owner, revision, whether it has ended and when it is due), not the decoded Will, and a record is read from the bucket when a broker is to adopt it. A broker's memory no longer grows with the size of its clients' Wills: 174 B per record whatever the payload, against about 330 B plus the Will (a 64 KiB Will cost 64 KiB in every broker). No API change.
 - **Added:** with `DurableWills`, a broker deletes, unpublished, a Will record that ended and was due more than 24 hours ago. The `_wills` bucket has no time-to-live (an open connection's record can be years old), so a record a fault left behind was indexed by every broker for ever; age is counted from the due time, so no Will Delay Interval can outlast it. A Will whose broker died is adopted within seconds and never reaches that age unless every broker was down for a day. Not configurable.
 - **Documented:** what `DurablePublish` and the Will bucket each guarantee, that a published Will is not held for the flush and why, and that the Will bucket needs the NATS permissions of the session bucket (README, "Durable Will Messages").
+- **Changed:** a shared-subscription message handed back by `Options.SharedHoldLimit` is no longer left in the slow
+  member's in-flight set: a reconnect of that session does not resend it (the group already has it), and its Packet
+  Identifier is owed as a withdrawn one, so a late PUBACK is ignored and returns the send-quota slot. With the limit
+  unset nothing changes.
+- **Changed:** with persistent sessions, a surviving broker removes the membership entry of a shared-subscription member
+  whose session record is gone (a session killed with its broker whose record the store's sweep has reclaimed), and ends
+  the group if that was its last member, instead of waiting for the entry to lapse. Entries are written with the
+  consumer name and Client Identifier after the instance; older entries are still read and only lapse.
+- **Changed:** a connected shared-subscription member pulls its backlog in batches sized to the free room under its
+  client's Receive Maximum (at most 64), not one message per round trip to JetStream; it never holds more than its client
+  could be sent, and gives back the messages it holds when the connection ends.
+- **Tests:** a broker killed with SIGKILL while a shared member holds a QoS 1 message is pinned: restored before
+  `AckWait` the restored session holds the message again and the group never has it; restored after, the client sees it
+  twice (at-least-once), not thrice (`NATSMQTT5_SLOW_TESTS=1`).
+
 - **Fixed:** with `DurablePublish`, a PUBACK or PUBREC could acknowledge a message whose live copy was lost. If the NATS connection dropped just after the broker handed the live publish to a connected NATS client, the bytes went into the dead socket, the client had nothing buffered to resend, and its flush was answered after the reconnect. The broker now refuses with 0x83 when the connection reconnected between the live publish and the confirmation, so the client sends the message again (the queue stream may then hold a duplicate, as for any 0x83). A publish made while NATS is already reconnecting is unchanged: it waits in the client's buffer. Seen as a flake of `TestDurablePublishSurvivesNATSBeingCutAfterTheQueueCopyIsStored` under `-race` in CI on 2026-10-23.
 - **Changed:** dependencies: nats.go v1.54.0 to v1.55.0, nats-server (tests) v2.15.0 to v2.15.1, and patch bumps of golang.org/x/{crypto,net,sys,text} and klauspost/compress. No API change.
 - **Fixed:** a broker cut off from NATS for longer than `RetainedTombstoneTTL` kept serving a retained message another broker had cleared, because the tombstone was purged before it could read it. The sweep now notices that its retained view holds more entries than the stream has messages and drops those the stream no longer holds. The tombstone purge also treats the server's "sequence not found" (error 10043) as already purged. Found with the three-server cluster harness.

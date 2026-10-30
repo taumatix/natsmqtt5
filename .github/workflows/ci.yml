@@ -97,6 +97,11 @@ jobs:
           NATSMQTT5_SLOW_TESTS: '1'
         run: .github/scripts/smoke.sh TestAReplayToASlowReaderIsNotCutOffAfterThirtySeconds
 
+      - name: A killed broker's held shared message
+        env:
+          NATSMQTT5_SLOW_TESTS: '1'
+        run: .github/scripts/smoke.sh TestAKilledBrokersHeldSharedMessageIsHeldAgainByTheRestoredSession TestAKilledBrokersHeldSharedMessageRestoredLateIsSeenTwiceNotThrice
+
   cluster:
     # The tests that need a three-server NATS cluster (an isolated server, a restart, a long
     # outage) run the servers in containers; natscluster_test.go drives docker here and Apple's

@@ -7,6 +7,13 @@ import (
 
 // Seams for the external tests. They exist only in the test binary.
 
+// SetSharedFetchHook makes every batch pull of a shared subscription's backlog
+// call f(asked, got) until the test ends. Set it before the broker starts.
+func SetSharedFetchHook(t interface{ Cleanup(func()) }, f func(asked, got int)) {
+	sharedFetchHook = f
+	t.Cleanup(func() { sharedFetchHook = nil })
+}
+
 // SetResendGate makes a connection's resend call f(id) after it has claimed
 // the in-flight entry for id and before it writes the packet, which is the
 // window in which an acknowledgement can complete an exchange that is about to
@@ -168,6 +175,20 @@ func SetShareMemberSlack(t interface {
 	shareMemberSlack = d
 	t.Cleanup(func() { shareMemberSlack = was })
 }
+
+// SetShareMemberSweepGrace changes how old a membership entry must be before the
+// sweep may remove it for want of a session record, for the rest of the test.
+func SetShareMemberSweepGrace(t interface {
+	Cleanup(func())
+}, d time.Duration) {
+	was := shareMemberSweepGrace
+	shareMemberSweepGrace = d
+	t.Cleanup(func() { shareMemberSweepGrace = was })
+}
+
+// SweepShareMembers runs one pass of the membership sweep, which otherwise runs
+// with the session sweep.
+func SweepShareMembers(ctx context.Context, b *Broker) error { return b.sweepShareMembers(ctx) }
 
 // SweepStore runs one pass of the session store's sweep, which otherwise runs
 // every sessionSweepInterval.
