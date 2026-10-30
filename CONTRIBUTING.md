@@ -54,6 +54,16 @@ In the pull request description, give a table of statement id to the integration
 When a change touches a row of `conformance/mqtt5-statements.tsv`, update the row and the summary in
 [CONFORMANCE.md](CONFORMANCE.md).
 
+## Scheduled runs nobody is watching
+
+The weekly `Vulnerability scan` (`.github/workflows/vulncheck.yml`, Mondays 05:41 UTC) is the only thing that
+turns red when a vulnerability is published against code that has not changed. The workflows hold
+`contents: read` only, so one cannot open an issue on failure, and nothing in this repository pushes the
+result to anyone. Whoever runs the maintenance pass reads it: list
+`/repos/taumatix/natsmqtt5/actions/runs?event=schedule` (the Actions API; the App has no `checks:read`) and
+treat a latest `Vulnerability scan` run that is not `success` as a finding, not as noise. A failure that names
+a standard-library symbol clears when the runner's Go does; one that names a dependency is a bump.
+
 ## Other expectations
 
 - Anything bound to an external reference (the specification, `nats.go`, `nats-server`) is pinned in
