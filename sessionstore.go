@@ -654,12 +654,18 @@ func (s *sessionStore) putBlob(ctx context.Context, owner string, raw []byte) (s
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(raw)
-	key := owner + "." + hex.EncodeToString(sum[:])
+	key := blobKeyFor(owner, raw)
 	if _, err := kv.Put(ctx, key, raw); err != nil {
 		return "", err
 	}
 	return key, nil
+}
+
+// blobKeyFor is the key putBlob stores raw under: its owner and its digest, so
+// the same bytes always have the same key.
+func blobKeyFor(owner string, raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return owner + "." + hex.EncodeToString(sum[:])
 }
 
 // deleteBlob removes a payload once nothing needs it. A key without an owner was
@@ -790,6 +796,13 @@ const spillKeyLen = 32 + 1 + 64
 // A record that fits is left alone and its Spill cleared. What is still too
 // large afterwards (received QoS 2 identifiers) is for fitRecord.
 func (s *sessionStore) spillRecord(rec *sessionRecord, limit int) (lost int, err error) {
+	return s.spillRecordReusing(rec, limit, nil)
+}
+
+// spillRecordReusing is spillRecord for a session whose last record named the
+// chunks in known, which are still stored: a chunk with the same content has the
+// same key (putBlob), so it is named again without being written.
+func (s *sessionStore) spillRecordReusing(rec *sessionRecord, limit int, known map[string]struct{}) (lost int, err error) {
 	rec.Spill = nil
 	if n := trimDelivered(rec, limit/2); n > 0 {
 		s.logger.Warn("delivered ids dropped to keep the session record within a value; a replay may repeat a QoS 2 message",
@@ -846,12 +859,15 @@ func (s *sessionStore) spillRecord(rec *sessionRecord, limit int) (lost int, err
 	kept := keep
 	for _, span := range spans {
 		raw, _ := json.Marshal(all[span[0]:span[1]])
-		ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
-		key, perr := s.putBlob(ctx, blobOwner(rec.ClientID), raw)
-		cancel()
-		if perr != nil {
-			err = perr
-			break
+		key := blobKeyFor(blobOwner(rec.ClientID), raw)
+		if _, have := known[key]; !have {
+			ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
+			_, perr := s.putBlob(ctx, blobOwner(rec.ClientID), raw)
+			cancel()
+			if perr != nil {
+				err = perr
+				break
+			}
 		}
 		rec.Spill = append(rec.Spill, key)
 		kept += span[1] - span[0]
@@ -1077,10 +1093,13 @@ const blobGrace = 10 * time.Minute
 type blobClaims struct {
 	owners map[string]bool
 	keys   map[string]bool
+	// exact is the owners whose record is complete: a payload under one that the
+	// record does not name is an orphan.
+	exact map[string]bool
 }
 
 func newBlobClaims() *blobClaims {
-	return &blobClaims{owners: map[string]bool{}, keys: map[string]bool{}}
+	return &blobClaims{owners: map[string]bool{}, keys: map[string]bool{}, exact: map[string]bool{}}
 }
 
 func (c *blobClaims) add(rec *sessionRecord) {
@@ -1090,13 +1109,22 @@ func (c *blobClaims) add(rec *sessionRecord) {
 			c.keys[e.Blob] = true
 		}
 	}
+	for _, k := range rec.Spill {
+		c.keys[k] = true
+	}
+	if !rec.Attached {
+		// A released record names everything its session needs; one a broker is
+		// serving may be a step behind the payloads that broker holds.
+		c.exact[blobOwner(rec.ClientID)] = true
+	}
 }
 
 // sweepBlobs deletes payloads no session record can still need: those under an
 // owner that has no record (a session discarded before the payload was written,
 // or whose cleanup was lost), and keys from before keys named an owner that no
-// record names. Payloads of a live owner stay to the bucket's TTL, since the
-// record cannot say which of them it has stopped using.
+// record names. Payloads of an owner whose session is attached stay to the
+// bucket's TTL, since its record may be a step behind what the broker holds; for
+// an owner whose record was released, only the keys that record names stay.
 func (s *sessionStore) sweepBlobs(ctx context.Context, kept *blobClaims) error {
 	kv, err := s.blobBucket(ctx, false)
 	if err != nil {
@@ -1118,7 +1146,7 @@ func (s *sessionStore) sweepBlobs(ctx context.Context, kept *blobClaims) error {
 			return ctx.Err()
 		}
 		owner, _, owned := strings.Cut(key, ".")
-		if owned && kept.owners[owner] || !owned && kept.keys[key] {
+		if owned && kept.owners[owner] && !(kept.exact[owner] && !kept.keys[key]) || !owned && kept.keys[key] {
 			continue
 		}
 		entry, err := kv.Get(ctx, key)

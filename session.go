@@ -248,6 +248,8 @@ type session struct {
 	// were read back from another broker's record, which makes them stale.
 	spillKeys []string
 	spillAt   time.Time
+	// spillReused is whether the last spillInto named chunks it did not write.
+	spillReused bool
 	// sendSeq numbers sends so that unacknowledged returns the in-flight set in
 	// the order it left.
 	sendSeq uint64
@@ -1657,7 +1659,20 @@ func (s *session) blobsStale(store *sessionStore) bool {
 // (sessionStore.spillRecord), and returns how many in-flight entries were left
 // out.
 func (s *session) spillInto(store *sessionStore, rec *sessionRecord) (lost int, err error) {
-	return store.spillRecord(rec, store.valueLimit())
+	// The chunks the last record named are written again only when their
+	// payloads are about to expire; until then a chunk that did not change is
+	// named, not written.
+	s.mu.Lock()
+	var known map[string]struct{}
+	if len(s.spillKeys) > 0 && !store.blobStale(s.spillAt) {
+		known = make(map[string]struct{}, len(s.spillKeys))
+		for _, k := range s.spillKeys {
+			known[k] = struct{}{}
+		}
+	}
+	s.spillReused = known != nil
+	s.mu.Unlock()
+	return store.spillRecordReusing(rec, store.valueLimit(), known)
 }
 
 // commitSpill notes that rec, now written, names its spilled values as of
@@ -1665,7 +1680,12 @@ func (s *session) spillInto(store *sessionStore, rec *sessionRecord) (lost int, 
 func (s *session) commitSpill(store *sessionStore, rec *sessionRecord, wroteAt time.Time) {
 	s.mu.Lock()
 	old := s.spillKeys
-	s.spillKeys, s.spillAt = rec.Spill, wroteAt
+	// Chunks carried over from the last record were written then, not now, so
+	// the oldest write time stays until a pass rewrites them all.
+	if !s.spillReused || len(old) == 0 {
+		s.spillAt = wroteAt
+	}
+	s.spillKeys = rec.Spill
 	s.mu.Unlock()
 	named := make(map[string]struct{}, len(rec.Spill))
 	for _, k := range rec.Spill {

@@ -267,19 +267,17 @@ non-persistent ceiling is 0.09 ms). Killed-broker tests cover the burst (`killed
 about 2 ms on a loaded host. That needs a write that is not waited for, which [MQTT-4.3.3-6] does not
 allow, or a faster store. Not measured with `sync_always` on the NATS server.
 
-## Spilled in-flight entries are rewritten whole at every changed checkpoint
+## Spilled in-flight entries: a message acknowledged at the front rewrites every chunk
 
-**Today:** when the in-flight set outgrows a record value, the entries that do not fit are written to the
-payload bucket in chunks (`spillRecord`, 2026-10-09; measured at 225 bytes an entry in the record, not the
-150 this file said). A checkpoint after any change writes every chunk again and deletes the superseded ones,
-so a session holding thousands of unacknowledged messages under a small `max_payload` writes megabytes per
-interval. Past the number of chunk names a record holds (about 35 at 4 KiB) the newest entries are still left
-out and logged, as before. Orphaned chunks of a live owner wait on the TTL (`sweepBlobs` judges owners, not
-keys).
-
-**Shape:** write only the chunks whose content changed (the keys are content-addressed, so this is a
-comparison with the last record's `Spill`); let the sweep delete a live owner's keys that its record no
-longer names. Low priority: it needs a very small `max_payload` or tens of thousands of messages unacknowledged.
+**Done (2026-10-30):** a checkpoint names a chunk whose content did not change without writing it
+(`spillRecordReusing`; a message appended writes the last chunk only, 1 of 10 in the test), until
+its payloads near the bucket's TTL, when all are rewritten. The sweep deletes the unnamed payloads
+(and counts the chunks as named) of an owner whose record was released.
+**Left:** chunks are cut by size from the oldest entry, so an acknowledgement at the front shifts every
+boundary and every chunk changes; cutting at boundaries that do not move (a fixed number of identifiers
+per chunk) would fix that. The sweep still leaves an attached owner's unnamed payloads to the TTL: its
+record can be a step behind what the broker holds (a claimed record names nothing until the first
+checkpoint), so judging them needs the record's age and the broker's own liveness.
 
 ## Other tests still sleep for a checkpoint or a publish
 
