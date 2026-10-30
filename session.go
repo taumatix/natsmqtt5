@@ -588,21 +588,31 @@ func (s *session) handBackHeld() {
 // heldSubjects lists the acknowledgement subjects of the backlog messages the
 // session is holding, for holdLoop. With a limit, the messages held for longer
 // are not listed but returned in expired, and are no longer held: the caller
-// hands them back to the group, and the entry stays in flight so that the
-// client's late acknowledgement still completes it.
+// hands them back to the group. The message is no longer this session's, so its
+// entry leaves the in-flight set and a later reconnect does not resend it to a
+// client the group has since given it to. The Packet Identifier stays owed, as
+// a withdrawn one does: a late PUBACK is ignored and returns the send-quota slot
+// (the client counts the message against its Receive Maximum until then,
+// MQTT-5.0 §4.9), and the identifier is not reused before it.
 func (s *session) heldSubjects(now time.Time, limit time.Duration) (held, expired []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, o := range s.inflight {
+	for id, o := range s.inflight {
 		if o.ackSubject == "" {
 			continue
 		}
 		if o.heldSince.IsZero() {
 			o.heldSince = now
 		}
-		if limit > 0 && now.Sub(o.heldSince) >= limit {
+		if limit > 0 && now.Sub(o.heldSince) >= limit && !o.awaitingPubcomp {
 			expired = append(expired, o.ackSubject)
-			o.ackSubject = ""
+			delete(s.inflight, id)
+			s.retireBlobLocked(o)
+			w := withdrawal{madeAt: s.attaches, owed: owedAck(o)}
+			if o.quotaHeld {
+				w.quotaHolder = s.conn
+			}
+			s.withdrawn[id] = w
 			continue
 		}
 		held = append(held, o.ackSubject)

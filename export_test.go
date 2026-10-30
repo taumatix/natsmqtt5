@@ -169,6 +169,20 @@ func SetShareMemberSlack(t interface {
 	t.Cleanup(func() { shareMemberSlack = was })
 }
 
+// SetShareMemberSweepGrace changes how old a membership entry must be before the
+// sweep may remove it for want of a session record, for the rest of the test.
+func SetShareMemberSweepGrace(t interface {
+	Cleanup(func())
+}, d time.Duration) {
+	was := shareMemberSweepGrace
+	shareMemberSweepGrace = d
+	t.Cleanup(func() { shareMemberSweepGrace = was })
+}
+
+// SweepShareMembers runs one pass of the membership sweep, which otherwise runs
+// with the session sweep.
+func SweepShareMembers(ctx context.Context, b *Broker) error { return b.sweepShareMembers(ctx) }
+
 // SweepStore runs one pass of the session store's sweep, which otherwise runs
 // every sessionSweepInterval.
 func SweepStore(ctx context.Context, b *Broker) error { return b.store.sweep(ctx) }

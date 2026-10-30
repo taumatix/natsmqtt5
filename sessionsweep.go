@@ -1,6 +1,9 @@
 package natsmqtt5
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // DefaultSessionSweepInterval is how often a broker looks for detached sessions
 // whose Session Expiry Interval has passed; see Options.SessionSweepInterval.
@@ -24,8 +27,19 @@ func (b *Broker) sweepSessionsLoop(interval time.Duration) {
 			return
 		case <-t.C:
 			b.sweepSessions()
+			b.sweepMembersBounded(interval)
 			b.retain.sweep()
 		}
+	}
+}
+
+// sweepMembersBounded runs the shared-subscription membership sweep for at most
+// half an interval, so that one that overruns never stacks behind the ticker.
+func (b *Broker) sweepMembersBounded(interval time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), interval/2)
+	defer cancel()
+	if err := b.sweepShareMembers(ctx); err != nil && ctx.Err() == nil {
+		b.logger.Debug("the shared-subscription membership sweep did not finish", "error", err)
 	}
 }
 

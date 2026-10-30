@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -36,7 +37,10 @@ import (
 // unsubscribing (its broker was killed) leaves its entry behind: every broker
 // rewrites the entries of the sessions it holds, and the bucket drops an entry
 // nobody has rewritten for longer than any session can last, which is also how
-// long the consumer survives with no member pulling (InactiveThreshold). And a
+// long the consumer survives with no member pulling (InactiveThreshold). With
+// persistent sessions a surviving broker does not wait that long: once the
+// session store has reclaimed the session's record, the entry goes too
+// (sweepShareMembers). And a
 // member joining just as the last one leaves can find the consumer gone: the
 // member's pull loop creates it again (conn.pull).
 
@@ -44,6 +48,32 @@ import (
 // entry that is not being rewritten. A variable so that a test need not wait it
 // out.
 var shareMemberSlack = time.Minute
+
+// shareMemberSweepGrace is how long an entry must have gone unrewritten before
+// the sweep (sweepShareMembers) may remove it because its session has no record.
+// A live member's entry is rewritten every refreshEvery, and a session's record
+// is written by its first CONNECT, before any SUBSCRIBE writes an entry, so an
+// entry this old with no record belongs to nobody. A variable so that a test
+// need not wait it out.
+var shareMemberSweepGrace = time.Minute
+
+// memberValue is what an entry holds: the instance that wrote it (the one thing
+// leave compares), then the consumer's name and the Client Identifier, which the
+// key only holds hashed and which the sweep needs. None contains NUL (a
+// Client Identifier is an MQTT UTF-8 string, which may not). An entry written
+// before this held the instance alone, and is never swept, only left or lapsed.
+func memberValue(instance, group, clientID string) []byte {
+	return []byte(instance + "\x00" + group + "\x00" + clientID)
+}
+
+func parseMemberValue(v []byte) (instance, group, clientID string) {
+	parts := strings.SplitN(string(v), "\x00", 3)
+	instance = parts[0]
+	if len(parts) == 3 {
+		group, clientID = parts[1], parts[2]
+	}
+	return instance, group, clientID
+}
 
 // shareMembers is the key-value bucket of member sessions, one entry per group
 // and Client Identifier.
@@ -89,7 +119,7 @@ func groupPrefix(group string) string {
 // join records that clientID's session, whose instance is the given one, is
 // subscribed to group.
 func (m *shareMembers) join(ctx context.Context, group, clientID, instance string) error {
-	_, err := m.kv.Put(ctx, memberKey(group, clientID), []byte(instance))
+	_, err := m.kv.Put(ctx, memberKey(group, clientID), memberValue(instance, group, clientID))
 	return err
 }
 
@@ -101,7 +131,7 @@ func (m *shareMembers) leave(ctx context.Context, group, clientID, instance stri
 	entry, err := m.kv.Get(ctx, key)
 	switch {
 	case err == nil:
-		if string(entry.Value()) != instance {
+		if written, _, _ := parseMemberValue(entry.Value()); written != instance {
 			return false, nil
 		}
 		if err := m.kv.Delete(ctx, key, jetstream.LastRevision(entry.Revision())); err != nil {
@@ -116,15 +146,80 @@ func (m *shareMembers) leave(ctx context.Context, group, clientID, instance stri
 	default:
 		return false, err
 	}
+	has, err := m.hasMember(ctx, group)
+	return !has, err
+}
+
+// hasMember reports whether any session's entry is in the group.
+func (m *shareMembers) hasMember(ctx context.Context, group string) (bool, error) {
 	lister, err := m.kv.ListKeysFiltered(ctx, groupPrefix(group))
 	if err != nil {
 		return false, err
 	}
 	for range lister.Keys() {
 		_ = lister.Stop()
-		return false, nil
+		return true, nil
 	}
-	return true, nil
+	return false, nil
+}
+
+// sweepShareMembers removes the entries of sessions that have no record in the
+// session store (persistent sessions), which the entry's lapse would take
+// MaxSessionExpiry plus a minute to do: a session killed with its broker whose
+// record the store's sweep has since reclaimed, or one whose record was removed
+// by a discard that never reached the group. A group left with no member has its
+// backlog deleted, as when the last session leaves.
+//
+// An entry is only removed when it has gone unrewritten for shareMemberSweepGrace
+// (a live member is rewritten every refreshEvery) and the record is known to be
+// absent; a failed read keeps it. The deletion is conditional on the revision
+// read, so a session that subscribes again in between keeps its entry. Without
+// persistent sessions there are no records and nothing is swept.
+func (b *Broker) sweepShareMembers(ctx context.Context) error {
+	q := b.queue.Load()
+	if q == nil || q.members == nil || b.store == nil {
+		return nil
+	}
+	m := q.members
+	keys, err := m.kv.Keys(ctx)
+	if errors.Is(err, jetstream.ErrNoKeysFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	touched := map[string]bool{}
+	for _, key := range keys {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		entry, err := m.kv.Get(ctx, key)
+		if err != nil {
+			continue
+		}
+		_, group, clientID := parseMemberValue(entry.Value())
+		if group == "" || time.Since(entry.Created()) < shareMemberSweepGrace {
+			continue
+		}
+		if _, err := b.store.kv.Get(ctx, sessionKey(clientID)); !errors.Is(err, jetstream.ErrKeyNotFound) {
+			continue // there is a record, or it could not be read
+		}
+		if err := m.kv.Delete(ctx, key, jetstream.LastRevision(entry.Revision())); err != nil {
+			continue
+		}
+		b.logger.Debug("swept the membership of a session with no record", "client_id", clientID)
+		touched[group] = true
+	}
+	for group := range touched {
+		has, err := m.hasMember(ctx, group)
+		if err != nil || has {
+			continue
+		}
+		if err := q.stream.DeleteConsumer(ctx, group); err != nil && !errors.Is(err, jetstream.ErrConsumerNotFound) {
+			b.logger.Warn("could not delete the backlog of an ended shared subscription", "group", group, "error", err)
+		}
+	}
+	return nil
 }
 
 // groupName is the name of the consumer behind a shared subscription, which

@@ -132,35 +132,30 @@ it needs a variant that cuts before).
 
 ## A held shared message: the killed-broker window and the packet identifier
 
-A shared member's QoS 1 message now stays unacknowledged in JetStream until its PUBACK
-(`held.go`), kept alive by an `InProgress` every third of `sharedAckWait`, and goes back to the
-group when the session ends or, with `Options.SharedHoldLimit` set, when it has been held past
-that limit. Two edges remain:
+`SharedHoldLimit` is off by default and applies to every group alike; a per-group value (which
+would be an `Options` map or a callback) is a possible follow-up, with no known need yet. A
+message it hands back is withdrawn from the slow member (no resend on reconnect, a late PUBACK
+ignored), but the member's Receive Maximum slot stays taken until that PUBACK or a reconnect:
+the client still counts the message against its own Receive Maximum, so freeing the slot earlier
+would let the broker exceed it [MQTT-3.3.4-9].
 
-- A broker that is killed stops sending the keepalive, so after `sharedAckWait` (30 s) the
-  message returns to the group even though the session record may be restored elsewhere with the
-  message in flight. The restored session then settles an acknowledgement JetStream no longer
-  expects, and the client can see the message twice (the restored copy with Dup=1, a fresh one
-  from the other member). That is at-least-once, which QoS 1 allows, but nothing pins it.
-- A message handed back by `SharedHoldLimit` keeps its packet identifier in flight on the slow
-  member, so it occupies a Receive Maximum slot until that member PUBACKs or disconnects, and it
-  can be delivered to the group twice. Withdrawing the identifier (so the slot is freed and a late
-  PUBACK is ignored) would close that; the limit is also off by default and applies to every
-  group alike, so a per-group value is a possible follow-up.
+The killed-broker window is pinned (`shared_killed_test.go`, `NATSMQTT5_SLOW_TESTS=1`): the
+message is seen twice at worst, never lost.
 
 ## A shared subscription's membership: the edges left
 
-A shared subscription now ends when its last session does (`sharedmembers.go`: a key-value
-entry per member session, the consumer deleted by whoever leaves last). What remains:
+A shared subscription ends when its last session does (`sharedmembers.go`). What remains:
 
-- A session that is dropped because its persistent record could not be restored (a failed
-  restore) does not leave the group, and a session killed with its broker leaves only when its
-  entry lapses, `MaxSessionExpiry` plus a minute. The consumer's inactivity threshold is the
-  backstop for both, so a group can keep collecting for that long. Making a surviving broker
-  sweep entries whose session record is gone would close it.
+- A killed broker's session still holds its group until the session store reclaims the record
+  (`MaxSessionExpiry` after the broker's last write, and only if the broker does not answer), at
+  which point a surviving broker sweeps the entry. A session whose record exists but is no longer
+  subscribed to the group (a failed restore that kept the record) is not swept; the entry's own
+  lapse is the backstop for it.
 - The race of a last leaver and a joiner is healed by the joiner's puller creating the consumer
-  again, on its first failed pull (up to `sharedPullWait` later). A message published in that window
-  is not in the new consumer, which starts at the next message.
+  again on its first failed pull, which comes at once; a message published between the
+  consumer's deletion and that re-creation is not in the new consumer, which starts at the next
+  message. Closing it would need a deletion that a joining member can veto; JetStream has no
+  conditional consumer delete.
 
 ## Restricting `$` topics by default
 
