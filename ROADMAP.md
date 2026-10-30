@@ -333,6 +333,15 @@ price of a replay per reconnect; build it if a user reports a stale retained mes
 **Done:** CI runs `staticcheck` (pinned, 2026-10-11) beside `go vet`; its four findings were fixed. A broader
 `golangci-lint` set (errcheck, gosec) was not added and would need its own findings worked through.
 
+**2026-10-30:** `CONTRIBUTING.md` ("Scheduled runs nobody is watching") now says what the maintenance pass reads: the
+latest `schedule` run of `Vulnerability scan` through `/actions/runs?event=schedule`. A workflow cannot open an issue
+on failure with the `contents: read` it has, and a token with `issues: write` is a permission change, so there is no
+in-repo alert. The `golangci-lint` set was tried as `errcheck` and `gosec` run bare: 24 unchecked errors (mostly
+`Close` and `fmt.Fprint*`, which golangci-lint's defaults exclude, but also `b.nc.Drain()` in `broker.go` and
+`c.nc.Close()` in `conn.go`) and 21 `gosec` findings (15 G115 integer conversions, 5 G104, 1 G118). It would need a
+`.golangci.yml` that sets those exclusions and a pass over `broker.go`, `conn.go` and the G115 conversions; it was not
+added because that touches files other work is changing.
+
 **Today:** the weekly `Vulnerability scan` run is the only thing that fails when a vulnerability is published against
 unchanged code, and nothing routes a failed scheduled run to a pass; the maintenance pass should read it, and
 `check-repo-health.py` counts only the `CI` workflow (the same gap as `claude-agent-sdk-go`'s `Upstream surface`). A push
