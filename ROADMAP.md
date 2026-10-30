@@ -373,24 +373,20 @@ messages that today are at worst dropped for an absent client. Doing it safely n
 decision to be made against the bucket with a revision check and a re-subscribe on the
 reconnect before the CONNACK, which is a design of its own.
 
-## `finish` and `awayFloor` wait for the delivery goroutine with no bound
+## A frozen NATS server still costs a connection one deadline per payload it stores
 
-**Today:** `finish` (`conn.go`) and `awayFloor` (`catchup.go`) wait on `<-c.loopDone` with no timeout, so a
-delivery goroutine that never returns blocks the connection's cleanup, and with it a resume on the same client
-(`awaitPredecessor` waits for the reader and `awaitPredecessorLoop` bounds its own wait at `predecessorWait`,
-10 s, so the resume path itself does not hang on the goroutine). Checked 2026-10-23: the premise this entry used to
-have, a user callback holding the goroutine, is false. The delivery goroutine (`deliverLoop`, `subscribe.go`) calls
-neither the `Authenticator` nor the `Authorizer`; those run on the reader and in `Reauthorize`. What can hold it is
-a socket write (`c.close()` interrupts that), the receive-quota wait, and a NATS or JetStream call made without a
-deadline. A bounded wait in `finish` is not a fix by itself: `awayFloor` and `detach` read `pending` and the
-in-flight bookkeeping after `loopDone` closes precisely because the goroutine owns them and has stopped, so reading
-them after a timeout would race.
+**Done (2026-10-30):** audited every JetStream and NATS call the delivery goroutine and the connection's end make.
+Each has a deadline (`sessionOpTimeout`, `natsFlushTimeout`) except the stream reads (`streamContext`,
+`catchup.go`), which go at the client's pace on purpose and are cancelled by `c.done`, which `finish` closes before it
+waits. What was unbounded was the total: `stashBlobs`, `reapBlobs` and `commitSpill` took `sessionOpTimeout` per
+payload, so a connection holding many in-flight payloads waited that many times 5 s on a NATS server that answered
+nothing. They now share one `sessionOpTimeout`; past it the rest fail at once and are counted as unrecorded, as a failed
+store always was. `TestClusterAConnectionWithManyUnacknowledgedMessagesStillEndsWhenItsNATSServerFreezes` freezes the
+broker's server with eight 200 KiB unacknowledged messages and shows the broker ends within 40 s.
 
-**Shape:** audit each JetStream and NATS call on the delivery path (the QoS 2 record writes, the stream reads, the
-shared pull) for a context with a deadline, and give any that lacks one the same bound the Will bucket has; then a
-test that blocks one such call (a frozen NATS server from the cluster harness, `Freeze`) and shows the connection
-still finishes. Only if a call cannot be bounded, hand the goroutine's state over through a mutex so a bounded wait
-is safe.
+**Left:** that test passes on the old code too (about 9 s either way): with the default queue the in-flight entries
+name queue copies and nothing is stashed, so it covers the end of a connection on a frozen server, not the aggregate
+bound. A test that stashes many payloads needs a broker without the queue and entries larger than the record allows.
 
 ## A default queue that failed at startup: what a session away in the gap is owed
 

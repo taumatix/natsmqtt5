@@ -1691,13 +1691,13 @@ func (s *session) commitSpill(store *sessionStore, rec *sessionRecord, wroteAt t
 	for _, k := range rec.Spill {
 		named[k] = struct{}{}
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout) // for all of them
+	defer cancel()
 	for _, k := range old {
 		if _, still := named[k]; still {
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
-		_ = store.deleteBlob(ctx, k)
-		cancel()
+		_ = store.deleteBlob(ctx, k) // the bucket's TTL removes what this cannot
 	}
 }
 
@@ -1729,14 +1729,13 @@ func (s *session) reapBlobs(store *sessionStore) {
 	}
 	s.mu.Unlock()
 	var failed []string
+	ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout) // for all of them
+	defer cancel()
 	for _, key := range dead {
 		if _, still := held[key]; still {
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
-		err := store.deleteBlob(ctx, key)
-		cancel()
-		if err != nil {
+		if err := store.deleteBlob(ctx, key); err != nil {
 			failed = append(failed, key)
 		}
 	}
@@ -1766,11 +1765,14 @@ func (s *session) stashBlobs(store *sessionStore, rec *sessionRecord, pending []
 		return 0, nil
 	}
 	drop := make(map[int]struct{})
+	// One bound for all of them: a store that answers nothing would otherwise cost
+	// sessionOpTimeout for each payload, and finish and awayFloor wait for this.
+	// Past it the rest fail at once and are counted as unrecorded.
+	ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
+	defer cancel()
 	for _, p := range pending {
-		ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
 		wroteAt := time.Now()
 		key, perr := store.putBlob(ctx, blobOwner(s.clientID), p.raw)
-		cancel()
 		if perr != nil {
 			err = perr
 			drop[p.index] = struct{}{}
