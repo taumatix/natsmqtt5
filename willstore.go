@@ -33,6 +33,12 @@ const (
 	// willDeadRetryGap is the pause between the two liveness checks that must
 	// both fail before a broker is taken for dead.
 	willDeadRetryGap = 250 * time.Millisecond
+
+	// defaultWillSweepAfter is how long after its due time a record that has ended is
+	// kept before any broker deletes it unpublished. The delay is already inside the due
+	// time, so no Will Delay Interval can outlast it; what it catches is a record nobody
+	// is going to publish. See willStore.sweepStale.
+	defaultWillSweepAfter = 24 * time.Hour
 )
 
 // willRecord is a Will Message held in JetStream so that it outlives the broker
@@ -73,6 +79,37 @@ type willRecord struct {
 	// is then not the connection's broker, so a CONNECT arriving at that owner
 	// still has to settle it.
 	Adopted bool
+}
+
+// willRef is what the index keeps of a record: who holds it, the revision it was seen
+// at, and whether and when it is due. Everything else, the Will's payload above all,
+// stays in the bucket and is read when a record is to be adopted, so the index costs
+// the same for a 64 KiB Will as for a 7-byte one.
+type willRef struct {
+	key   string
+	owner string
+	rev   uint64
+	ended bool
+	dueAt time.Time
+}
+
+// willHeader is the part of a record the index decodes; json skips the rest.
+type willHeader struct {
+	Version int
+	Owner   string
+	Ended   bool
+	DueAt   time.Time
+}
+
+func refOf(key string, rev uint64, b []byte) (willRef, error) {
+	var h willHeader
+	if err := json.Unmarshal(b, &h); err != nil {
+		return willRef{}, err
+	}
+	if h.Version != willRecordVersion {
+		return willRef{}, fmt.Errorf("will record version %d not understood", h.Version)
+	}
+	return willRef{key: key, owner: h.Owner, rev: rev, ended: h.Ended, dueAt: h.DueAt}, nil
 }
 
 // willLease is one connection's claim on its Will record. It carries the
@@ -133,8 +170,11 @@ type willStore struct {
 	// watcher has delivered the initial contents and whenever it is down, and a
 	// check then reads the bucket directly.
 	indexMu sync.Mutex
-	index   map[string]*willLease
+	index   map[string]willRef
 	synced  bool
+
+	// sweepAfter is defaultWillSweepAfter, in nanoseconds so that a test can shorten it.
+	sweepAfter atomic.Int64
 
 	// publish sends an adopted Will. The broker supplies it.
 	publish func(clientID string, w *packet.Will)
@@ -175,8 +215,9 @@ func newWillStore(ctx context.Context, js jetstream.JetStream, nc *nats.Conn, op
 		fence:         fence,
 		closing:       closing,
 		silentSince:   map[string]time.Time{},
-		index:         map[string]*willLease{},
+		index:         map[string]willRef{},
 	}
+	w.sweepAfter.Store(int64(defaultWillSweepAfter))
 	w.fenceAfter = 2 * every
 	w.selfEvery = every / 2
 	w.selfTimeout = min(ownerPingTimeout, every)
@@ -395,7 +436,7 @@ func (w *willStore) watchLoop(ctx context.Context) {
 		w.watchOnce(ctx)
 		w.indexMu.Lock()
 		w.synced = false
-		w.index = map[string]*willLease{}
+		w.index = map[string]willRef{}
 		w.indexMu.Unlock()
 		select {
 		case <-ctx.Done():
@@ -427,8 +468,8 @@ func (w *willStore) watchOnce(ctx context.Context) {
 			case e.Operation() != jetstream.KeyValuePut:
 				delete(w.index, e.Key())
 			default:
-				if rec, err := decodeWillRecord(e.Value()); err == nil {
-					w.index[e.Key()] = &willLease{key: e.Key(), rec: *rec, rev: e.Revision()}
+				if ref, err := refOf(e.Key(), e.Revision(), e.Value()); err == nil {
+					w.index[e.Key()] = ref
 				} else {
 					delete(w.index, e.Key())
 				}
@@ -438,22 +479,54 @@ func (w *willStore) watchOnce(ctx context.Context) {
 	}
 }
 
-// indexed returns a copy of the foreign records the watcher knows, or false when
-// it is not in sync.
-func (w *willStore) indexed() ([]*willLease, bool) {
+// indexed returns the foreign records the watcher knows, or false when it is not in sync.
+func (w *willStore) indexed() ([]willRef, bool) {
 	w.indexMu.Lock()
 	defer w.indexMu.Unlock()
 	if !w.synced {
 		return nil, false
 	}
-	out := make([]*willLease, 0, len(w.index))
-	for _, l := range w.index {
-		if l.rec.Owner != w.owner {
-			c := *l
-			out = append(out, &c)
+	out := make([]willRef, 0, len(w.index))
+	for _, r := range w.index {
+		if r.owner != w.owner {
+			out = append(out, r)
 		}
 	}
 	return out, true
+}
+
+// sweepStale deletes, unpublished, the records of Wills that ended and were due more than
+// sweepAfter ago, whoever holds them. The bucket has no time-to-live: a record of an open
+// connection can be years old and must stay, so the age that matters is how long a Will has
+// been overdue, which is independent of its Will Delay Interval. A record that long overdue
+// has outlived every path that publishes it (the broker that held it fired it or died, and a
+// survivor adopts a dead broker's records within seconds), so what is left is one a fault
+// leaked, and each is a record every broker indexes for ever. The delete is a
+// compare-and-swap on the revision seen, so a record changed meanwhile is left alone.
+func (w *willStore) sweepStale(ctx context.Context) {
+	after := time.Duration(w.sweepAfter.Load())
+	var stale []willRef
+	w.indexMu.Lock()
+	if w.synced {
+		for _, r := range w.index {
+			if r.ended && time.Since(r.dueAt) > after {
+				stale = append(stale, r)
+			}
+		}
+	}
+	w.indexMu.Unlock()
+	for _, r := range stale {
+		dctx, cancel := context.WithTimeout(ctx, willOpTimeout)
+		err := w.kv.Delete(dctx, r.key, jetstream.LastRevision(r.rev))
+		cancel()
+		switch {
+		case err == nil:
+			w.logger.Warn("deleted a Will Message record that was overdue and never published",
+				"key", r.key, "due_at", r.dueAt, "owner", r.owner)
+		case !isRevisionConflict(err):
+			w.logger.Warn("could not delete an overdue Will Message record", "key", r.key, "error", err)
+		}
+	}
 }
 
 func (w *willStore) read(ctx context.Context, key string) (*willLease, bool) {
@@ -478,6 +551,7 @@ func (w *willStore) checkLoop(ctx context.Context) {
 			return
 		case <-t.C:
 			w.adoptOrphans(ctx)
+			w.sweepStale(ctx)
 		}
 	}
 }
@@ -553,24 +627,24 @@ func (w *willStore) adoptOrphans(ctx context.Context) {
 		}
 	}()
 	for _, l := range leases {
-		up, known := alive[l.rec.Owner]
+		up, known := alive[l.owner]
 		if !known {
 			// One request, not two: silence has to last waitOut across checks
 			// before anything is adopted, which is the confirmation.
-			up = brokerAnswers(listCtx, w.nc, w.subjectPrefix, l.rec.Owner)
-			alive[l.rec.Owner] = up
+			up = brokerAnswers(listCtx, w.nc, w.subjectPrefix, l.owner)
+			alive[l.owner] = up
 		}
-		seen[l.rec.Owner] = true
+		seen[l.owner] = true
 		if up {
-			delete(w.silentSince, l.rec.Owner)
+			delete(w.silentSince, l.owner)
 			continue
 		}
 		// Silent is not dead: an owner cut off from NATS still holds its clients
 		// until it fences itself, which takes up to waitOut.
-		first, ok := w.silentSince[l.rec.Owner]
+		first, ok := w.silentSince[l.owner]
 		if !ok {
 			first = time.Now()
-			w.silentSince[l.rec.Owner] = first
+			w.silentSince[l.owner] = first
 		}
 		if time.Since(first) >= w.waitOut {
 			w.adopt(l)
@@ -580,21 +654,30 @@ func (w *willStore) adoptOrphans(ctx context.Context) {
 
 // listForeign reads the bucket record by record: the path taken until the
 // watcher is in sync.
-func (w *willStore) listForeign(ctx context.Context) ([]*willLease, error) {
+func (w *willStore) listForeign(ctx context.Context) ([]willRef, error) {
 	keys, err := w.kv.ListKeys(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var out []*willLease
+	var out []willRef
 	for key := range keys.Keys() {
 		if l, ok := w.read(ctx, key); ok && l.rec.Owner != w.owner {
-			out = append(out, l)
+			out = append(out, willRef{key: key, owner: l.rec.Owner, rev: l.rev, ended: l.rec.Ended, dueAt: l.rec.DueAt})
 		}
 	}
 	return out, nil
 }
 
-func (w *willStore) adopt(l *willLease) {
+// adopt claims the record ref points at. The record is read here, not held in the index,
+// and is taken only if it is still the owner's: a record another broker adopted, or its own
+// broker settled, since the index saw it is not ours.
+func (w *willStore) adopt(ref willRef) {
+	rctx, rcancel := context.WithTimeout(context.Background(), willOpTimeout)
+	l, ok := w.read(rctx, ref.key)
+	rcancel()
+	if !ok || l.rec.Owner != ref.owner {
+		return
+	}
 	now := time.Now()
 	next := l.rec
 	next.Owner, next.Adopted = w.owner, true

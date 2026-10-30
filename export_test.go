@@ -219,3 +219,11 @@ func SetAfterConnackWrite(t interface {
 	afterConnackWrite.Store(&fn)
 	t.Cleanup(func() { afterConnackWrite.Store(nil) })
 }
+
+// SetWillSweepAfter shortens how long past its due time an ended Will record is kept before a
+// broker deletes it unpublished. It is a no-op on a broker without Durable Wills.
+func SetWillSweepAfter(b *Broker, d time.Duration) {
+	if b.wills != nil {
+		b.wills.sweepAfter.Store(int64(d))
+	}
+}

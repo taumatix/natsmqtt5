@@ -360,7 +360,10 @@ it from the queue; a connected subscriber gets it once, as without the option.
 
 What it is not: live delivery stays core NATS, at most once per hop, so a connected subscriber whose
 own NATS path fails at the wrong moment can still miss it ([ROADMAP.md](ROADMAP.md)). A retry after
-a refusal can leave a second queue copy. Wills and QoS 0 are not covered.
+a refusal can leave a second queue copy. QoS 0 is not covered. Nor are Wills: a Will goes through
+the queue's keep like any other message but is not flushed, because there is no client to refuse to
+and nothing a refusal could ask it to retry; the record of a durable Will is already removed by the
+broker that publishes it ([ROADMAP.md](ROADMAP.md)).
 
 ## How MQTT maps onto NATS
 
@@ -507,11 +510,20 @@ so a reconnect never overwrites its predecessor's record.
   broker looks; the delay is counted from when a survivor notices, up to that
   long after the connection was lost.
 
-The bucket has no time-to-live: a record is removed only by a broker that
-publishes, cancels or drops it, so one left behind (see ROADMAP.md) stays
-until a broker adopts it. It is off by default because the Will's payload sits in clear text in that
-bucket, which therefore needs the access control of the session bucket, and
-because it needs JetStream. It works with or without `PersistentSessions`.
+The bucket has no time-to-live, because the record of a connection that stays open can
+be years old: a record is removed by the broker that publishes, cancels or drops it, or
+adopted by a survivor if that broker dies. A record that ended and has been overdue for more than
+24 hours (counted from its due time, so no Will Delay Interval can outlast it) is deleted by any
+broker without being published, since what is left is one a fault leaked.
+Each broker's index holds a small fixed reference per record, not the Will, so many large Wills
+cost the bucket's storage and not every broker's memory.
+
+It is off by default because the Will's payload sits in clear text in that
+bucket, and because it needs JetStream. **Requirement:** the `Authorizer` governs MQTT actions and
+cannot see the bucket, so whoever can read the key-value bucket `<StreamPrefix>_wills` (its
+`$KV.<StreamPrefix>_wills.>` subjects and `$JS.API` calls on it) can read every client's Will, and
+whoever can write it can have a Will published that no client set. Give the bucket the NATS
+permissions of the session bucket: the brokers' own NATS user and no other. It works with or without `PersistentSessions`.
 A broker cut off from NATS but still serving clients looks dead to the others,
 so it fences itself: if it cannot reach NATS (its connection, its own liveness
 subject and the Will bucket) for twice `WillCheckInterval`, it closes its client
