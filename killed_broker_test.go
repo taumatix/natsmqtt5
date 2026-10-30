@@ -176,9 +176,17 @@ func TestAKilledBrokersClientIsNotSentWhatItAlreadyGotAgain(t *testing.T) {
 		receiveQoS2(t, victim, topic)
 	}
 
-	// Several checkpoint intervals: the connection has written a position after
-	// the last exchange finished.
-	time.Sleep(700 * time.Millisecond)
+	// The record lists both messages as delivered and nothing in flight: the
+	// connection has written a position after the last exchange finished.
+	require.Eventually(t, func() bool {
+		rec, err := readStoredSession(natsURL, "killed-caught-up")
+		if err != nil {
+			return false
+		}
+		delivered, _ := rec["Delivered"].([]any)
+		inflight, _ := rec["Inflight"].([]any)
+		return len(delivered) == 2 && len(inflight) == 0
+	}, 10*time.Second, 20*time.Millisecond, "the broker never checkpointed both finished exchanges")
 	rec := storedSession(t, natsURL, "killed-caught-up")
 	require.NotEmpty(t, rec["AwayAt"], "the broker did not checkpoint the session")
 	require.Equal(t, true, rec["Attached"], "the record is still the live connection's")

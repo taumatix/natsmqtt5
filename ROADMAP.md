@@ -292,9 +292,9 @@ longer names. Low priority: it needs a very small `max_payload` or tens of thous
 disconnect, after it released the session (2026-10-11: `restore_nocopy_test.go`, `spec_integration_test.go`,
 `restored_rewind_test.go`). What remains are sleeps that wait for something else. The checkpoint-with-a-message-in-flight sleeps are gone
 (2026-10-11: `awaitCheckpointedInflight` polls the stored record for the packet id, with its PUBREL out for QoS 2, in
-`killed_broker_test.go`, `killed_inflight_test.go`, `restore_nocopy_test.go`). Left: the 700 ms in
-`killed_broker_test.go` for a checkpoint of the position after the last exchange (the record has no field that says
-"this exchange is included", so it needs a checkpoint counter or a field), the 1 s in `restore_nocopy_test.go` and
+`killed_broker_test.go`, `killed_inflight_test.go`, `restore_nocopy_test.go`). (2026-10-30: the 700 ms in
+`killed_broker_test.go` is gone; the test waits for the record to list both messages as delivered with nothing in flight.)
+Left: the 1 s in `restore_nocopy_test.go` and
 `oversize_inflight_test.go` that ages a message past the checkpoint skew (a clock condition, not an event), 1500 ms for a
 session's expiry to pass (`spec_integration_test.go`), (2026-10-13: the two in `oversize_inflight_test.go` that followed a dropped connection now use `waitDetached`; the "a session that is only away keeps its payload" check is a negative one, so it proves the payload survived the release, not an unbounded wait. Also 2026-10-13: the 100 ms in
 `restored_rewind_test.go` and the four 200 ms after a retained QoS 1 publish in `oversize_inflight_test.go` are gone; the
