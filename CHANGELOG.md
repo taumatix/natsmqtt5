@@ -26,6 +26,9 @@ honestly be reconstructed now.
   whose session record is gone (a session killed with its broker whose record the store's sweep has reclaimed), and ends
   the group if that was its last member, instead of waiting for the entry to lapse. Entries are written with the
   consumer name and Client Identifier after the instance; older entries are still read and only lapse.
+- **Changed:** a connected shared-subscription member pulls its backlog in batches sized to the free room under its
+  client's Receive Maximum (at most 64), not one message per round trip to JetStream; it never holds more than its client
+  could be sent, and gives back the messages it holds when the connection ends.
 - **Tests:** a broker killed with SIGKILL while a shared member holds a QoS 1 message is pinned: restored before
   `AckWait` the restored session holds the message again and the group never has it; restored after, the client sees it
   twice (at-least-once), not thrice (`NATSMQTT5_SLOW_TESTS=1`).

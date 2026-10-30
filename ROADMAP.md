@@ -341,6 +341,14 @@ messages do, and NATS still picks members whose client is away, whose share is
 dropped. Leaving the queue group while the session has no connection would stop
 that, as long as the last member leaving does not leave the group with nobody.
 
+Evaluated and not built: the queue group is a property of a NATS subscription on one broker,
+while "nobody left" is a fact about every broker's members, which only the membership bucket
+knows and which changes between the check and the unsubscribe. A broker that leaves on the
+strength of a stale read, or a member that returns while the group is empty, loses live QoS 0
+messages that today are at worst dropped for an absent client. Doing it safely needs the
+decision to be made against the bucket with a revision check and a re-subscribe on the
+reconnect before the CONNACK, which is a design of its own.
+
 ## `finish` and `awayFloor` wait for the delivery goroutine with no bound
 
 **Today:** `finish` (`conn.go`) and `awayFloor` (`catchup.go`) wait on `<-c.loopDone` with no timeout, so a
@@ -368,12 +376,6 @@ went away and came back while the queue was off still gets Session Present 1 wit
 reply could say 0 (and drop the session) while the queue is known to be off. That changes what a resuming client is
 told, so it wants a decision, not a guess. Also untested: shared-subscription hold-back and membership refresh after a
 late queue (they start with it, `queueretry.go`, but only the replay is driven by a test).
-
-## A shared-subscription member pulls one message per round trip
-
-A connected member pulls one message, waits for room under its client's Receive Maximum, then
-pulls the next, so a member's rate is bounded by the round trip to JetStream. Pulling a batch the
-size of the free quota would lift that without a member holding more than it can send.
 
 ## Without the queue, a client that falls behind still loses QoS 1 and 2
 

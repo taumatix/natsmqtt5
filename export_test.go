@@ -7,6 +7,13 @@ import (
 
 // Seams for the external tests. They exist only in the test binary.
 
+// SetSharedFetchHook makes every batch pull of a shared subscription's backlog
+// call f(asked, got) until the test ends. Set it before the broker starts.
+func SetSharedFetchHook(t interface{ Cleanup(func()) }, f func(asked, got int)) {
+	sharedFetchHook = f
+	t.Cleanup(func() { sharedFetchHook = nil })
+}
+
 // SetResendGate makes a connection's resend call f(id) after it has claimed
 // the in-flight entry for id and before it writes the packet, which is the
 // window in which an acknowledgement can complete an exchange that is about to
