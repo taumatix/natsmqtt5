@@ -183,9 +183,9 @@ MQTT-3.14.4-1	3.14.4 DISCONNECT Actions	CS	TESTED	met		TestNothingFollowsAServer
 MQTT-3.14.4-2	3.14.4 DISCONNECT Actions	CS	TESTED	met		TestConformance_MQTT_3_14_2_ServerDisconnectsUseDisconnectCodesAndNoSessionExpiry
 MQTT-3.14.4-3	3.14.4 DISCONNECT Actions	S	TESTED	met		TestConformance_MQTT_3_14_4_3_NormalDisconnectDiscardsTheWill TestAnOversizeDisconnectLosesItsReasonStringAndIsStillSent TestNothingFollowsAServerDisconnectOnTheWire
 MQTT-3.15.1-1	3.15.1 AUTH Fixed Header	CS	TESTED	met		TestConformance_MQTT_3_15_1_1_AuthWithReservedBitsClosesTheConnection
-MQTT-3.15.2-1	3.15.2.1 Authenticate Reason Code	CS	NOT-APPLICABLE	n/a	Enhanced authentication (AUTH packets)	enhanced authentication is refused (0x8C); the broker never sends an AUTH packet
-MQTT-3.15.2-2	3.15.2.2.4 Reason String	CS	NOT-APPLICABLE	n/a	Enhanced authentication (AUTH packets)	enhanced authentication is refused; the broker never sends an AUTH packet
-MQTT-3.15.2-3	3.15.2.2.5 User Property	CS	NOT-APPLICABLE	n/a	Enhanced authentication (AUTH packets)	enhanced authentication is refused; the broker never sends an AUTH packet
+MQTT-3.15.2-1	3.15.2.1 Authenticate Reason Code	CS	TESTED	met		TestEnhancedAuth_MQTT_4_12_0_2_and_5_ExchangeEndsInAConnackNamingTheMethod
+MQTT-3.15.2-2	3.15.2.2.4 Reason String	CS	TESTED	met		TestEnhancedAuth_MQTT_4_12_0_2_and_5_ExchangeEndsInAConnackNamingTheMethod
+MQTT-3.15.2-3	3.15.2.2.5 User Property	CS	TESTED	met		TestEnhancedAuth_MQTT_4_12_0_2_and_5_ExchangeEndsInAConnackNamingTheMethod
 MQTT-4.1.0-1	4.1.1 Storing Session State	CS	TESTED	met		TestConformance_MQTT_4_1_0_1_SessionStateSurvivesWhileConnected TestConformance_MQTT_4_2_1_TCPCarriesAnOrderedLosslessStream
 MQTT-4.1.0-2	4.1.1 Storing Session State	S	TESTED	met		TestConformance_MQTT_4_1_0_2_AnExpiredSharedMemberStopsReceivingItsShare TestConformance_MQTT_4_1_0_2_SessionStateIsDiscardedWhenTheExpiryIntervalPasses TestAnExpiredSharedMemberComesBackWithoutASession
 MQTT-4.2.0-1	§4.2.0 (label appears only in Appendix B)	CS	TESTED	met		TestConformance_MQTT_4_1_0_1_SessionStateSurvivesWhileConnected TestConformance_MQTT_4_2_1_TCPCarriesAnOrderedLosslessStream
@@ -236,15 +236,15 @@ MQTT-4.8.2-6	4.8.2 Shared Subscriptions	S	TESTED	met		TestAnAcknowledgedSharedMe
 MQTT-4.9.0-1	4.9 Flow Control	CS	TESTED	met		TestConformance_MQTT_4_9_0_1_InitialSendQuotaIsNonZeroAndWithinReceiveMaximum
 MQTT-4.9.0-2	4.9 Flow Control	CS	TESTED	met		TestResendsRespectASmallerReceiveMaximum
 MQTT-4.9.0-3	4.9 Flow Control	CS	TESTED	met		TestConformance_MQTT_4_9_0_3_PacketsAreStillProcessedWhileTheQuotaIsZero
-MQTT-4.12.0-1	4.12 Enhanced authentication	S	TESTED	met		TestConformance_MQTT_4_12_0_1_AnUnsupportedAuthenticationMethodIsRefusedAndClosed
-MQTT-4.12.0-2	4.12 Enhanced authentication	S	NOT-APPLICABLE	n/a	Enhanced authentication (AUTH packets)	enhanced authentication is not offered; the broker never sends AUTH 0x18
+MQTT-4.12.0-1	4.12 Enhanced authentication	S	TESTED	met		TestConformance_MQTT_4_12_0_1_AnUnsupportedAuthenticationMethodIsRefusedAndClosed TestEnhancedAuth_MQTT_4_12_0_1_UnsupportedMethodStillRefusedWithAnAuther
+MQTT-4.12.0-2	4.12 Enhanced authentication	S	TESTED	met		TestEnhancedAuth_MQTT_4_12_0_2_and_5_ExchangeEndsInAConnackNamingTheMethod
 MQTT-4.12.0-3	4.12 Enhanced authentication	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-4.12.0-4	4.12 Enhanced authentication	S	TESTED	met		TestConformance_MQTT_4_12_0_1_AnUnsupportedAuthenticationMethodIsRefusedAndClosed
-MQTT-4.12.0-5	4.12 Enhanced authentication	CS	NOT-APPLICABLE	n/a	Enhanced authentication (AUTH packets)	enhanced authentication is not offered; no successful CONNACK can carry an Authentication Method
-MQTT-4.12.0-6	4.12 Enhanced authentication	S	TESTED	met		TestConformance_MQTT_4_12_0_6_NoAuthPacketOrMethodWithoutAnAuthenticationMethod
+MQTT-4.12.0-4	4.12 Enhanced authentication	S	TESTED	met		TestEnhancedAuth_MQTT_4_12_0_4_RejectionAtAnyPointIsAConnackAndAClose TestConformance_MQTT_4_12_0_1_AnUnsupportedAuthenticationMethodIsRefusedAndClosed
+MQTT-4.12.0-5	4.12 Enhanced authentication	CS	TESTED	met		TestEnhancedAuth_MQTT_4_12_0_2_and_5_ExchangeEndsInAConnackNamingTheMethod TestEnhancedAuth_MQTT_4_12_1_Reauthentication
+MQTT-4.12.0-6	4.12 Enhanced authentication	S	TESTED	met		TestConformance_MQTT_4_12_0_6_NoAuthPacketOrMethodWithoutAnAuthenticationMethod TestEnhancedAuth_MQTT_4_12_0_7_AuthWithoutAMethodInTheConnectIsAProtocolError
 MQTT-4.12.0-7	4.12 Enhanced authentication	C	CLIENT-ONLY	n/a		binds only a Client
 MQTT-4.12.1-1	4.12.1 Re-authentication	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-4.12.1-2	4.12.1 Re-authentication	CS	NOT-APPLICABLE	n/a	Enhanced authentication (AUTH packets)	re-authentication is not offered
+MQTT-4.12.1-2	4.12.1 Re-authentication	CS	TESTED	met		TestEnhancedAuth_MQTT_4_12_1_ReauthenticationFailureDisconnects TestEnhancedAuth_ReauthenticationCannotChangeTheIdentity TestEnhancedAuth_AStalledReauthenticationIsDropped
 MQTT-4.13.1-1	4.13.1 Malformed Packet and Protocol Errors	S	TESTED	met		TestConformance_MQTT_4_13_1_1_MalformedPacketsAndProtocolErrorsCloseTheConnection TestAClientPublishWithASubscriptionIdentifierIsAProtocolError TestAResponseTopicWithWildcardsIsAProtocolError TestAWillWithAResponseTopicWithWildcardsIsRefusedAtConnect TestNoLocalOnASharedSubscriptionIsAProtocolErrorThatClosesTheConnection TestMQTT_3_3_4_ReceiveMaximumExceededIsDisconnected0x93
 MQTT-4.13.2-1	4.13.2 Other errors	CS	TESTED	met		TestConformance_MQTT_4_13_2_1_AnErrorReasonCodeAlwaysClosesTheConnection
 MQTT-6.0.0-1	6 Using WebSocket as a network transport	CS	TESTED	met		TestConformance_MQTT_6_0_0_1_ATextFrameClosesTheConnection TestAWebSocketClientAndATCPClientExchangeMessagesBothWays

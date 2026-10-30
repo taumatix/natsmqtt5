@@ -190,7 +190,15 @@ type conn struct {
 	disconnectSent bool
 
 	closeOnce sync.Once
-	done      chan struct{}
+
+	// authMethod is the Authentication Method the CONNECT was accepted with, or
+	// empty when it used none; authIdentity is what the Auther named. reauth and
+	// reauthTimer are an open re-authentication (enhauth.go). Only the reader
+	// touches them.
+	authMethod, authIdentity string
+	reauth                   AuthExchange
+	reauthTimer              *time.Timer
+	done                     chan struct{}
 	// connected is set once CONNACK with a success code has gone out. Until
 	// then the broker must not send a DISCONNECT [MQTT-3.14.0-1].
 	connected atomic.Bool
@@ -361,10 +369,7 @@ func (c *conn) handle(ctx context.Context, pkt packet.Packet) error {
 	case *packet.Disconnect:
 		return c.handleDisconnect(p)
 	case *packet.Auth:
-		// The broker advertises no authentication method, so an AUTH can only
-		// be out of sequence (MQTT-5.0 §4.12).
-		c.sendDisconnect(packet.ProtocolError, "this broker does not support enhanced authentication")
-		return errors.New("unexpected AUTH")
+		return c.handleAuth(ctx, p)
 	default:
 		c.sendDisconnect(packet.ProtocolError, "unexpected packet type "+pkt.Type().String())
 		return fmt.Errorf("unexpected %s from client", pkt.Type())
