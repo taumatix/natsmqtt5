@@ -49,13 +49,12 @@ func (b *Broker) serveWebSocket(w http.ResponseWriter, r *http.Request) {
 		_ = ws.Close(websocket.StatusPolicyViolation, "the mqtt subprotocol is required")
 		return
 	}
-	// Frames are bounded by the largest packet the broker accepts, which the
-	// packet reader already enforces; the library's own default would cut a
-	// large PUBLISH short.
-	ws.SetReadLimit(-1)
+	conn := websocket.NetConn(r.Context(), ws, websocket.MessageBinary)
+	// NetConn lifts the read limit, so this comes after it.
+	ws.SetReadLimit(webSocketReadLimit(b.opts.maximumPacketSize))
 
 	nc := &webSocketConn{
-		Conn:   websocket.NetConn(r.Context(), ws, websocket.MessageBinary),
+		Conn:   conn,
 		remote: remoteAddr(r.RemoteAddr),
 		tls:    r.TLS,
 	}
@@ -74,6 +73,20 @@ func (b *Broker) serveWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer b.wg.Done()
 	defer b.trackConn(c, false)
 	c.serve(r.Context())
+}
+
+// webSocketBatchAllowance is what a WebSocket message may carry beyond one
+// maximum-size packet: the packets a client pipelined behind it ([MQTT-6.0.0-2]
+// lets a message hold several, or part of one).
+const webSocketBatchAllowance = 64 << 10
+
+// webSocketReadLimit is the largest WebSocket message the broker reads: the
+// maximum packet size plus webSocketBatchAllowance. A bigger message is refused
+// with close status 1009 before it is buffered, instead of being streamed to
+// the packet reader; the library's own 32 KiB default would cut a large PUBLISH
+// short.
+func webSocketReadLimit(maximumPacketSize uint32) int64 {
+	return int64(maximumPacketSize) + webSocketBatchAllowance
 }
 
 // webSocketConn is a WebSocket connection seen as a net.Conn, with the peer's

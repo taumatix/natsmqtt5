@@ -150,7 +150,13 @@ The handler negotiates the `mqtt` subprotocol and closes a client that offers no
 sends a text frame (MQTT-5.0 section 6). A browser's `Origin` must match the request's host or one of
 `Options.WebSocketOriginPatterns`. `Broker.Close` disconnects WebSocket clients with 0x8B like any other;
 shutting the `http.Server` down does not, because it cannot reach a hijacked connection. The TLS state and
-remote address an `Authenticator` sees are those of the HTTP request.
+remote address an `Authenticator` sees are those of the HTTP request. A message is read up to the
+maximum packet size plus 64 KiB (for packets pipelined behind it); a larger one is refused with close
+status 1009 before it is buffered.
+
+The command serves it with `-ws-listen :8083` (path `-ws-path`, `/mqtt` by default). `-tls-cert` and
+`-tls-key` make both that listener (`wss://`) and `-listen` (`mqtts://`) serve TLS; there is no
+certificate reload, so restart the command to rotate.
 
 Authentication and authorization are two small interfaces:
 
@@ -575,9 +581,17 @@ one with fewer features:
   `/t` `/n` `/r` `/f` `/d`), a sequence the `nats-server` mapping never
   produces. Topics without those characters keep exactly the subject they had;
   the ones with them are no longer readable as the same subject by
-  `nats-server`'s own MQTT listener, so choose before you have data: switching
-  later leaves stored retained, queued and in-flight messages under the other
-  mapping.
+  `nats-server`'s own MQTT listener, so choose before you have data. **Switching
+  on** needs nothing done: every topic the plain mapping could store has the same
+  subject under the escaping one, so retained, queued and in-flight messages are
+  found as before. **Switching off** has no rewrite to offer, because a topic that
+  needed escaping cannot be written under the plain mapping at all; and the plain
+  broker does not refuse what is stored, it reads `ret/a*b` back as the topic
+  `ret/asb`. Before switching off, publish an empty retained message to every
+  topic containing one of those characters (with the escaping broker still
+  running), and let the offline queue's `OfflineQueueMaxAge` pass or have the
+  affected sessions drain; a session's in-flight messages end when they are
+  acknowledged.
 
 ## Correctness
 

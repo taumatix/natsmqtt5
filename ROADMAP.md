@@ -166,13 +166,14 @@ entry per member session, the consumer deleted by whoever leaves last). What rem
 
 `Options.RestrictDollarTopics` (opt in) refuses every `$` topic but
 `$share/...`, which is the spec's advice (MQTT-5.0 §4.7.2). Defaulting it on breaks anyone using
-`$app/...`, so it waits for the next major version: consider flipping the default there, with a
-`MIGRATION.md` and a release that logs a warning the first time a client uses a `$` topic. What
-remains of the entry today:
+`$app/...`, so it waits for the next major version. The release that logs a warning the first time a client uses a
+`$` topic is done (2026-10-30; once per broker, naming the client, the action and the topic), so what remains is
+the flip itself, with a `MIGRATION.md` written in that release: nothing in this roadmap plans a major version, so
+none is drafted now. Also still open:
 
-- A restricted broker now drops a stored `$` filter when it resumes the session (2026-10-10). Not covered: a session
-  held in a restricted broker's memory cannot hold one, so that branch is untested by construction; and the in-flight
-  messages such a filter earned are withdrawn the way a denied filter's are, but no test drives that for `$`.
+- A session held in a restricted broker's memory cannot hold a `$` filter, so the resume branch that drops one is
+  untested by construction. (The in-flight messages such a filter earned are withdrawn on resume, and a test drives
+  that, 2026-10-30.)
 - The broker publishes nothing of its own on `$SYS`; the option leaves that namespace unused
   rather than serving it.
 
@@ -188,6 +189,16 @@ therefore survives a fraction of a second rather than none.
 (`Mqtt5-Published-At`), at the cost of trusting two brokers' clocks to agree. Worth doing only if
 someone runs brokers apart enough for the difference to matter.
 
+**Looked at 2026-10-30, not built:** it is additive on the wire but not cheap, and the part that makes it unsafe is the
+part that costs. (1) It must be an option, off by default: a publisher's clock behind the receiver's makes a message
+wait longer than it did and expire early, which breaks [MQTT-3.3.2-5] for a deployment that never asked for the
+trade. (2) The receiver has to bound the stamp (ignore one in the future or older than the interval) and `arrivedAt`
+in `expiry.go` has to prefer it only for live copies, since a stored copy already counts from the JetStream
+timestamp. (3) Every PUBLISH grows by about 30 bytes of header, also for the plain NATS clients that read the subject.
+(4) The test that proves it needs a NATS leg that delays a message while both brokers' clocks are right (and one
+where they differ), which the embedded server cannot do and the three-server harness (`natscluster_test.go`) could
+with `Freeze`/`Thaw` on the server between the brokers. Take it when a deployment with a slow inter-broker link asks.
+
 # Tier 4: features MQTT 5 defines that the broker does not offer
 
 ## Enhanced authentication (AUTH packets)
@@ -202,9 +213,28 @@ plus re-authentication on an established connection.
 ## Outbound topic aliases: on by default, and measured
 
 **Today:** `Options.OutboundTopicAliases` ships off (2026-10-23): a client that offers a Topic Alias Maximum is sent
-aliases when it is on. **Left:** whether it should default on (a behaviour change for clients that advertise a
-maximum but handle aliases badly, so a decision, with a CHANGELOG line), and a measurement of the bytes it saves
-on a realistic topic mix, which would also tell whether `minAliasedTopic` (8) is the right threshold.
+aliases when it is on. **Left:** the decision to default it on (a behaviour change for clients that advertise a
+maximum but handle aliases badly: a major version, with a CHANGELOG line).
+
+**Measured (2026-10-30, `outalias_measure_internal_test.go`, 100,000 PUBLISHes of a skewed mix: 70% 40-byte telemetry
+names over 400 devices, 15% 21-byte command names, 15% names of 4-6 bytes; real codec, the broker's own table):**
+
+| Payload | Table 1 | 8 | 32 | 128 | 400 |
+|---|---|---|---|---|---|
+| 4 B | -1.3% | 19.2% | 38.9% | 55.5% | 66.4% |
+| 64 B | -0.5% | 7.9% | 15.9% | 22.7% | 27.2% |
+| 512 B | -0.1% | 1.5% | 2.9% | 4.2% | 5.0% |
+
+The saving is the share of bytes on the wire and depends on the client's Topic Alias Maximum and how many distinct
+topics it sees, far more than on the threshold. Findings: (1) a reused name saves its length minus 3 and a first use
+costs 3, so 8 bytes pays off at the 2nd send, 5 bytes at the 3rd, 4 bytes at the 5th, 3 bytes never: 8 is a safe,
+slightly conservative floor and lowering it to 5 gains under 2 points here. (2) With a table smaller than the working
+set the LRU thrashes: a maximum of 1 sends more bytes than no aliases, and raising the floor to 32 saved more than 8
+did at tables of 8 and 32 (22.5% against 19.2%, 40.3% against 38.9%) because the 21-byte names stopped evicting the
+hot 40-byte ones. **Recommendation:** keep `minAliasedTopic` at 8; when it is on by default, send aliases only to a
+client whose maximum is at least 8 (below that the table does not hold a working set), or admit a name to the table on
+its second sighting instead of its first; neither is done. Not measured: CPU of the encode (aliasing encodes twice
+on a miss), and clients in the field that mishandle aliases, which only a trial tells.
 
 ## QoS 2 on shared subscriptions
 
@@ -229,23 +259,19 @@ QoS 2 still needs is that state surviving a broker restart and a takeover, which
 the session record carries for QoS 1 and 2 on a non-shared subscription but not
 yet for a message a shared member holds.
 
-## WebSocket: the binary, TLS and a frame size bound
+## Escaping `*` and `>`: a plain broker reads an escaped subject under a wrong name
 
-**Today:** `Broker.WebSocketHandler` ships for library users (tests drive a Paho client over a real
-`httptest` server, binary and split frames, origin, subprotocol). Not done: the `natsmqtt5` command has no
-flag to serve it (`-ws-listen`, with the TLS flags it already has); a `wss://` test that proves an
-`Authenticator` sees the request's TLS state and remote address (`webSocketConn`); and the read limit is
-off (`SetReadLimit(-1)`), relying on the packet reader's own size check, so a hostile client's single huge
-frame is streamed rather than rejected up front. **Shape:** the flag, one wss test, and a limit derived from
-the maximum packet size.
+**Decided 2026-10-30: no migration tool.** Turning `EscapeNATSWildcards` on needs no rewrite (a topic the plain
+mapping could store has the same subject under the escaping one; `TestTurningEscapingOnKeeps...` drives a retained
+and a queued message across the switch). Turning it off has nothing to rewrite *to*: a topic containing `*`, `>` or
+whitespace has no plain subject, so a tool could only delete, which is what the README's procedure (clear those
+retained messages, let the queue age out) does with the tools clients already have.
 
-## Escaping `*` and `>`: a way to move
-
-**Today:** `Options.EscapeNATSWildcards` (and `-escape-nats-wildcards`) works.
-Turning it on or off with data in the retained, queue and in-flight streams
-leaves those messages under the other mapping, with no tool to rewrite them.
-Whether a migration is wanted at all is a decision for a deployment that needs
-it.
+**What is left:** with escaping off, the broker does not refuse a subject it stored under escaping: it decodes
+`ret.a/sb` as the topic `ret/asb` (`TestTurningEscapingOffReads...`), delivering a message under a name nobody
+published. **Shape:** the plain `subjectToName` treats a `/` followed by one of the escape letters as an escape
+sequence it does not know, so the retained and queue readers can skip such a subject (and say so in a warning)
+instead of serving it; a few lines in the decode path plus a test that the wrong name is no longer served.
 
 # Operations and robustness (not conformance)
 
