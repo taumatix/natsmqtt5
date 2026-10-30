@@ -412,8 +412,8 @@ func TestSweepReclaimsARecordFromAnUnreachableOwner(t *testing.T) {
 }
 
 // The sweep deletes a payload under an owner with no record, and one from
-// before keys named an owner unless a record still names it; payloads of an
-// owner that has a record are left to the bucket's TTL.
+// before keys named an owner unless a record still names it; a released
+// record's payloads are kept only if it names them, in-flight or spilled.
 func TestSweepDeletesOnlyPayloadsNoRecordCanNeed(t *testing.T) {
 	s, _ := storeFixture(t)
 	s.blobGrace = time.Millisecond
@@ -428,6 +428,7 @@ func TestSweepDeletesOnlyPayloadsNoRecordCanNeed(t *testing.T) {
 	require.NoError(t, err)
 	const legacyKept = "cafef00d"
 	rec.Inflight = []storedInflight{{Blob: legacyKept}}
+	rec.Spill = []string{kept}
 	_, err = s.save(ctx, rec, rev)
 	require.NoError(t, err)
 
