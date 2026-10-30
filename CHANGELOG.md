@@ -11,6 +11,7 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Changed:** the shared-subscription membership sweep also removes the entry of a released session whose record no longer lists the group (a failed restore that kept the record), not only of one with no record. A record a broker is serving is never judged by this. **Fixed:** a shared-subscription puller whose connection had ended while its fetch was running could re-create the group and write the member entry of a session that is away; it no longer does.
 - **Fixed:** a broker without `EscapeNATSWildcards` read a subject stored under escaping (retained, queued) back as a mangled topic (`ret/a*b` as `ret/asb`). `topic.SubjectToName` now decodes the escape sequences too; the plain mapping never writes them, so every subject it produces decodes as before. Switching the option off no longer renames what was stored; it cannot be reached by a client that must publish or subscribe by that name.
 - **Added:** an unrestricted broker logs a warning, once, the first time a client publishes, subscribes or sets a Will on a topic starting with `$` (other than the reserved `$retained` and `$queue`, which stay refused), saying a future major version may refuse them by default and that `Options.RestrictDollarTopics` refuses them now. Behaviour is otherwise unchanged.
 - **Added:** the `natsmqtt5` command serves WebSocket: `-ws-listen` (with `-ws-path`, default `/mqtt`), and `-tls-cert` / `-tls-key` make `-listen` (mqtts) and the WebSocket listener (wss) serve TLS. Without them nothing changes.

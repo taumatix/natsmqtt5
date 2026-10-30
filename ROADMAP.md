@@ -148,14 +148,14 @@ A shared subscription ends when its last session does (`sharedmembers.go`). What
 
 - A killed broker's session still holds its group until the session store reclaims the record
   (`MaxSessionExpiry` after the broker's last write, and only if the broker does not answer), at
-  which point a surviving broker sweeps the entry. A session whose record exists but is no longer
-  subscribed to the group (a failed restore that kept the record) is not swept; the entry's own
-  lapse is the backstop for it.
-- The race of a last leaver and a joiner is healed by the joiner's puller creating the consumer
-  again on its first failed pull, which comes at once; a message published between the
-  consumer's deletion and that re-creation is not in the new consumer, which starts at the next
-  message. Closing it would need a deletion that a joining member can veto; JetStream has no
-  conditional consumer delete.
+  which point a surviving broker sweeps the entry. A record that a broker still serves
+  (`Attached`) and that does not list the group is not swept, because a SUBSCRIBE writes the entry
+  before the record; a released one that does not list it is.
+- The race of a last leaver and a joiner is pinned (`shared_race_test.go`): the joiner's puller
+  creates the consumer again on its first failed pull, which comes at once. A message published
+  between the consumer's deletion and that re-creation is not in the new consumer, which starts
+  at the next message. Closing it would need a deletion that a joining member can veto; JetStream
+  has no conditional consumer delete.
 
 ## Restricting `$` topics by default
 

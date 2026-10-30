@@ -315,6 +315,15 @@ func (c *conn) healBacklog(sub *subscription) {
 	if q == nil || !sub.live.Load() {
 		return
 	}
+	select {
+	case <-c.done:
+		// A puller whose connection has ended (its fetch was still running)
+		// must not make the group again, nor write the entry, for a session
+		// that is away: its entry is the refresh's and the sweep's to keep or
+		// drop.
+		return
+	default:
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), natsFlushTimeout)
 	defer cancel()
 	if _, err := q.joinGroup(ctx, c.broker.opts, c.sess, sub); err != nil {
