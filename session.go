@@ -58,6 +58,14 @@ type subscription struct {
 	// NATS subscriptions (see subscribeOne), and always holds the newest. The
 	// NATS handler reads it to find who is to deliver.
 	cell *atomic.Pointer[subscription]
+
+	// since is the offline queue's last sequence when the subscription's
+	// interest reached NATS: a message stored after it reaches the subscription
+	// live, and one stored at or before it was never owed through it, which is
+	// what keeps it from holding the replay cursor back (cursor.go). 0 for a
+	// subscription restored from a record that predates it (owed everything),
+	// sinceUnknown until it is read.
+	since atomic.Uint64
 }
 
 // latest follows the chain of replacements to the subscription now in force.
@@ -330,6 +338,13 @@ type session struct {
 	delivered map[string]deliveredMark
 	// maxDeliveredSeq is the highest queue sequence noteDelivered has seen.
 	maxDeliveredSeq uint64
+
+	// cursorMu orders the replay cursor's moves against live copies arriving
+	// (session.noteLiveCopy). It is taken before the connection's locks and
+	// before mu.
+	cursorMu sync.Mutex
+	// cur is the replay cursor (cursor.go), guarded by mu.
+	cur replayCursor
 
 	// pendingWill is a Will whose connection has gone and which is waiting
 	// out its Will Delay Interval. It is published only if it is still here
@@ -1041,6 +1056,9 @@ func (s *session) installSubscription(c *conn, sub *subscription) (old *subscrip
 		sub.natsSubs, old.natsSubs = old.natsSubs, nil
 		sub.cell = old.cell
 	}
+	if old != nil && keepsSince(old, sub) {
+		sub.since.Store(old.since.Load())
+	}
 	s.subs[sub.filter] = sub
 	// Live before the old one is retired, so a message arriving between the two
 	// is delivered by one of them and not by neither.
@@ -1167,11 +1185,15 @@ func lowestSeq(seqs ...uint64) uint64 {
 // markAwayRestored records the absence a session store record describes: when
 // the session was released, and, if the record has them, the sequence the
 // replay starts at and the ids delivered at or above it.
-func (s *session) markAwayRestored(at time.Time, fromSeq, lateSeq uint64, rewoundTo time.Time, delivered []storedDelivered) {
+func (s *session) markAwayRestored(at time.Time, fromSeq, lateSeq uint64, rewoundTo time.Time, delivered []storedDelivered,
+	cursor uint64, holes []storedDelivered) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.awayAt, s.awayRestored, s.awayFromSeq, s.awayLateSeq = at, true, fromSeq, lateSeq
 	s.awayRewoundTo = rewoundTo
+	// The record carried every id at or above its cursor, which is what lets it
+	// carry the cursor at all (cursorIntoLocked).
+	s.restoreCursorLocked(cursor, holes)
 	if len(delivered) == 0 {
 		return
 	}
@@ -1202,19 +1224,35 @@ var storedDeliveredBound = func() *atomic.Int64 {
 	return &n
 }()
 
-// awayState is what the session record keeps of the last connection's absence
-// beyond its time: the replay's starting sequence and the ids delivered at or
-// above it, lowest sequence first. dropped counts ids left out for the bound.
-func (s *session) awayState() (fromSeq, lateSeq uint64, delivered []storedDelivered, dropped int) {
+// awayStateInto writes what the session record keeps of the last connection's
+// absence beyond its time into rec: the replay's starting sequence, the replay
+// cursor, and the ids delivered at or above either, lowest sequence first. It
+// returns how many ids were left out for the bound.
+func (s *session) awayStateInto(rec *sessionRecord) (dropped int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	late := lowestSeq(s.awayLateSeq, s.lateSeq)
-	from := lowestSeq(s.awayFromSeq, late)
+	from := lowestSeq(s.awayFromSeq, late, s.cur.next)
 	if from == 0 {
 		from = math.MaxUint64 // no sequence: only the ids of the rewind's span
 	}
-	delivered, dropped = s.deliveredFromLocked(from, nil)
-	return s.awayFromSeq, late, delivered, dropped
+	rec.Delivered, dropped = s.deliveredFromLocked(from, nil)
+	rec.AwayFromSeq, rec.AwayLateSeq = s.awayFromSeq, late
+	s.cursorIntoLocked(rec, dropped)
+	return dropped
+}
+
+// cursorIntoLocked writes the replay cursor into rec, whose Delivered was just
+// taken from the ids at or above it, or clears it when the record cannot carry
+// it: dropped ids, which may be above it, or a subscription whose since is not
+// known yet. A record without a cursor is replayed from the time rewind.
+func (s *session) cursorIntoLocked(rec *sessionRecord, dropped int) {
+	rec.ReplayCursor, rec.ReplayHoles = 0, nil
+	if s.cur.next == 0 || dropped > 0 || !s.sinceKnownLocked() {
+		return
+	}
+	v := s.cursorViewLocked()
+	rec.ReplayCursor, rec.ReplayHoles = v.next, v.stored()
 }
 
 // lateRecord is the released record with a late copy's sequence folded in, the
@@ -1223,7 +1261,7 @@ func (s *session) awayState() (fromSeq, lateSeq uint64, delivered []storedDelive
 func (s *session) lateRecord() (rec *sessionRecord, rev, gen uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.rec == nil || s.rec.Attached || s.awayLateSeq == 0 {
+	if s.rec == nil || s.rec.Attached || (s.awayLateSeq == 0 && s.cur.next == 0) {
 		return nil, 0, 0
 	}
 	cp := *s.rec
@@ -1231,8 +1269,10 @@ func (s *session) lateRecord() (rec *sessionRecord, rev, gen uint64) {
 	cp.AwayLateSeq = s.awayLateSeq
 	// Ids past the record's bound are left out here as at release, which
 	// already logged them.
-	cp.Delivered, _ = s.deliveredFromLocked(lowestSeq(s.awayFromSeq, s.awayLateSeq), nil)
+	var dropped int
+	cp.Delivered, dropped = s.deliveredFromLocked(lowestSeq(s.awayFromSeq, s.awayLateSeq, s.cur.next), nil)
 	cp.DeliveredSince = s.deliveredFloor()
+	s.cursorIntoLocked(&cp, dropped)
 	return &cp, s.rev, s.claimGen
 }
 
@@ -1254,14 +1294,21 @@ func (s *session) deliveredFromLocked(fromSeq uint64, exclude map[uint64]bool) (
 	return delivered, dropped
 }
 
-// deliveredSince is the delivered ids a checkpoint writes with a replay from
-// fromSeq: those at or above it. A replay with no sequence starts at a time,
-// and the ids delivered since that time are the ones it must not repeat. The
+// deliveredSinceInto writes into a checkpoint's record the delivered ids it
+// keeps with a replay from fromSeq: those at or above it, or at or above the
+// replay cursor. A replay with no sequence starts at a time, and the ids
+// delivered since that time are the ones it must not repeat. The
 // unacknowledged messages are among them: they are resent from the record's
 // in-flight list, not by the replay.
-func (s *session) deliveredSince(fromSeq, lateSeq uint64, since time.Time) (delivered []storedDelivered, dropped int) {
+func (s *session) deliveredSinceInto(rec *sessionRecord, fromSeq uint64, since time.Time) (dropped int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	rec.Delivered, dropped = s.deliveredSinceLocked(fromSeq, s.cur.next, since)
+	s.cursorIntoLocked(rec, dropped)
+	return dropped
+}
+
+func (s *session) deliveredSinceLocked(fromSeq, lateSeq uint64, since time.Time) (delivered []storedDelivered, dropped int) {
 	from := lowestSeq(fromSeq, lateSeq)
 	for id, m := range s.delivered {
 		if (from != 0 && m.seq >= from) || !m.at.Before(since) {
@@ -1305,12 +1352,23 @@ type away struct {
 // returns the session's connection when that is a different one: the copy
 // belongs to it, as a live delivery. persist is true when the note changed a
 // released session, whose stored record then has to say so.
-func (s *session) lateCopy(from *conn, seq uint64) (successor *conn, persist bool) {
+//
+// With a replay cursor, a copy below it is a hole (cursor.go), so the replay
+// from the cursor sends it however far below everything else it is; one at or
+// above it is read by that replay anyway.
+func (s *session) lateCopy(from *conn, seq uint64, id string) (successor *conn, persist bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	switch {
-	case s.conn != nil && s.conn != from:
+	if s.conn != nil && s.conn != from {
 		return s.conn, false
+	}
+	holed := false
+	if next := s.cur.next; next != 0 && seq < next {
+		before := len(s.cur.holes)
+		s.addHoleLocked(seq, id)
+		holed = len(s.cur.holes) != before
+	}
+	switch {
 	case s.conn != nil:
 		// Still attached, and ending: detach folds it into the absence.
 		if s.lateSeqSafeLocked(seq) {
@@ -1322,7 +1380,7 @@ func (s *session) lateCopy(from *conn, seq uint64) (successor *conn, persist boo
 		return nil, false
 	}
 	if !s.lateSeqSafeLocked(seq) || (s.awayLateSeq != 0 && s.awayLateSeq <= seq) {
-		return nil, false
+		return nil, holed && s.rec != nil
 	}
 	s.awayLateSeq = seq
 	return nil, s.rec != nil
@@ -1330,9 +1388,22 @@ func (s *session) lateCopy(from *conn, seq uint64) (successor *conn, persist boo
 
 // lateSeqSafeLocked says whether a replay may start at seq: the ids delivered at
 // or above it must still be known, or a QoS 2 message would be sent twice
-// [MQTT-4.3.3-2]. They are kept for the span deliveredSeqWindow below the
-// highest delivered sequence.
+// [MQTT-4.3.3-2]. With a replay cursor they are kept from the cursor up, and a
+// copy below it that is not a hole was delivered or never owed. Without one they
+// are kept for the span deliveredSeqWindow below the highest delivered sequence.
 func (s *session) lateSeqSafeLocked(seq uint64) bool {
+	if s.cur.next != 0 {
+		if seq >= s.cur.next {
+			return true
+		}
+		_, hole := s.cur.holes[seq]
+		return hole
+	}
+	return s.windowSafeLocked(seq)
+}
+
+// windowSafeLocked is lateSeqSafeLocked's rule without a cursor.
+func (s *session) windowSafeLocked(seq uint64) bool {
 	return s.maxDeliveredSeq == 0 || seq+deliveredSeqWindow >= s.maxDeliveredSeq
 }
 
@@ -1363,7 +1434,10 @@ type deliveredMark struct {
 // noteDelivered records a delivered message id. It forgets those older than a
 // time-based replay could rewind to, unless their queue sequence is near the
 // newest: a replay starting at a sequence reaches those however old they are.
-func (s *session) noteDelivered(id string, seq uint64) {
+// It keeps every id at or above the replay cursor, and drops the cursor when
+// they outgrow cursorIDBound. scan is true when enough have piled up above the
+// cursor for a scan to move it (conn.scanCursor), which the caller starts.
+func (s *session) noteDelivered(id string, seq uint64) (scan bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
@@ -1374,13 +1448,33 @@ func (s *session) noteDelivered(id string, seq uint64) {
 	if seq > s.maxDeliveredSeq {
 		s.maxDeliveredSeq = seq
 	}
+	s.cur.removeHole(id)
+	if s.cur.next != 0 && seq >= s.cur.next {
+		s.cur.above++
+	}
+	// The ids at or above keep are the cursor's (or a replay's that may start
+	// one): a replay from it meets them again.
+	keep := lowestSeq(s.cur.next, s.cur.pin)
 	if len(s.delivered) > 64 && len(s.delivered)%64 == 0 {
+		kept := 0
 		for k, m := range s.delivered {
+			if keep != 0 && m.seq >= keep {
+				kept++
+				continue
+			}
 			if now.Sub(m.at) > 2*s.window() && (m.seq == 0 || m.seq+deliveredSeqWindow < s.maxDeliveredSeq) {
 				delete(s.delivered, k)
 			}
 		}
+		if int64(kept) > cursorIDBound.Load() {
+			s.dropCursorLocked()
+		}
 	}
+	if s.cur.next != 0 && !s.cur.scanning && int64(s.cur.above) >= cursorScanAfter.Load() {
+		s.cur.scanning = true
+		return true
+	}
+	return false
 }
 
 func (s *session) deliveredIDs() map[string]bool {
@@ -1532,11 +1626,16 @@ func (s *session) snapshot(gen uint64) (*sessionRecord, uint64) {
 
 	subs := make([]storedSubscription, 0, len(s.subs))
 	for _, sub := range s.subs {
+		since := sub.since.Load()
+		if since == sinceUnknown {
+			since = 0
+		}
 		subs = append(subs, storedSubscription{
 			Filter:     sub.filter,
 			Opts:       sub.opts,
 			GrantedQoS: sub.grantedQoS,
 			ID:         sub.id,
+			SinceSeq:   since,
 		})
 	}
 	// Map iteration order is random, so without this the same subscription set

@@ -53,7 +53,7 @@ func TestOnlyIDsTheReplayCanMeetAgainAreStored(t *testing.T) {
 	}
 	s.markAwayLocked(away{at: time.Now(), fromSeq: 5})
 
-	from, _, ids, dropped := s.awayState()
+	from, _, ids, dropped := awayStateOf(s)
 	assert.Equal(t, uint64(5), from)
 	var got []string
 	for _, d := range ids {
@@ -71,7 +71,7 @@ func TestOnlyRecentIDsAreStoredWhenThereIsNoReplayPosition(t *testing.T) {
 	}
 	s.markAwayLocked(away{at: time.Now()})
 
-	from, _, ids, _ := s.awayState()
+	from, _, ids, _ := awayStateOf(s)
 	assert.Zero(t, from)
 	assert.Equal(t, []storedDelivered{{ID: "recent", Seq: 6}}, ids)
 }
@@ -83,7 +83,7 @@ func TestTheStoredIDsAreBounded(t *testing.T) {
 	}
 	s.markAwayLocked(away{at: time.Now(), fromSeq: 1})
 
-	_, _, ids, dropped := s.awayState()
+	_, _, ids, dropped := awayStateOf(s)
 	assert.Len(t, ids, maxStoredDelivered)
 	assert.Equal(t, 10, dropped)
 }
@@ -92,11 +92,19 @@ func TestTheStoredIDsAreBounded(t *testing.T) {
 // restored session knows the ids, so the replay that starts below them skips them.
 func TestARestoredSessionKnowsWhatItAlreadyDelivered(t *testing.T) {
 	s := newSession("c")
-	s.markAwayRestored(time.Now(), 5, 0, time.Time{}, []storedDelivered{{ID: "seen", Seq: 8}})
+	s.markAwayRestored(time.Now(), 5, 0, time.Time{}, []storedDelivered{{ID: "seen", Seq: 8}}, 0, nil)
 
 	a, ok := s.takeAway()
 	require.True(t, ok)
 	assert.Equal(t, uint64(5), a.fromSeq)
 	assert.True(t, a.restored)
 	assert.True(t, s.deliveredIDs()["seen"])
+}
+
+// awayStateOf is what a release writes of the absence: the replay's start, the
+// late copy's sequence, the ids, and how many were left out.
+func awayStateOf(s *session) (from, late uint64, ids []storedDelivered, dropped int) {
+	var rec sessionRecord
+	dropped = s.awayStateInto(&rec)
+	return rec.AwayFromSeq, rec.AwayLateSeq, rec.Delivered, dropped
 }

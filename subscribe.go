@@ -36,6 +36,7 @@ func (c *conn) handleSubscribe(ctx context.Context, p *packet.Subscribe) error {
 		subID = p.Properties.SubscriptionIdentifiers[0]
 	}
 
+	hadNonShared := c.sess.hasNonSharedSub()
 	codes := make([]packet.ReasonCode, len(p.Subscriptions))
 	granted := make([]*subscription, len(p.Subscriptions))
 	replaced := make([]bool, len(p.Subscriptions))
@@ -66,6 +67,10 @@ func (c *conn) handleSubscribe(ctx context.Context, p *packet.Subscribe) error {
 			}
 		}
 	}
+
+	// What the new subscriptions are owed starts where the queue stands now
+	// that their interest has reached NATS (subscription.since).
+	c.readSince(ctx, granted, hadNonShared)
 
 	// The subscription set has changed, so the durable copy has to change with
 	// it or a restart would resume a set the client never asked for.
@@ -152,6 +157,7 @@ func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID
 		grantedQoS: granted,
 		id:         subID,
 	}
+	sub.since.Store(sinceUnknown)
 	// Subscribing again to a non-shared filter the session already holds keeps
 	// the NATS subscriptions it has and replaces only what the broker says about
 	// them: the options, the granted QoS, the identifier. Tearing them down and
@@ -290,6 +296,11 @@ func (c *conn) bindNATS(sub *subscription) error {
 			// The backlog delivers this one, to whichever member pulls it.
 			return
 		}
+		if q := c.broker.queue.Load(); q != nil {
+			if seq := queueSeq(msg); seq != 0 {
+				q.saw(seq)
+			}
+		}
 		conn := sess.currentConn()
 		if conn == nil {
 			// Between connections. The message is dropped unless the offline
@@ -301,7 +312,7 @@ func (c *conn) bindNATS(sub *subscription) error {
 				return
 			}
 			var persist bool
-			conn, persist = sess.lateCopy(nil, seq)
+			conn, persist = sess.lateCopy(nil, seq, messageID(msg))
 			if persist {
 				go c.broker.persistLateCopy(sess)
 			}
@@ -695,6 +706,11 @@ func (c *conn) prepare(d *delivery, wait bool) (*prepared, error) {
 	// for the client to acknowledge and nothing to wedge.
 	if d.applyExpiry(time.Now()) {
 		c.releaseQuota()
+		if d.id != "" && c.broker.queue.Load() != nil {
+			// Deleted, which a replay would do too: it is not owed any more, and
+			// the replay cursor is not held back by it.
+			c.noteDelivered(d.id, d.seq)
+		}
 		return nil, nil
 	}
 
@@ -713,7 +729,7 @@ func (c *conn) prepare(d *delivery, wait bool) (*prepared, error) {
 		// [MQTT-3.1.2-25]: either way a replay must not send it again. Noted
 		// before the write, so one whose write failed is the in-flight message
 		// the resume resends and not also a new one the replay sends.
-		c.sess.noteDelivered(d.id, d.seq)
+		c.noteDelivered(d.id, d.seq)
 	}
 	return &prepared{d: d, pub: pub, record: d.qos == packet.QoS2}, nil
 }

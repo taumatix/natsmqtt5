@@ -283,9 +283,19 @@ What it costs and what it does not cover yet:
 
 - Each QoS 1 and 2 message is published twice: first under
   `<prefix>.$queue.<subject>` into the `MQTT5_queue` stream, which keeps it for
-  `OfflineQueueMaxAge` (24 hours by default), and then live. A resumed session's replay also
-  reaches back `OfflineQueueRewind` (10 seconds by default) before it was released, to catch a
-  message whose live copy never arrived. The broker waits
+  `OfflineQueueMaxAge` (24 hours by default), and then live. A message whose live copy never
+  reached the session (its publisher stopped between the two writes), or reached it after the
+  session was released, is replayed however long ago it was stored: each session keeps a replay
+  cursor, a queue sequence below which everything it was owed was sent except a short list of
+  holes, and moves it by reading the stream without delivering once 1024 ids have piled up above
+  it. That costs one read of the session's subjects per 1024 messages it is sent, and one
+  JetStream request per SUBSCRIBE, to note where the new subscription starts (waited for at most
+  250 ms; without an answer the highest queue sequence the broker has seen is used, which can only
+  owe the subscription more). A session without a
+  cursor (one restored from a record written before it existed, or one that left more than 1024
+  holes or 16384 ids above it) replays from `OfflineQueueRewind` (10 seconds by default) before it
+  was released instead, and starts a cursor once that replay has read the queue to its end. The
+  broker waits
   for JetStream to confirm the first before publishing live and acknowledging
   the client, which adds a JetStream round trip to every QoS 1 and 2 publish.
   If JetStream cannot store it, the publish is refused, so the client tries

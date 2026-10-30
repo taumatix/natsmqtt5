@@ -146,9 +146,16 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 	// reconnect. A publish made while the client is already reconnecting waits in
 	// its buffer and is sent first, so only the connected case needs the check.
 	connected, reconnects := c.broker.nc.IsConnected(), c.broker.nc.Stats().Reconnects
-	if err := c.broker.nc.PublishMsg(msg); err != nil {
-		c.logger.Warn("publishing to NATS failed", "subject", full, "error", err)
-		return c.rejectPublish(p, packet.ImplementationSpecificError, "the NATS server rejected the message")
+	// A test can leave the live copy out: the queue copy is stored and nothing follows.
+	withheld := false
+	if f := c.broker.liveCopyGate.Load(); f != nil {
+		withheld = !(*f)(msg)
+	}
+	if !withheld {
+		if err := c.broker.nc.PublishMsg(msg); err != nil {
+			c.logger.Warn("publishing to NATS failed", "subject", full, "error", err)
+			return c.rejectPublish(p, packet.ImplementationSpecificError, "the NATS server rejected the message")
+		}
 	}
 	if f := c.broker.publishFlushGate.Load(); f != nil {
 		(*f)()
