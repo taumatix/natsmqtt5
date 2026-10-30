@@ -213,6 +213,16 @@ func SetBeforeMemberRefreshWrite(t interface {
 	t.Cleanup(func() { beforeMemberRefreshWrite.Store(nil) })
 }
 
+// SetBeforeGroupDelete makes a leaving session that found its shared
+// subscription empty call fn before it deletes the group's consumer, until the
+// test ends.
+func SetBeforeGroupDelete(t interface {
+	Cleanup(func())
+}, fn func()) {
+	beforeGroupDelete.Store(&fn)
+	t.Cleanup(func() { beforeGroupDelete.Store(nil) })
+}
+
 // SetQueueRetryEvery changes how soon the broker retries a default offline queue
 // that failed at start-up, for the rest of the test. Set it before the broker starts.
 func SetQueueRetryEvery(t interface {

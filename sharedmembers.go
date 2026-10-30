@@ -201,8 +201,8 @@ func (b *Broker) sweepShareMembers(ctx context.Context) error {
 		if group == "" || time.Since(entry.Created()) < shareMemberSweepGrace {
 			continue
 		}
-		if _, err := b.store.kv.Get(ctx, sessionKey(clientID)); !errors.Is(err, jetstream.ErrKeyNotFound) {
-			continue // there is a record, or it could not be read
+		if b.sessionMayHoldGroup(ctx, clientID, group) {
+			continue
 		}
 		if err := m.kv.Delete(ctx, key, jetstream.LastRevision(entry.Revision())); err != nil {
 			continue
@@ -220,6 +220,40 @@ func (b *Broker) sweepShareMembers(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// sessionMayHoldGroup reports whether the stored session of clientID could be a
+// member of group, and is true whenever that cannot be told: a record that
+// cannot be read or decoded, and a record a broker is serving (Attached), which
+// is the one place its subscriptions can be newer than the record (a SUBSCRIBE
+// writes the entry before the record, and a failed record write is only
+// logged). It is false for a missing record, one past its expiry, and one
+// released (or left by a broker the store has not yet reclaimed) that does not
+// list the group, such as a restore that failed and kept the record.
+func (b *Broker) sessionMayHoldGroup(ctx context.Context, clientID, group string) bool {
+	entry, err := b.store.kv.Get(ctx, sessionKey(clientID))
+	if errors.Is(err, jetstream.ErrKeyNotFound) {
+		return false
+	}
+	if err != nil {
+		return true
+	}
+	rec, err := decodeRecord(entry.Value())
+	if err != nil {
+		return true
+	}
+	if !rec.resumable(time.Now()) {
+		return false
+	}
+	if rec.Attached {
+		return true
+	}
+	for _, sub := range rec.Subscriptions {
+		if name, ok := b.groupName(sub.Filter); ok && name == group {
+			return true
+		}
+	}
+	return false
 }
 
 // groupName is the name of the consumer behind a shared subscription, which
@@ -271,6 +305,9 @@ func (b *Broker) leaveGroup(s *session, filter string) {
 	if !empty {
 		return
 	}
+	if fn := beforeGroupDelete.Load(); fn != nil {
+		(*fn)()
+	}
 	// The held messages of this session were handed back before this, so the
 	// consumer deleted here takes them with it, as it does the undelivered ones.
 	if err := q.stream.DeleteConsumer(ctx, group); err != nil && !errors.Is(err, jetstream.ErrConsumerNotFound) {
@@ -306,6 +343,11 @@ func (b *Broker) refreshMembersLoop(q *offlineQueue) {
 		}
 	}
 }
+
+// beforeGroupDelete, when set, runs between a leaving session finding the group
+// empty and deleting its consumer, which is where a joiner can arrive. A test
+// uses it to hold the leaver there.
+var beforeGroupDelete atomic.Pointer[func()]
 
 // beforeMemberRefreshWrite, when set, runs between a refresh reading a session's
 // subscription and writing its entry. A test uses it to unsubscribe there.
