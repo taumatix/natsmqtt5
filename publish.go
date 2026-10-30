@@ -305,8 +305,49 @@ func (c *conn) handlePubrec(p *packet.Pubrec) error {
 	// The record says PUBREL before the PUBREL goes out: the client may answer it
 	// and the broker be killed before the next tick, and a successor that still
 	// resent the PUBLISH would break [MQTT-4.3.3-6].
+	if c.broker.store != nil && c.sess.expiry() != 0 && c.broker.opts.SessionCheckpointInterval > 0 {
+		c.queuePubrel(p.Ack.PacketID)
+		return nil
+	}
 	c.checkpointNow()
 	return c.write(&packet.Pubrel{Ack: packet.Ack{PacketID: p.Ack.PacketID}})
+}
+
+// queuePubrel sends a PUBREL once the record says so, sharing that record with
+// the PUBRELs queued while it is written: the reader goes on to the next PUBREC
+// instead of waiting for the write, so a client that answers a burst of QoS 2
+// messages costs one record write for the burst, not one for each. A single
+// goroutine at a time drains the queue and ends when it is empty.
+func (c *conn) queuePubrel(id uint16) {
+	c.relMu.Lock()
+	c.relIDs = append(c.relIDs, id)
+	start := !c.relRunning
+	c.relRunning = true
+	c.relMu.Unlock()
+	if start {
+		go c.drainPubrels()
+	}
+}
+
+func (c *conn) drainPubrels() {
+	for {
+		c.relMu.Lock()
+		ids := c.relIDs
+		c.relIDs = nil
+		if len(ids) == 0 {
+			c.relRunning = false
+			c.relMu.Unlock()
+			return
+		}
+		c.relMu.Unlock()
+		c.checkpointNow()
+		for _, id := range ids {
+			if err := c.write(&packet.Pubrel{Ack: packet.Ack{PacketID: id}}); err != nil {
+				c.close()
+				return
+			}
+		}
+	}
 }
 
 // handlePubrel is stage 2 of a client-to-broker QoS 2 delivery: the client

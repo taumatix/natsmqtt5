@@ -168,6 +168,11 @@ type conn struct {
 	// activity counts deliveries enqueued and sent, so the checkpoint writes
 	// only when something moved.
 	activity atomic.Uint64
+	// relIDs are the PUBRELs waiting for the record that precedes them
+	// (queuePubrel); relRunning is whether a goroutine is draining them.
+	relMu      sync.Mutex
+	relIDs     []uint16
+	relRunning bool
 	// cpMark is what the last checkpoint stood for; guarded by sess.persistMu.
 	cpMark   checkpointMark
 	loopDone chan struct{}

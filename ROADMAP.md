@@ -256,15 +256,16 @@ yet for a message a shared member holds.
 
 # Operations and robustness (not conformance)
 
-## Two record writes serialise the delivery of every QoS 2 message
+## A lone QoS 2 message still waits for two record writes
 
-**Today:** a QoS 2 message sent to a persistent session is recorded before its PUBLISH and before
-its PUBREL ([MQTT-4.3.3-6]), each a key-value write the delivery goroutine waits for. Measured
-(`BenchmarkQoS2Delivery`, file-backed JetStream on the same host, one client in lockstep): 0.77 ms a
-message against 0.16 ms with the tick only, so one connection's QoS 2 rate is about 1300 a second.
-**Shape:** one write for every message already waiting in the connection's queue (group commit),
-or a write only when the record would change a successor's answer; measure before and after, and
-with `sync_always` on the NATS server, where the writes cost more.
+**Done (2026-10-30):** messages waiting together share the record written before their PUBLISH
+(`deliverBurst`, `subscribe.go`) and PUBRELs queued while a record is written share the next one
+(`queuePubrel`, `publish.go`), so a burst of 32 costs 0.42 ms a message instead of 1.43
+(`BenchmarkQoS2DeliveryBurst/Durable`, a subscriber with a persistent session, one client; the
+non-persistent ceiling is 0.09 ms). Killed-broker tests cover the burst (`killed_qos2_burst_test.go`).
+**Left:** one client in lockstep (`BenchmarkQoS2Delivery`) has nothing to share: two writes a message,
+about 2 ms on a loaded host. That needs a write that is not waited for, which [MQTT-4.3.3-6] does not
+allow, or a faster store. Not measured with `sync_always` on the NATS server.
 
 ## Spilled in-flight entries are rewritten whole at every changed checkpoint
 
