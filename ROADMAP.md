@@ -196,14 +196,12 @@ with `Freeze`/`Thaw` on the server between the brokers. Take it when a deploymen
 
 # Tier 4: features MQTT 5 defines that the broker does not offer
 
-## Enhanced authentication: a shipped SCRAM method, and identity change on re-authentication
+## Enhanced authentication: identity change on re-authentication
 
-**Today:** `Options.Auther` (2026-10-30) drives the AUTH exchange, but the only method is the example one in
-`example_test.go`; deployments that want SCRAM-SHA-256 write it themselves. A re-authentication that proves a
-different identity than the connection's is refused with 0x87.
-**Shape:** (1) a `scram` sub-package with a SCRAM-SHA-256 `Auther` (RFC 7677) over a credential lookup the caller
-supplies, tested against Paho. (2) Let a re-authentication change the identity: re-run the `Authorizer` over the
-session's subscriptions as `Broker.Reauthorize` does and drop those no longer allowed, instead of disconnecting.
+**Today:** `Options.Auther` and the `scram` sub-package (2026-10-30) drive the AUTH exchange. A re-authentication that
+proves a different identity than the connection's is refused with 0x87.
+**Shape:** let a re-authentication change the identity: re-run the `Authorizer` over the session's subscriptions as
+`Broker.Reauthorize` does and drop those no longer allowed, instead of disconnecting.
 
 ## Outbound topic aliases: on by default, and measured
 

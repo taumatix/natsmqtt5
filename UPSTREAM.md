@@ -16,6 +16,15 @@ controls. This file says which versions it was built and checked against.
     Re-checked 2026-09-27 at oasis-open.org/standard/mqtt-v5-0-os: still the
     approved standard, with no successor listed.
 
+- name: scram-rfcs
+  kind: literal
+  value: "RFC 5802 (SCRAM), RFC 7677 (SCRAM-SHA-256)"
+  checked: 2026-10-30
+  note: >-
+    the `scram` sub-package's contract. The RFC 7677 section 3 example exchange is
+    asserted byte for byte in scram/scram_internal_test.go; RFC 5802 and 7677 are
+    Proposed Standards with no successor.
+
 - name: nats-server
   kind: github-release
   repo: nats-io/nats-server

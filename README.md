@@ -569,7 +569,9 @@ one with fewer features:
   re-authentication ends in a DISCONNECT. `hmacAuther` in `example_test.go` is a complete
   reference method. Without an `Auther` a CONNECT carrying a method is refused with
   `0x8C Bad authentication method`, as before. The `Authenticator` is not asked for such a
-  CONNECT; the `Authorizer` sees the identity the exchange returns.
+  CONNECT; the `Authorizer` sees the identity the exchange returns. The `scram` sub-package
+  is a ready SCRAM-SHA-256 method (RFC 7677, no channel binding) over a credential lookup
+  you supply: `Options.Auther = &scram.Auther{Lookup: ..., OwnsClientID: ...}`.
 - **The broker sends topic aliases only if asked to.** It accepts them from clients always; `Options.OutboundTopicAliases` makes it send them to a client that offered a Topic Alias Maximum (off by default).
 - **`Message Expiry Interval` counts whole seconds.** A message is deleted once it
   has waited its whole interval, and one still live goes out with the interval less
