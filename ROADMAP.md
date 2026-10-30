@@ -172,6 +172,16 @@ therefore survives a fraction of a second rather than none.
 (`Mqtt5-Published-At`), at the cost of trusting two brokers' clocks to agree. Worth doing only if
 someone runs brokers apart enough for the difference to matter.
 
+**Looked at 2026-10-30, not built:** it is additive on the wire but not cheap, and the part that makes it unsafe is the
+part that costs. (1) It must be an option, off by default: a publisher's clock behind the receiver's makes a message
+wait longer than it did and expire early, which breaks [MQTT-3.3.2-5] for a deployment that never asked for the
+trade. (2) The receiver has to bound the stamp (ignore one in the future or older than the interval) and `arrivedAt`
+in `expiry.go` has to prefer it only for live copies, since a stored copy already counts from the JetStream
+timestamp. (3) Every PUBLISH grows by about 30 bytes of header, also for the plain NATS clients that read the subject.
+(4) The test that proves it needs a NATS leg that delays a message while both brokers' clocks are right (and one
+where they differ), which the embedded server cannot do and the three-server harness (`natscluster_test.go`) could
+with `Freeze`/`Thaw` on the server between the brokers. Take it when a deployment with a slow inter-broker link asks.
+
 # Tier 4: features MQTT 5 defines that the broker does not offer
 
 ## Enhanced authentication (AUTH packets)
