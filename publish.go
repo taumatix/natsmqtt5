@@ -60,6 +60,9 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 		// MQTT-5.0 §4.7.2 (dollar.go).
 		return c.rejectPublish(p, packet.TopicNameInvalid, "clients may not publish to topics starting with $")
 	}
+	if dollarName(topicName) {
+		c.broker.warnDollarUse(c.sess.clientID, "publish", topicName)
+	}
 
 	// "If it receives more than Receive Maximum QoS 1 and QoS 2 PUBLISH packets
 	// where it has not sent a PUBACK or PUBCOMP in response, the Server uses a

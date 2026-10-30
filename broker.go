@@ -34,6 +34,8 @@ type Broker struct {
 	// wills is nil unless Options.DurableWills is set; see willstore.go.
 	wills  *willStore
 	logger *slog.Logger
+	// dollarWarned makes the first use of a $ topic on an unrestricted broker log once (dollar.go).
+	dollarWarned sync.Once
 
 	listener net.Listener
 

@@ -614,6 +614,9 @@ func (c *conn) checkWill(cp *packet.Connect) error {
 		c.refuse(packet.TopicNameInvalid, "a Will may not target a topic starting with $")
 		return fmt.Errorf("will topic %q starts with $", cp.Will.Topic)
 	}
+	if dollarName(cp.Will.Topic) {
+		c.broker.warnDollarUse(cp.ClientID, "will", cp.Will.Topic)
+	}
 	return nil
 }
 

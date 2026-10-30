@@ -107,6 +107,9 @@ func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID
 		c.logger.Debug("rejecting a subscription to a $ topic", "filter", want.Filter)
 		return nil, false, packet.TopicFilterInvalid
 	}
+	if dollarFilter(want.Filter) {
+		c.broker.warnDollarUse(c.sess.clientID, "subscribe", want.Filter)
+	}
 	if a := c.broker.opts.Authorizer; a != nil {
 		identity, username := c.sess.principal()
 		req := &AuthzRequest{

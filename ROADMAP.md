@@ -149,13 +149,14 @@ entry per member session, the consumer deleted by whoever leaves last). What rem
 
 `Options.RestrictDollarTopics` (opt in) refuses every `$` topic but
 `$share/...`, which is the spec's advice (MQTT-5.0 §4.7.2). Defaulting it on breaks anyone using
-`$app/...`, so it waits for the next major version: consider flipping the default there, with a
-`MIGRATION.md` and a release that logs a warning the first time a client uses a `$` topic. What
-remains of the entry today:
+`$app/...`, so it waits for the next major version. The release that logs a warning the first time a client uses a
+`$` topic is done (2026-10-30; once per broker, naming the client, the action and the topic), so what remains is
+the flip itself, with a `MIGRATION.md` written in that release: nothing in this roadmap plans a major version, so
+none is drafted now. Also still open:
 
-- A restricted broker now drops a stored `$` filter when it resumes the session (2026-10-10). Not covered: a session
-  held in a restricted broker's memory cannot hold one, so that branch is untested by construction; and the in-flight
-  messages such a filter earned are withdrawn the way a denied filter's are, but no test drives that for `$`.
+- A session held in a restricted broker's memory cannot hold a `$` filter, so the resume branch that drops one is
+  untested by construction. (The in-flight messages such a filter earned are withdrawn on resume, and a test drives
+  that, 2026-10-30.)
 - The broker publishes nothing of its own on `$SYS`; the option leaves that namespace unused
   rather than serving it.
 
