@@ -249,10 +249,38 @@ the exchange can end — unsubscribe, disconnect, session expiry, takeover.
 
 The shared backlog changed this: a member takes a message off the group's consumer
 and the message becomes that session's in-flight state, exactly the handover
-described above, and QoS 1 is held in JetStream until its PUBACK (`held.go`). What
-QoS 2 still needs is that state surviving a broker restart and a takeover, which
-the session record carries for QoS 1 and 2 on a non-shared subscription but not
-yet for a message a shared member holds.
+described above, and QoS 1 is held in JetStream until its PUBACK (`held.go`). The
+separate arbitration stream is therefore not needed; what is needed is below, in
+the order that ships something each time. SUBACK keeps granting QoS 1 on `$share/`
+(`subscribe.go`, the cap before `granted`) until the last piece is done, so the
+first two change nothing a client sees.
+
+### 1. A shared member's held QoS 2 message survives a broker restart and a takeover
+
+The session record already carries a QoS 1 or 2 message of a non-shared
+subscription across both (`inflightState`, `restoreEntry`). For a shared member it
+must carry the JetStream ack subject too, and the held-message timer must be
+re-armed on restore, so that the group's AckWait does not lapse and hand the
+message to another member while its owner is down for less than the session
+expiry. Test, real sockets, a killed broker binary and a takeover: [MQTT-4.3.3-6]
+(the PUBLISH is resent on resumption) and that a second member never sees it.
+
+### 2. The ownership point: acknowledge to the group at PUBREC, not at PUBCOMP
+
+Once the PUBREC is received and the record naming the PUBREL is written
+(`handlePubrec`, `checkpointNow`) the message is the member's alone
+([MQTT-4.3.3-8]): the JetStream message is acknowledged then, and `handBackHeld`
+must stop handing back an entry that is `awaitingPubcomp`. Before PUBREC, an
+unsubscribe, a disconnect with a clean start and a session expiry still return the
+message to the group. Test each of those ends, and that a message past PUBREC is
+never delivered to a second member ([MQTT-4.3.3-2], exactly once).
+
+### 3. Grant QoS 2 on `$share/`
+
+Remove the cap, behind an additive `Options` switch that is off until a release has
+carried 1 and 2, then make it the default. The SUBACK test moves from QoS 1 to the
+requested QoS ([MQTT-3.8.4-7]); with the switch off a QoS 2 request is still
+granted QoS 1.
 
 # Operations and robustness (not conformance)
 
