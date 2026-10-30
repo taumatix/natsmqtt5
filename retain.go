@@ -87,6 +87,9 @@ type retainedStore struct {
 	tombstones map[string]tombstone
 	// tombstoneTTL is how long a tombstone is kept; zero or less keeps it forever.
 	tombstoneTTL time.Duration
+	// verifiedAt is the reconnect count at which sweep last checked the whole view
+	// against the stream. Only the broker's sweep goroutine touches it.
+	verifiedAt uint64
 
 	cancel context.CancelFunc
 	// ready closes once the initial replay has caught up, so New does not
@@ -233,21 +236,26 @@ func (s *retainedStore) apply(msg jetstream.Msg) {
 		return
 	}
 	delete(s.tombstones, name)
-	qos, _, _, props := fromNATS(&nats.Msg{Header: msg.Headers(), Data: msg.Data()})
-	r := &retained{
-		topicName: name,
-		payload:   msg.Data(),
-		qos:       qos,
-		props:     props,
-		stored:    time.Now(),
-		id:        messageID(&nats.Msg{Header: msg.Headers()}),
-	}
+	r := newRetained(name, msg.Data(), msg.Headers())
 	// The stream's timestamp, so a message stored before this broker started
 	// has been waiting since then and not since the broker read it.
 	if md, err := msg.Metadata(); err == nil {
 		r.stored, r.seq = md.Timestamp, md.Sequence.Stream
 	}
 	s.byTopic[name] = r
+}
+
+// newRetained builds the view's entry for a stream message's payload and headers.
+func newRetained(name string, data []byte, hdr nats.Header) *retained {
+	qos, _, _, props := fromNATS(&nats.Msg{Header: hdr, Data: data})
+	return &retained{
+		topicName: name,
+		payload:   data,
+		qos:       qos,
+		props:     props,
+		stored:    time.Now(),
+		id:        messageID(&nats.Msg{Header: hdr}),
+	}
 }
 
 func trimRetainedMarker(subject string) (string, bool) {
@@ -341,7 +349,10 @@ func (s *retainedStore) match(filter string) []*retained {
 // those no subscription has asked for since [MQTT-3.3.2-5]. It runs on the
 // broker's session sweep, so a message outlives its interval by up to
 // Options.SessionSweepInterval.
-func (s *retainedStore) sweep() {
+//
+// reconnects is the NATS client's reconnect count. When it has moved since the last
+// full check, the view is verified against the stream whatever the counts say.
+func (s *retainedStore) sweep(reconnects uint64) {
 	now := time.Now()
 	var expired []*retained
 	s.mu.RLock()
@@ -355,7 +366,9 @@ func (s *retainedStore) sweep() {
 		s.discard(expired)
 	}
 	s.purgeTombstones(now)
-	s.reconcile()
+	if s.reconcile(reconnects != s.verifiedAt) {
+		s.verifiedAt = reconnects
+	}
 }
 
 // reconcile drops what this broker still holds although the stream no longer does. The
@@ -363,8 +376,11 @@ func (s *retainedStore) sweep() {
 // while the broker was cut off from NATS never reaches it; the stream holds one message
 // per topic, so a local view with more entries than the stream has messages must hold
 // some the stream has dropped. Counting is one request; only a mismatch pays for
-// looking each entry up.
-func (s *retainedStore) reconcile() {
+// looking each entry up. A reconnect (full) looks every entry up whatever the counts say:
+// a stale entry cancelled by one message the consumer has not delivered yet leaves the
+// counts equal, and a NATS outage is when the consumer can have missed such a clear. It
+// costs one lookup per entry, not a replay. It reports whether the check was made.
+func (s *retainedStore) reconcile(full bool) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), retainStoreTimeout)
 	defer cancel()
 
@@ -372,11 +388,14 @@ func (s *retainedStore) reconcile() {
 	local := len(s.byTopic) + len(s.tombstones)
 	s.mu.RUnlock()
 	if local == 0 {
-		return
+		return true
 	}
 	info, err := s.stream.Info(ctx)
-	if err != nil || uint64(local) <= info.State.Msgs {
-		return
+	if err != nil {
+		return false
+	}
+	if !full && uint64(local) <= info.State.Msgs {
+		return true
 	}
 
 	s.mu.RLock()
@@ -399,6 +418,15 @@ func (s *retainedStore) reconcile() {
 		}
 		last, err := s.stream.GetLastMsgForSubject(ctx, retainedSubject(s.prefix, subject))
 		if err == nil && len(last.Data) > 0 {
+			// Retained again by another broker. The consumer will deliver it, but
+			// until it does the stale message is what a subscriber is sent.
+			s.mu.Lock()
+			if s.byTopic[r.topicName] == r {
+				n := newRetained(r.topicName, last.Data, last.Header)
+				n.stored, n.seq = last.Time, last.Sequence
+				s.byTopic[r.topicName] = n
+			}
+			s.mu.Unlock()
 			continue
 		}
 		if err != nil && !errors.Is(err, jetstream.ErrMsgNotFound) {
@@ -427,6 +455,7 @@ func (s *retainedStore) reconcile() {
 		}
 		s.mu.Unlock()
 	}
+	return true
 }
 
 // purgeTombstones deletes the markers of cleared topics older than the
