@@ -37,6 +37,17 @@ func SetPublishFlushGate(b *Broker, f func()) {
 	b.publishFlushGate.Store(&f)
 }
 
+// SetPublishQueuedGate makes a publish call f with the message's payload after its
+// offline-queue copy is stored and before its live publish: the window in which
+// another publisher's copies can overtake this one. nil removes it.
+func SetPublishQueuedGate(b *Broker, f func(payload []byte)) {
+	if f == nil {
+		b.publishQueuedGate.Store(nil)
+		return
+	}
+	b.publishQueuedGate.Store(&f)
+}
+
 // AwaitNATSReconnect waits until the broker's NATS connection has reconnected
 // at least once and is connected again.
 func AwaitNATSReconnect(b *Broker, within time.Duration) bool {
