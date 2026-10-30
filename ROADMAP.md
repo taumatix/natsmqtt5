@@ -185,9 +185,28 @@ plus re-authentication on an established connection.
 ## Outbound topic aliases: on by default, and measured
 
 **Today:** `Options.OutboundTopicAliases` ships off (2026-10-23): a client that offers a Topic Alias Maximum is sent
-aliases when it is on. **Left:** whether it should default on (a behaviour change for clients that advertise a
-maximum but handle aliases badly, so a decision, with a CHANGELOG line), and a measurement of the bytes it saves
-on a realistic topic mix, which would also tell whether `minAliasedTopic` (8) is the right threshold.
+aliases when it is on. **Left:** the decision to default it on (a behaviour change for clients that advertise a
+maximum but handle aliases badly: a major version, with a CHANGELOG line).
+
+**Measured (2026-10-30, `outalias_measure_internal_test.go`, 100,000 PUBLISHes of a skewed mix: 70% 40-byte telemetry
+names over 400 devices, 15% 21-byte command names, 15% names of 4-6 bytes; real codec, the broker's own table):**
+
+| Payload | Table 1 | 8 | 32 | 128 | 400 |
+|---|---|---|---|---|---|
+| 4 B | -1.3% | 19.2% | 38.9% | 55.5% | 66.4% |
+| 64 B | -0.5% | 7.9% | 15.9% | 22.7% | 27.2% |
+| 512 B | -0.1% | 1.5% | 2.9% | 4.2% | 5.0% |
+
+The saving is the share of bytes on the wire and depends on the client's Topic Alias Maximum and how many distinct
+topics it sees, far more than on the threshold. Findings: (1) a reused name saves its length minus 3 and a first use
+costs 3, so 8 bytes pays off at the 2nd send, 5 bytes at the 3rd, 4 bytes at the 5th, 3 bytes never: 8 is a safe,
+slightly conservative floor and lowering it to 5 gains under 2 points here. (2) With a table smaller than the working
+set the LRU thrashes: a maximum of 1 sends more bytes than no aliases, and raising the floor to 32 saved more than 8
+did at tables of 8 and 32 (22.5% against 19.2%, 40.3% against 38.9%) because the 21-byte names stopped evicting the
+hot 40-byte ones. **Recommendation:** keep `minAliasedTopic` at 8; when it is on by default, send aliases only to a
+client whose maximum is at least 8 (below that the table does not hold a working set), or admit a name to the table on
+its second sighting instead of its first; neither is done. Not measured: CPU of the encode (aliasing encodes twice
+on a miss), and clients in the field that mishandle aliases, which only a trial tells.
 
 ## QoS 2 on shared subscriptions
 
