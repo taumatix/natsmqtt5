@@ -574,6 +574,14 @@ drain:
 		return nil
 	}
 	for _, d := range ds {
+		select {
+		case <-c.done:
+			// Nothing more may leave the queue of waiting deliveries once the
+			// connection has ended, or what was waiting is gone before awayFloor
+			// can see it.
+			return nil
+		default:
+		}
 		c.inHand.Store(d.seq)
 		c.pending.remove(d.seq)
 		p, err := c.prepare(d, len(ready) == 0)
