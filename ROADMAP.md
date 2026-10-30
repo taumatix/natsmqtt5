@@ -389,14 +389,23 @@ broker's server with eight 200 KiB unacknowledged messages and shows the broker 
 name queue copies and nothing is stashed, so it covers the end of a connection on a frozen server, not the aggregate
 bound. A test that stashes many payloads needs a broker without the queue and entries larger than the record allows.
 
-## A default queue that failed at startup: what a session away in the gap is owed
+## A default queue that failed at startup: shared subscriptions made before it came up
 
 **Done (2026-10-11):** the broker retries a default queue it could not create, with a doubling wait from 5 s to a
-minute, logs at info when it comes up, and `Broker.OfflineQueueActive` says whether it is on. Left: a session that
-went away and came back while the queue was off still gets Session Present 1 with nothing replayed, as before; the
-reply could say 0 (and drop the session) while the queue is known to be off. That changes what a resuming client is
-told, so it wants a decision, not a guess. Also untested: shared-subscription hold-back and membership refresh after a
-late queue (they start with it, `queueretry.go`, but only the replay is driven by a test).
+minute, logs at info when it comes up, and `Broker.OfflineQueueActive` says whether it is on.
+**Done (2026-10-30):** what the retry starts (`startQueueLoops`) is driven by tests on a broker whose queue came up late
+(`queueretry_shared_test.go`): the hold-back loop hands a held shared message to another member after
+`SharedHoldLimit`, and the membership refresh keeps the entry of a member that subscribed after the queue came up.
+**Decided (2026-10-30):** a session that went away and came back while the queue was off still gets Session Present 1
+with nothing replayed, and CONNACK is not changed. [MQTT-3.2.2-3] says the Server MUST set Session Present to 1 when it
+has stored Session State for the client, and it has: the subscriptions and the in-flight messages. What the gap lost is
+messages that were never kept, the deviation the start-up warning already names; answering 0 would make the client
+resubscribe and would drop the state that is there, to report a loss it could not repair.
+**Left:** a shared subscription made while the queue was off is a plain queue-group subscription with no backlog
+consumer and no membership entry, and the refresh skips it (`sub.backlog == nil`), so it stays that way until its
+session subscribes again: the group's backlog and the last-member rules do not cover it, and nothing says so but this
+entry. **Shape:** when the retry succeeds, give each live shared subscription its backlog consumer and its entry (the
+path SUBSCRIBE takes), with a test that publishes to a member that subscribed before the queue came up and then leaves.
 
 ## Without the queue, a client that falls behind still loses QoS 1 and 2
 
