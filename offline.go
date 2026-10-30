@@ -101,27 +101,37 @@ func newOfflineQueue(ctx context.Context, js jetstream.JetStream, opts *resolved
 // the ones its non-shared subscriptions can match. A replay reads the whole
 // rewind window otherwise, at a cost per message that every other session's
 // traffic adds to. It returns nil, which reads everything, when there is
-// nothing to narrow by or a filter cannot be converted.
+// nothing to narrow by or a filter cannot be converted. Overlapping filters are
+// reduced to a set that does not overlap, which JetStream requires.
 func (q *offlineQueue) replayFilters(subs []*subscription) []string {
 	var out []string
 	add := func(f string) {
-		for i, have := range out {
-			if !subjectsOverlap(have, f) {
-				continue
+		// The server refuses overlapping filters, so f is folded into the set
+		// until it overlaps nothing: a broader entry swallows it, f swallows a
+		// narrower one, and two that cross (a.*.c, a.b.*) become one subject
+		// that covers both. A broader read is safe: the replay matches each
+		// message against the subscriptions again.
+		for {
+			merged := false
+			for i, have := range out {
+				if !subjectsOverlap(have, f) {
+					continue
+				}
+				if covers(have, f) {
+					return
+				}
+				if !covers(f, have) {
+					f = joinSubjects(have, f)
+				}
+				out = append(out[:i], out[i+1:]...)
+				merged = true
+				break
 			}
-			// The server refuses overlapping filters; the broader one covers
-			// the other, or neither does and the read is left whole.
-			if covers(have, f) {
+			if !merged {
+				out = append(out, f)
 				return
 			}
-			if covers(f, have) {
-				out[i] = f
-				return
-			}
-			out = nil
-			return
 		}
-		out = append(out, f)
 	}
 	for _, sub := range subs {
 		if sub.share != "" {
@@ -135,11 +145,27 @@ func (q *offlineQueue) replayFilters(subs []*subscription) []string {
 		if parent, ok := topic.ParentSubject(subject); ok {
 			add(queuedSubject(q.prefix, parent))
 		}
-		if out == nil {
-			return nil
-		}
 	}
 	return out
+}
+
+// joinSubjects is a NATS filter that covers every subject matching a or b,
+// which overlap: the tokens they agree on are kept, the others become "*",
+// and a ">" in either ends it there.
+func joinSubjects(a, b string) string {
+	at, bt := strings.Split(a, "."), strings.Split(b, ".")
+	out := make([]string, 0, len(at))
+	for i := 0; i < len(at) && i < len(bt); i++ {
+		switch {
+		case at[i] == ">" || bt[i] == ">":
+			return strings.Join(append(out, ">"), ".")
+		case at[i] == bt[i]:
+			out = append(out, at[i])
+		default:
+			out = append(out, "*")
+		}
+	}
+	return strings.Join(out, ".")
 }
 
 // subjectsOverlap reports whether some subject matches both NATS filters.
