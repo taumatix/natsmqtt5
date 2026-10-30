@@ -79,8 +79,10 @@ type AuthStep struct {
 	Done bool
 	// Identity names the authenticated principal, as [AuthResult.Identity]. A
 	// re-authentication must come out as the identity the connection already
-	// has: one that differs disconnects with 0x87, because the subscriptions
-	// were authorised for the first.
+	// has, or else the Authorizer is re-run over the session's subscriptions and
+	// Will for the new identity, as Broker.Reauthorize does, and those it no
+	// longer allows are dropped. If that check cannot be completed the client is
+	// disconnected with 0x87.
 	Identity string
 	// AssignClientID is [AuthResult.AssignClientID]; CONNECT only.
 	AssignClientID string
@@ -212,8 +214,18 @@ func (c *conn) handleAuth(ctx context.Context, p *packet.Auth) error {
 	}
 	c.stopReauth()
 	if step.Identity != "" && step.Identity != c.authIdentity {
-		c.sendDisconnect(packet.NotAuthorized, "re-authentication changed the identity")
-		return errors.New("re-authentication changed the identity")
+		// The subscriptions and the Will were authorised for the first identity:
+		// re-check them for the new one, as Broker.Reauthorize does, before the
+		// client is told it succeeded. Failing closed: anything the sweep could
+		// not decide would stay held on the old identity's say-so, so it
+		// disconnects instead.
+		_, username := c.sess.principal()
+		c.sess.setPrincipal(step.Identity, username)
+		c.authIdentity = step.Identity
+		if _, err := c.broker.reauthorizeLocal(ctx, c.sess.clientID); err != nil {
+			c.sendDisconnect(packet.NotAuthorized, "re-authentication changed the identity and its permissions could not be re-checked")
+			return fmt.Errorf("re-authentication changed the identity: %w", err)
+		}
 	}
 	return c.write(&packet.Auth{ReasonCode: packet.Success, Properties: authProps(c.authMethod, step.Data)})
 }

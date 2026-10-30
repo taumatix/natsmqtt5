@@ -196,13 +196,6 @@ with `Freeze`/`Thaw` on the server between the brokers. Take it when a deploymen
 
 # Tier 4: features MQTT 5 defines that the broker does not offer
 
-## Enhanced authentication: identity change on re-authentication
-
-**Today:** `Options.Auther` and the `scram` sub-package (2026-10-30) drive the AUTH exchange. A re-authentication that
-proves a different identity than the connection's is refused with 0x87.
-**Shape:** let a re-authentication change the identity: re-run the `Authorizer` over the session's subscriptions as
-`Broker.Reauthorize` does and drop those no longer allowed, instead of disconnecting.
-
 ## Outbound topic aliases: on by default, and measured
 
 **Today:** `Options.OutboundTopicAliases` ships off (2026-10-23): a client that offers a Topic Alias Maximum is sent

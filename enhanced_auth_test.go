@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -263,17 +264,54 @@ func TestEnhancedAuth_MQTT_4_12_1_ReauthenticationFailureDisconnects(t *testing.
 	})
 }
 
-// [MQTT-4.12.1-2]: a re-authentication that proves a different principal would leave the
-// subscriptions authorised for the first one: the connection is dropped, with
-// 0x87. Here the secret of bob is proved by a connection that began as alice.
-func TestEnhancedAuth_ReauthenticationCannotChangeTheIdentity(t *testing.T) {
+// [MQTT-4.12.1-2]: a re-authentication that proves a different principal must not
+// leave the subscriptions authorised for the first one. The Authorizer is re-run
+// over them for the new identity: alice's subscription is dropped, the connection
+// stays up, and it now acts as bob. Here bob's secret is proved by a connection
+// that began as alice.
+func TestEnhancedAuth_ReauthenticationAsAnotherIdentityRechecksTheSubscriptions(t *testing.T) {
 	addr := p3Broker(t, func(o *natsmqtt5.Options) {
 		withAuther(o)
 		o.Auther = swapIdentity{hmacAuther{secrets: map[string]string{"alice": "s3cret", "bob": "x"}}}
 	})
 	c := connectedWithAuth(t, addr, "ea-swap", "alice", "s3cret")
+	assert.Equal(t, []packet.ReasonCode{packet.GrantedQoS0}, c.subscribeCodes("alice/#", 0))
 	c.send(authPkt(packet.ReAuthenticate, hmacMethod, nil))
 	nonce := c.expectAuth(packet.ContinueAuthentication).Properties.AuthenticationData
+	c.send(authPkt(packet.ContinueAuthentication, hmacMethod, proof("x", nonce)))
+	c.expectAuth(packet.Success)
+
+	// Acting as bob: bob's subtree is open, alice's is not.
+	assert.Equal(t, []packet.ReasonCode{packet.GrantedQoS0}, c.subscribeCodes("bob/#", 0))
+	assert.Equal(t, []packet.ReasonCode{packet.NotAuthorized}, c.subscribeCodes("alice/other", 0))
+
+	// And alice's old subscription is gone: a publish by alice is not delivered.
+	other := connectedWithAuth(t, addr, "ea-swap-other", "alice", "s3cret")
+	other.send(&packet.Publish{Topic: "alice/x", Payload: []byte("hi")})
+	c.expectNoPublishFor(300 * time.Millisecond)
+}
+
+// [MQTT-4.12.1-2] again: the same swap when the Authorizer cannot decide for the new identity: the
+// subscriptions would stay on the old identity's say-so, so the connection is
+// dropped instead.
+func TestEnhancedAuth_ReauthenticationAsAnotherIdentityFailsClosedWhenTheCheckCannotRun(t *testing.T) {
+	var outage atomic.Bool
+	addr := p3Broker(t, func(o *natsmqtt5.Options) {
+		withAuther(o)
+		o.Auther = swapIdentity{hmacAuther{secrets: map[string]string{"alice": "s3cret", "bob": "x"}}}
+		inner := o.Authorizer
+		o.Authorizer = natsmqtt5.AuthorizerFunc(func(ctx context.Context, r *natsmqtt5.AuthzRequest) error {
+			if outage.Load() {
+				return natsmqtt5.ErrAuthorizerUnavailable
+			}
+			return inner.Authorize(ctx, r)
+		})
+	})
+	c := connectedWithAuth(t, addr, "ea-swap-outage", "alice", "s3cret")
+	assert.Equal(t, []packet.ReasonCode{packet.GrantedQoS0}, c.subscribeCodes("alice/#", 0))
+	c.send(authPkt(packet.ReAuthenticate, hmacMethod, nil))
+	nonce := c.expectAuth(packet.ContinueAuthentication).Properties.AuthenticationData
+	outage.Store(true)
 	c.send(authPkt(packet.ContinueAuthentication, hmacMethod, proof("x", nonce)))
 	c.expectDisconnectThenClose(packet.NotAuthorized)
 }
