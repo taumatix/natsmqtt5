@@ -301,10 +301,14 @@ kept serving the cleared message (reproduced about once in two runs by
 view's size with the stream's message count and, on a surplus, drops entries the stream no longer holds. The purge also
 treats the server's error 10043 ("sequence N not found") as already purged.
 
-**Left:** the check is a count, so one stale entry cancelled by one message the consumer has not delivered yet goes
-unnoticed until the consumer catches up; and a stale entry whose topic was since retained again by another broker is
-corrected only when the consumer delivers that message. A reconnect-triggered full rebuild would close both, at the
-price of a replay per reconnect; build it if a user reports a stale retained message.
+**Done (2026-10-31):** after the NATS client has reconnected, the sweep checks every entry of the view against the stream
+whatever the counts say: an entry whose message is gone and whose topic is cleared is dropped, and one whose topic was
+retained again is replaced by the stream's message without waiting for the consumer. It costs one lookup per entry per
+reconnect, not a replay, so it was not made conditional. The three-server test above still passes;
+`TestARetainedViewIsVerifiedAfterANATSReconnectEvenWhenTheCountsAgree` puts the view in the state a count cannot see.
+
+**Left:** a stale entry is still served until the next sweep after the reconnect (up to `SessionSweepInterval`), and a
+reconnect the broker's NATS client did not notice (a partition shorter than its ping interval) triggers nothing.
 
 ## The weekly scans fail where no pass reads them
 

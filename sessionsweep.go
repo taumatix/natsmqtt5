@@ -28,7 +28,7 @@ func (b *Broker) sweepSessionsLoop(interval time.Duration) {
 		case <-t.C:
 			b.sweepSessions()
 			b.sweepMembersBounded(interval)
-			b.retain.sweep()
+			b.retain.sweep(uint64(b.nc.Stats().Reconnects))
 		}
 	}
 }

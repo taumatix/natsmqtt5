@@ -269,3 +269,35 @@ func SetWillSweepAfter(b *Broker, d time.Duration) {
 		b.wills.sweepAfter.Store(int64(d))
 	}
 }
+
+// RetainedPlant puts an entry into the broker's retained view that the stream does not
+// hold (seq names a stream sequence that does not exist), as a clear missed during a
+// NATS outage leaves one.
+func RetainedPlant(b *Broker, topic, payload string, seq uint64) {
+	b.retain.mu.Lock()
+	defer b.retain.mu.Unlock()
+	b.retain.byTopic[topic] = &retained{topicName: topic, payload: []byte(payload), seq: seq, stored: time.Now()}
+}
+
+// RetainedForget removes a topic from the broker's retained view, as a message its
+// consumer has not delivered yet is absent from it.
+func RetainedForget(b *Broker, topic string) {
+	b.retain.mu.Lock()
+	defer b.retain.mu.Unlock()
+	delete(b.retain.byTopic, topic)
+}
+
+// RetainedPayload is what the broker's retained view holds for topic.
+func RetainedPayload(b *Broker, topic string) (string, bool) {
+	b.retain.mu.RLock()
+	defer b.retain.mu.RUnlock()
+	r, ok := b.retain.byTopic[topic]
+	if !ok {
+		return "", false
+	}
+	return string(r.payload), true
+}
+
+// RetainedSweep runs the retained store's sweep as the broker would with the NATS
+// client having reconnected that many times.
+func RetainedSweep(b *Broker, reconnects uint64) { b.retain.sweep(reconnects) }
