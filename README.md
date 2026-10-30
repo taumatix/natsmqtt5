@@ -581,9 +581,17 @@ one with fewer features:
   `/t` `/n` `/r` `/f` `/d`), a sequence the `nats-server` mapping never
   produces. Topics without those characters keep exactly the subject they had;
   the ones with them are no longer readable as the same subject by
-  `nats-server`'s own MQTT listener, so choose before you have data: switching
-  later leaves stored retained, queued and in-flight messages under the other
-  mapping.
+  `nats-server`'s own MQTT listener, so choose before you have data. **Switching
+  on** needs nothing done: every topic the plain mapping could store has the same
+  subject under the escaping one, so retained, queued and in-flight messages are
+  found as before. **Switching off** has no rewrite to offer, because a topic that
+  needed escaping cannot be written under the plain mapping at all; and the plain
+  broker does not refuse what is stored, it reads `ret/a*b` back as the topic
+  `ret/asb`. Before switching off, publish an empty retained message to every
+  topic containing one of those characters (with the escaping broker still
+  running), and let the offline queue's `OfflineQueueMaxAge` pass or have the
+  affected sessions drain; a session's in-flight messages end when they are
+  acknowledged.
 
 ## Correctness
 

@@ -232,13 +232,19 @@ QoS 2 still needs is that state surviving a broker restart and a takeover, which
 the session record carries for QoS 1 and 2 on a non-shared subscription but not
 yet for a message a shared member holds.
 
-## Escaping `*` and `>`: a way to move
+## Escaping `*` and `>`: a plain broker reads an escaped subject under a wrong name
 
-**Today:** `Options.EscapeNATSWildcards` (and `-escape-nats-wildcards`) works.
-Turning it on or off with data in the retained, queue and in-flight streams
-leaves those messages under the other mapping, with no tool to rewrite them.
-Whether a migration is wanted at all is a decision for a deployment that needs
-it.
+**Decided 2026-10-30: no migration tool.** Turning `EscapeNATSWildcards` on needs no rewrite (a topic the plain
+mapping could store has the same subject under the escaping one; `TestTurningEscapingOnKeeps...` drives a retained
+and a queued message across the switch). Turning it off has nothing to rewrite *to*: a topic containing `*`, `>` or
+whitespace has no plain subject, so a tool could only delete, which is what the README's procedure (clear those
+retained messages, let the queue age out) does with the tools clients already have.
+
+**What is left:** with escaping off, the broker does not refuse a subject it stored under escaping: it decodes
+`ret.a/sb` as the topic `ret/asb` (`TestTurningEscapingOffReads...`), delivering a message under a name nobody
+published. **Shape:** the plain `subjectToName` treats a `/` followed by one of the escape letters as an escape
+sequence it does not know, so the retained and queue readers can skip such a subject (and say so in a warning)
+instead of serving it; a few lines in the decode path plus a test that the wrong name is no longer served.
 
 # Operations and robustness (not conformance)
 
