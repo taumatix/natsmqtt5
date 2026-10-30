@@ -150,7 +150,13 @@ The handler negotiates the `mqtt` subprotocol and closes a client that offers no
 sends a text frame (MQTT-5.0 section 6). A browser's `Origin` must match the request's host or one of
 `Options.WebSocketOriginPatterns`. `Broker.Close` disconnects WebSocket clients with 0x8B like any other;
 shutting the `http.Server` down does not, because it cannot reach a hijacked connection. The TLS state and
-remote address an `Authenticator` sees are those of the HTTP request.
+remote address an `Authenticator` sees are those of the HTTP request. A message is read up to the
+maximum packet size plus 64 KiB (for packets pipelined behind it); a larger one is refused with close
+status 1009 before it is buffered.
+
+The command serves it with `-ws-listen :8083` (path `-ws-path`, `/mqtt` by default). `-tls-cert` and
+`-tls-key` make both that listener (`wss://`) and `-listen` (`mqtts://`) serve TLS; there is no
+certificate reload, so restart the command to rotate.
 
 Authentication and authorization are two small interfaces:
 

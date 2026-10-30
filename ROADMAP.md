@@ -212,16 +212,6 @@ QoS 2 still needs is that state surviving a broker restart and a takeover, which
 the session record carries for QoS 1 and 2 on a non-shared subscription but not
 yet for a message a shared member holds.
 
-## WebSocket: the binary, TLS and a frame size bound
-
-**Today:** `Broker.WebSocketHandler` ships for library users (tests drive a Paho client over a real
-`httptest` server, binary and split frames, origin, subprotocol). Not done: the `natsmqtt5` command has no
-flag to serve it (`-ws-listen`, with the TLS flags it already has); a `wss://` test that proves an
-`Authenticator` sees the request's TLS state and remote address (`webSocketConn`); and the read limit is
-off (`SetReadLimit(-1)`), relying on the packet reader's own size check, so a hostile client's single huge
-frame is streamed rather than rejected up front. **Shape:** the flag, one wss test, and a limit derived from
-the maximum packet size.
-
 ## Escaping `*` and `>`: a way to move
 
 **Today:** `Options.EscapeNATSWildcards` (and `-escape-nats-wildcards`) works.

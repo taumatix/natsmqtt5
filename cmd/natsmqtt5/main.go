@@ -14,6 +14,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -66,6 +67,13 @@ func main() {
 }
 
 func run(args []string, getenv func(string) string, stdout, stderr io.Writer) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return runContext(ctx, args, getenv, stdout, stderr)
+}
+
+// runContext is run until ctx is cancelled, which a test does in place of a signal.
+func runContext(ctx context.Context, args []string, getenv func(string) string, stdout, stderr io.Writer) error {
 	cfg, err := parseConfig(args, getenv, stderr)
 	if err != nil {
 		return err
@@ -77,9 +85,6 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) er
 
 	cfg.broker.Logger = slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: cfg.level}))
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	startCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	broker, err := natsmqtt5.NewWithContext(startCtx, cfg.broker)
 	cancel()
@@ -89,6 +94,13 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) er
 	defer broker.Close()
 
 	cfg.broker.Logger.Info("starting", "version", binaryVersion(), "listen", cfg.broker.Listen, "nats", cfg.broker.NATSURL)
+	if cfg.wsListen != "" {
+		stopWS, err := serveWebSocket(broker, cfg, cfg.broker.Logger)
+		if err != nil {
+			return err
+		}
+		defer stopWS()
+	}
 	if err := broker.Serve(ctx); err != nil {
 		return err
 	}
@@ -102,6 +114,11 @@ type config struct {
 	broker      natsmqtt5.Options
 	level       slog.Level
 	showVersion bool
+	// wsListen is the address to serve MQTT over WebSocket on, "" for none; wsPath is the URL
+	// path it is mounted at; tls is shared by the TCP listener and the WebSocket one.
+	wsListen string
+	wsPath   string
+	tls      *tls.Config
 }
 
 // parseConfig resolves the command line against the environment. An explicit
@@ -131,6 +148,10 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 		restrictDollar  = fs.Bool("restrict-dollar-topics", false, "refuse publishes and subscriptions on topics starting with $ (MQTT 5.0 section 4.7.2), except $share/ subscriptions")
 		maxQoS          = fs.Int("max-qos", 2, "highest QoS the broker accepts (0, 1 or 2)")
 		keepAlive       = fs.Int("server-keep-alive", 0, "override the client's Keep Alive, in seconds; 0 leaves it to the client")
+		wsListen        = fs.String("ws-listen", "", "address to accept MQTT over WebSocket on (for example :8083); empty serves none")
+		wsPath          = fs.String("ws-path", "/mqtt", "URL path the WebSocket handler is mounted at")
+		tlsCert         = fs.String("tls-cert", "", "path to a PEM certificate chain; with -tls-key, the MQTT listener and the -ws-listen one serve TLS (mqtts:// and wss://)")
+		tlsKey          = fs.String("tls-key", "", "path to the PEM private key for -tls-cert")
 		logLevel        = fs.String("log-level", "info", "debug, info, warn or error")
 		showVersion     = fs.Bool("version", false, "print the version and exit")
 	)
@@ -162,6 +183,21 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 		return nil, fmt.Errorf("-server-keep-alive must be between 0 and 65535, got %d", *keepAlive)
 	}
 
+	if !strings.HasPrefix(*wsPath, "/") {
+		return nil, fmt.Errorf("-ws-path must start with /, got %q", *wsPath)
+	}
+	if (*tlsCert == "") != (*tlsKey == "") {
+		return nil, errors.New("-tls-cert and -tls-key go together")
+	}
+	var tlsConfig *tls.Config
+	if *tlsCert != "" {
+		pair, err := tls.LoadX509KeyPair(*tlsCert, *tlsKey)
+		if err != nil {
+			return nil, fmt.Errorf("-tls-cert/-tls-key: %w", err)
+		}
+		tlsConfig = &tls.Config{Certificates: []tls.Certificate{pair}, MinVersion: tls.VersionTLS12}
+	}
+
 	var natsOpts []nats.Option
 	if *creds != "" {
 		natsOpts = append(natsOpts, nats.UserCredentials(*creds))
@@ -175,6 +211,7 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 			NATSURL:                   *natsURL,
 			NATSOptions:               natsOpts,
 			Listen:                    *listen,
+			TLSConfig:                 tlsConfig,
 			SubjectPrefix:             *subjectPrefix,
 			StreamPrefix:              *streamPrefix,
 			DisableRetained:           *noRetained,
@@ -193,6 +230,9 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 		},
 		level:       level,
 		showVersion: *showVersion,
+		wsListen:    *wsListen,
+		wsPath:      *wsPath,
+		tls:         tlsConfig,
 	}, nil
 }
 
