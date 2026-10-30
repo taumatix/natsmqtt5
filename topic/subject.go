@@ -80,11 +80,15 @@ func FilterToSubjectEscaped(filter string) (string, error) {
 // SubjectToName converts a NATS subject produced by NameToSubject back to the
 // MQTT Topic Name it came from. The conversion is exact: for any name that
 // NameToSubject accepts, SubjectToName(NameToSubject(name)) == name.
-func SubjectToName(subject string) string { return subjectToName(subject, false) }
+//
+// It also reads the escape sequences SubjectToNameEscaped does: the plain mapping never writes '/'
+// before one of those letters, so a subject carrying one was stored by a broker that escaped, and
+// serving it under its real name beats serving it under a mangled one after the option is turned off.
+func SubjectToName(subject string) string { return subjectToName(subject) }
 
 // SubjectToNameEscaped is SubjectToName for a subject NameToSubjectEscaped
 // produced: for any name it accepts, SubjectToNameEscaped(NameToSubjectEscaped(name)) == name.
-func SubjectToNameEscaped(subject string) string { return subjectToName(subject, true) }
+func SubjectToNameEscaped(subject string) string { return subjectToName(subject) }
 
 // escapes maps the letter after '/' to the character it stands for.
 var escapes = map[byte]byte{'s': '*', 'g': '>', 'p': ' ', 't': '\t', 'n': '\n', 'r': '\r', 'f': '\f', 'd': 0x7f}
@@ -112,7 +116,7 @@ func escaped(c byte) byte {
 	return 0
 }
 
-func subjectToName(subject string, esc bool) string {
+func subjectToName(subject string) string {
 	var b strings.Builder
 	b.Grow(len(subject))
 	end := len(subject) - 1
@@ -130,7 +134,7 @@ func subjectToName(subject string, esc bool) string {
 					b.WriteByte('.')
 					i++
 				default:
-					if c, ok := escapes[subject[i+1]]; ok && esc {
+					if c, ok := escapes[subject[i+1]]; ok {
 						b.WriteByte(c)
 						i++
 					}
