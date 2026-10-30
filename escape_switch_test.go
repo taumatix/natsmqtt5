@@ -51,17 +51,14 @@ func TestTurningEscapingOnKeepsTheRetainedAndQueuedMessagesTheBrokerAlreadyHeld(
 	assert.Equal(t, "queued/x.y/", queued.Topic, "the queued message survives the switch")
 }
 
-// Turning it off is the direction with a hazard, and no rewrite can fix it: a topic that needed
-// escaping has no subject under the plain mapping at all (that is why the plain broker refuses it
-// with 0x90). The plain broker does not refuse what is already stored, though: it reads the
-// escaped subject "ret.a/sb" back as the topic "ret/asb". This test records that, so the
-// procedure the README gives (clear such retained messages before switching) is the one the
-// behaviour calls for.
-func TestTurningEscapingOffReadsAnEscapedRetainedMessageUnderAWrongName(t *testing.T) {
+// Turning it off cannot rewrite what was stored (a topic that needed escaping has no plain
+// subject), but the plain broker reads the escaped subject "ret.a/sb" back as the topic it was:
+// a retained message published under escaping is still served, under its real name.
+func TestTurningEscapingOffStillServesAnEscapedRetainedMessageUnderItsRealName(t *testing.T) {
 	natsURL := startNATS(t)
 	addrA, stopA := startStoppableBroker(t, natsURL, persistent, withEscapes)
 	pub, _ := connectClient(t, addrA, connectOpts("switch-off-pub"))
-	publishNamed(t, pub, "ret/a*b", true)
+	publishNamed(t, pub, "ret/a*b c", true)
 	stopA()
 
 	addrB := startBroker(t, natsURL, persistent)
@@ -69,6 +66,6 @@ func TestTurningEscapingOffReadsAnEscapedRetainedMessageUnderAWrongName(t *testi
 	late.connect(rawConnect("switch-off-late", 300))
 	late.subscribe("ret/#", packet.QoS1)
 	got := late.expectPublish()
-	assert.NotEqual(t, "ret/a*b", got.Topic, "the plain mapping cannot name the topic")
-	t.Logf("the plain broker serves it as %q", got.Topic)
+	assert.Equal(t, "ret/a*b c", got.Topic)
+	assert.True(t, got.Retain)
 }

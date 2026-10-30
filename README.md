@@ -597,13 +597,11 @@ one with fewer features:
   on** needs nothing done: every topic the plain mapping could store has the same
   subject under the escaping one, so retained, queued and in-flight messages are
   found as before. **Switching off** has no rewrite to offer, because a topic that
-  needed escaping cannot be written under the plain mapping at all; and the plain
-  broker does not refuse what is stored, it reads `ret/a*b` back as the topic
-  `ret/asb`. Before switching off, publish an empty retained message to every
-  topic containing one of those characters (with the escaping broker still
-  running), and let the offline queue's `OfflineQueueMaxAge` pass or have the
-  affected sessions drain; a session's in-flight messages end when they are
-  acknowledged.
+  needed escaping cannot be written under the plain mapping at all, but what is
+  stored is still read back under its real name (`ret/a*b` stays `ret/a*b`), so
+  it keeps being served; clients can no longer publish to such a topic, nor
+  subscribe to one by name, so publish an empty retained message to clear one
+  before switching off if it should go.
 
 ## Correctness
 

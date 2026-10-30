@@ -11,6 +11,7 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** a broker without `EscapeNATSWildcards` read a subject stored under escaping (retained, queued) back as a mangled topic (`ret/a*b` as `ret/asb`). `topic.SubjectToName` now decodes the escape sequences too; the plain mapping never writes them, so every subject it produces decodes as before. Switching the option off no longer renames what was stored; it cannot be reached by a client that must publish or subscribe by that name.
 - **Added:** an unrestricted broker logs a warning, once, the first time a client publishes, subscribes or sets a Will on a topic starting with `$` (other than the reserved `$retained` and `$queue`, which stay refused), saying a future major version may refuse them by default and that `Options.RestrictDollarTopics` refuses them now. Behaviour is otherwise unchanged.
 - **Added:** the `natsmqtt5` command serves WebSocket: `-ws-listen` (with `-ws-path`, default `/mqtt`), and `-tls-cert` / `-tls-key` make `-listen` (mqtts) and the WebSocket listener (wss) serve TLS. Without them nothing changes.
 - **Fixed:** the WebSocket handler's read limit was never applied (`websocket.NetConn` lifts it), so a client's single huge message was streamed to the packet reader. A message is now limited to `MaximumPacketSize` plus 64 KiB and a larger one is closed with status 1009 up front.
