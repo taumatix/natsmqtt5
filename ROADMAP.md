@@ -74,31 +74,25 @@ version that shipped first. Worked out 2026-10-30, to ship in this order, each s
 the server a broker uses from the other two (three real servers in containers, `natscluster_test.go`), watches the
 client's socket close before the survivor publishes, heals, and counts one publication. It found that the fenced
 broker's own disconnect path published the Will again when the removal of the record timed out; `fire` now retries
-the removal until the store answers. Left: the partition shapes the harness can make and the test does not (the
-isolated server was the leader of the Will bucket or not, chosen by chance; a partition that leaves the broker's
-server with a majority and cuts the *broker* off is the existing proxy test), and a partition longer than
-`retryFor` with the broker still cut off, which waits for the store for as long as it takes by design.
-
-## Large Wills in the index
-
-**Done:** against a real three-server cluster (2026-10-24), a rolling graceful restart of all three servers under the
-default `WillCheckInterval`, with brokers that know all three URLs, closes no client and publishes no Will, and
-neither does a 2-second kill of the only server a broker uses (`will_restart_cluster_test.go`). A restart longer than
-twice the interval does fence, as designed.
-
-**Today:** the index's memory is measured (`TestWillIndexHeapPerRecord`): about 330 bytes per record plus the Will's
-payload and properties, 16 MiB at 50,000 records of a 7-byte payload. A Will with a large payload (the protocol
-allows 64 KiB) makes the payload the dominant term, so a deployment of many large Wills holds them all in every broker.
-
-**Shape:** hold only owner, revision and due time in the index and read the record when one is to be adopted.
+the removal until the store answers. Left, precisely, and none of it changes behaviour a user relies on, so it waits for a pass with the cluster harness at
+hand: (1) the isolation test does not choose whether the isolated server leads the Will bucket, so it runs one of the
+two shapes by chance (pin each with `StopServer` of the leader first); (2) a partition that leaves the broker's server
+with a majority and cuts the *broker* off is the proxy test, not a cluster one; (3) a partition longer than `retryFor`
+with the broker still cut off waits for the store for as long as it takes, by design, so there is nothing to assert
+but that it does not publish.
 
 ## Durable Wills on by default
 
-**Today:** `DurableWills` is off, because it stores Will payloads in clear text
-in a bucket and needs JetStream. **Shape:** make it default whenever JetStream
-is in use, once the partition entry above is done and a Will payload's
-visibility has an answer (an Authorizer check on the bucket, or a documented
-requirement). A default change needs a CHANGELOG entry that says so.
+**Today:** `DurableWills` is off. Turning it on by default is a behaviour change for every deployment that does not
+set it: the broker would create a bucket, need JetStream where it ran without, hold Will payloads in clear text on
+NATS, and delay the Will of a broker that really died by the survivors' wait (about 4.5 times `WillCheckInterval`).
+The preconditions this entry named are met: the partition work is tested against a real three-server cluster, and the
+payload's visibility has its answer, a documented requirement (the `Authorizer` cannot see the bucket, so the bucket
+needs the session bucket's NATS permissions; README, "Durable Will Messages").
+
+**Why it waits:** the flip is a major-version change (or a minor one behind an opt-in the deployment sets), not a pass's
+work. **Shape:** at the next major version make it default whenever JetStream is in use and the offline queue or
+sessions already need it, with a CHANGELOG entry that says so and `DisableDurableWills` to opt out (additive today).
 
 ## DurablePublish does not cover live delivery to subscribers on other brokers
 
@@ -123,10 +117,16 @@ queue publish would let JetStream drop it within its duplicate window).
 Deriving that id from the MQTT packet id is unsafe: a packet id is reused after its PUBACK, so a later, legitimate
 message could be dropped as a duplicate within the window. It would need an id the client controls per message.
 
-## Will Messages are not covered by DurablePublish
+## A Will's queue copy is not retried when the queue refuses it
 
-A Will published by `publishWillFor` goes through the queue's keep but is not flushed, and a Will
-has no client to refuse to. Whether a published Will should wait for the flush is undecided.
+**Decided (2026-10-30):** a Will is not held for `DurablePublish`'s flush. The flush protects a client by letting the
+broker refuse its PUBLISH with 0x83 so it sends again; a Will has no client, and its record is deleted by the
+compare-and-swap that elects the publisher, so a second publication on a failed flush would risk announcing it twice.
+**Left:** `publishWillFor` logs and carries on when the queue stream refuses the copy, so a session that was away
+never gets that Will. With `DurablePublish` set that is the case the option exists to close. **Shape:** retry the keep
+a few times with a short gap before publishing live, only when `DurablePublish` is on; test it with a stream that
+refuses once (the existing `cutProxy` in `durable_flush_fail_test.go` cuts after the stored ack, the wrong moment, so
+it needs a variant that cuts before).
 
 # Tier 3: SHOULD statements
 
@@ -338,14 +338,6 @@ shared pull) for a context with a deadline, and give any that lacks one the same
 test that blocks one such call (a frozen NATS server from the cluster harness, `Freeze`) and shows the connection
 still finishes. Only if a call cannot be bounded, hand the goroutine's state over through a mutex so a bounded wait
 is safe.
-
-## DurablePublish and the Will bucket: what each guarantees
-
-**Today:** `DurablePublish`'s flush confirms that the NATS server received the live publish, not that
-JetStream stored anything; the stored copy is the queue's. The README says so since v0.11.0. The
-`_wills` bucket has no TTL, so an orphaned record is never aged out. **Shape:** decide a TTL or a
-sweep for the bucket (it must outlast the longest Will Delay Interval), and add a test that proves
-the README's statement about what the flush covers.
 
 ## A default queue that failed at startup: what a session away in the gap is owed
 
