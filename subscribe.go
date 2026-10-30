@@ -510,22 +510,10 @@ func (c *conn) deliverLoop() {
 				return
 			}
 		case d := <-c.deliveries:
-			if d.id != "" && c.wasReplayed(d.id) {
-				// Its queued copy was replayed; this is the live copy arriving
-				// late, and QoS 2 must not deliver twice.
-				c.pending.remove(d.seq)
+			if c.skipDelivery(d) {
 				continue
 			}
-			if d.sub != nil && !d.sub.wanted() {
-				// Queued before its subscription was removed, by an UNSUBSCRIBE
-				// or by Broker.Reauthorize. A server "MAY continue to deliver any
-				// existing messages buffered" after an UNSUBSCRIBE (MQTT-5.0
-				// §3.10.4); after a revoked permission it must not.
-				c.pending.remove(d.seq)
-				continue
-			}
-			err := c.deliverTracked(d)
-			if err != nil {
+			if err := c.deliverBurst(d); err != nil {
 				c.logger.Debug("delivery failed", "topic", d.topic, "error", err)
 				c.close()
 				return
@@ -534,7 +522,134 @@ func (c *conn) deliverLoop() {
 	}
 }
 
+// maxDeliveryBurst is how many waiting deliveries one pass of the delivery
+// goroutine prepares before it writes any, so that their QoS 2 records share one
+// checkpoint (deliverBurst).
+const maxDeliveryBurst = 32
+
+// prepared is a delivery that holds its Packet Identifier and send quota and is
+// tracked as in flight, and whose PUBLISH has not been written.
+type prepared struct {
+	d   *delivery
+	pub *packet.Publish
+	// record is true for QoS 2: the stored record must say so before the PUBLISH.
+	record bool
+}
+
+// deliverBurst delivers first and the deliveries already waiting behind it,
+// writing the record of their QoS 2 messages once for all of them instead of
+// once for each: the write is the cost of a QoS 2 delivery, and it must precede
+// every PUBLISH it covers [MQTT-4.3.3-6]. A delivery that would wait for send
+// quota ends the burst there (what is prepared is written first), because the
+// client frees quota by acknowledging what was not yet sent.
+func (c *conn) deliverBurst(first *delivery) error {
+	ds := []*delivery{first}
+drain:
+	for len(ds) < maxDeliveryBurst {
+		select {
+		case d := <-c.deliveries:
+			if c.skipDelivery(d) {
+				continue
+			}
+			ds = append(ds, d)
+		default:
+			break drain
+		}
+	}
+	var ready []*prepared
+	flush := func() error {
+		record := false
+		for _, p := range ready {
+			record = record || p.record
+		}
+		if record {
+			c.checkpointNow()
+		}
+		for _, p := range ready {
+			if err := c.sendPrepared(p); err != nil {
+				return err
+			}
+		}
+		ready = nil
+		return nil
+	}
+	for _, d := range ds {
+		select {
+		case <-c.done:
+			// Nothing more may leave the queue of waiting deliveries once the
+			// connection has ended, or what was waiting is gone before awayFloor
+			// can see it.
+			return nil
+		default:
+		}
+		c.inHand.Store(d.seq)
+		c.pending.remove(d.seq)
+		p, err := c.prepare(d, len(ready) == 0)
+		if err == errNoQuotaYet {
+			if err = flush(); err != nil {
+				return err
+			}
+			p, err = c.prepare(d, true)
+		}
+		if err != nil {
+			return err
+		}
+		if p != nil {
+			ready = append(ready, p)
+		}
+	}
+	err := flush()
+	select {
+	case <-c.done:
+		// Left set, as deliverTracked does.
+	default:
+		c.inHand.Store(0)
+	}
+	return err
+}
+
+// skipDelivery reports a waiting delivery that is not to be sent, and drops it.
+func (c *conn) skipDelivery(d *delivery) bool {
+	if d.id != "" && c.wasReplayed(d.id) {
+		// Its queued copy was replayed; this is the live copy arriving
+		// late, and QoS 2 must not deliver twice.
+		c.pending.remove(d.seq)
+		return true
+	}
+	if d.sub != nil && !d.sub.wanted() {
+		// Queued before its subscription was removed, by an UNSUBSCRIBE
+		// or by Broker.Reauthorize. A server "MAY continue to deliver any
+		// existing messages buffered" after an UNSUBSCRIBE (MQTT-5.0
+		// §3.10.4); after a revoked permission it must not.
+		c.pending.remove(d.seq)
+		return true
+	}
+	return false
+}
+
+// errNoQuotaYet is prepare's answer when it may not wait for send quota.
+var errNoQuotaYet = errors.New("no send quota yet")
+
 func (c *conn) deliver(d *delivery) error {
+	p, err := c.prepare(d, true)
+	if err != nil || p == nil {
+		return err
+	}
+	if p.record {
+		// In the stored record before the PUBLISH is on the wire, so that a
+		// successor of a broker killed after the client has it resends this one
+		// message with its identifier [MQTT-4.4.0-1] and does not deliver it
+		// again as a new one from the replay (the position and the delivered id
+		// are written with it).
+		c.checkpointNow()
+	}
+	return c.sendPrepared(p)
+}
+
+// prepare takes what a delivery needs before its PUBLISH: send quota, a Packet
+// Identifier, a place among the in-flight messages. It returns nil when there is
+// nothing to send, and errNoQuotaYet when wait is false and quota is not free.
+func (c *conn) prepare(d *delivery, wait bool) (*prepared, error) {
 	pub := &packet.Publish{
 		Topic:      d.topic,
 		QoS:        d.qos,
@@ -544,18 +659,26 @@ func (c *conn) deliver(d *delivery) error {
 	}
 	if d.qos == packet.QoS0 {
 		if d.applyExpiry(time.Now()) {
-			return nil
+			return nil, nil
 		}
-		return c.write(pub)
+		return &prepared{d: d, pub: pub}, nil
 	}
 
 	// Receive Maximum limits how many QoS 1 and QoS 2 publications may be in
 	// flight towards the client at once (MQTT-5.0 §4.9).
 	if !d.quotaHeld {
-		select {
-		case c.quota <- struct{}{}:
-		case <-c.done:
-			return nil
+		if wait {
+			select {
+			case c.quota <- struct{}{}:
+			case <-c.done:
+				return nil, nil
+			}
+		} else {
+			select {
+			case c.quota <- struct{}{}:
+			default:
+				return nil, errNoQuotaYet
+			}
 		}
 	}
 	if d.sub != nil && !d.sub.wanted() {
@@ -563,7 +686,7 @@ func (c *conn) deliver(d *delivery) error {
 		// unbounded. A revocation landing between here and the write below
 		// still lets this one message out: it was earned before the change.
 		c.releaseQuota()
-		return nil
+		return nil, nil
 	}
 
 	// Checked last, after the waits above, which count towards the interval: a
@@ -572,13 +695,13 @@ func (c *conn) deliver(d *delivery) error {
 	// for the client to acknowledge and nothing to wedge.
 	if d.applyExpiry(time.Now()) {
 		c.releaseQuota()
-		return nil
+		return nil, nil
 	}
 
 	id, ok := c.sess.nextID()
 	if !ok {
 		c.releaseQuota()
-		return fmt.Errorf("no free Packet Identifier for %q", d.topic)
+		return nil, fmt.Errorf("no free Packet Identifier for %q", d.topic)
 	}
 	pub.PacketID = id
 	c.activity.Add(1)
@@ -592,15 +715,15 @@ func (c *conn) deliver(d *delivery) error {
 		// the resume resends and not also a new one the replay sends.
 		c.sess.noteDelivered(d.id, d.seq)
 	}
-	if d.qos == packet.QoS2 {
-		// In the stored record before the PUBLISH is on the wire, so that a
-		// successor of a broker killed after the client has it resends this one
-		// message with its identifier [MQTT-4.4.0-1] and does not deliver it
-		// again as a new one from the replay (the position and the delivered id
-		// are written with it).
-		c.checkpointNow()
+	return &prepared{d: d, pub: pub, record: d.qos == packet.QoS2}, nil
+}
+
+// sendPrepared writes a prepared delivery's PUBLISH.
+func (c *conn) sendPrepared(p *prepared) error {
+	if p.d.qos == packet.QoS0 {
+		return c.write(p.pub)
 	}
-	sent, err := c.writePublish(pub)
+	sent, err := c.writePublish(p.pub)
 	if err != nil {
 		return err
 	}
@@ -610,8 +733,8 @@ func (c *conn) deliver(d *delivery) error {
 		// completed sending that Application Message" [MQTT-3.1.2-25]: the
 		// exchange ends here, rather than holding a Packet Identifier and a
 		// send-quota slot until the session does.
-		c.sess.completeInflight(c, id)
-		d.held = false
+		c.sess.completeInflight(c, p.pub.PacketID)
+		p.d.held = false
 		c.releaseQuota()
 	}
 	return nil
