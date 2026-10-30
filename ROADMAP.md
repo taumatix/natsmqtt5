@@ -33,8 +33,11 @@ queue subjects the session's non-shared subscriptions match (`replayFilters`): 5
 
 **Shape:** a session that subscribes during its own replay no longer gets the window's older messages for the new
 filter (they were queued before it subscribed; MQTT owes it only what arrives after). Left: a session whose
-subscriptions are all shared, or whose filters overlap without one covering the other, still reads the whole window;
-the per-session cursor below replaces the span.
+subscriptions are all shared still reads the whole window, though it delivers nothing from it (a shared message comes from
+its backlog): skip the read when no non-shared subscription remains. Filters that overlap are reduced to a set
+JetStream accepts (`joinSubjects`, 2026-10-30: crossing filters join into one covering subject, and a broad filter
+arriving after narrower ones no longer leaves them overlapping, which made the replay fail); the per-session cursor
+below replaces the span.
 
 ## A live copy for a session that has since delivered 8192 more sequences is not noted
 
@@ -47,7 +50,21 @@ deliveries to the same session, so it is rare, but it is the exact case the spec
 has been delivered or acknowledged, advanced only by a stream read, so an unheard copy cannot be skipped over.
 A replay starts at the cursor; the delivered ids are only needed above it. That makes the window above moot
 too, and it is the redesign this entry and the one before it share. Size L; the entry above is the bounded
-version that shipped first.
+version that shipped first. Worked out 2026-10-30, to ship in this order, each slice usable alone:
+
+1. **A read-only advance scan.** The cursor can only move past a sequence the stream has been read through, and a
+   live connection reads nothing, so a scan runs (from the checkpoint loop, once the delivered ids above the cursor
+   pass a threshold, and at release): read the session's `replayFilters` from the cursor to the stream's last
+   sequence without delivering, and move the cursor to just below the lowest matching message whose id is not in
+   `delivered`, in the connection's queue, or in hand (the copy stored before its live copy was published is in the
+   stream already, so a scan that reaches sequence E has seen every copy at or below E). Ids at or below the cursor
+   are then dropped. No change to what a client is sent.
+2. **`ReplayCursor` in the record** (`omitempty`, so an older record restores without one and an older broker ignores
+   it), written with the checkpoint and at release. A record with a cursor replays from `min(cursor, AwayFromSeq,
+   AwayLateSeq)`; one without keeps the time rewind. `lateSeqSafeLocked` then accepts any sequence at or above the
+   cursor, and `deliveredSeqWindow` and the time rewind's ids go. The cursor never moves backward, and a restored
+   cursor above the queue's first sequence after a purge is clamped.
+3. **Drop `OfflineQueueRewind` as a correctness bound** (keep it as the start for records with no cursor).
 
 # Tier 2: MUST statements on rare or optional paths
 
@@ -320,12 +337,6 @@ price of a replay per reconnect; build it if a user reports a stale retained mes
 unchanged code, and nothing routes a failed scheduled run to a pass; the maintenance pass should read it, and
 `check-repo-health.py` counts only the `CI` workflow (the same gap as `claude-agent-sdk-go`'s `Upstream surface`). A push
 that is red because of a standard-library finding is also not this module's to fix: it clears when the runner's Go does.
-
-## Offline-queue replay without scanning everything published
-
-The replay reads every queued message since the disconnect and matches each in Go. `FilterSubjects`
-would let JetStream do it, but it refuses overlapping filters (`a.>` with `a.b`), so the
-session's filters have to be reduced to a non-overlapping set first.
 
 ## Offline queue for messages published by plain NATS clients
 
