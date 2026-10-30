@@ -45,6 +45,9 @@ type Broker struct {
 	// publishFlushGate, when set, is called by a durable publish between the
 	// live publish and the flush that confirms it. A seam for tests.
 	publishFlushGate atomic.Pointer[func()]
+	// publishQueuedGate, when set, is called with a QoS 1 or 2 message's payload after
+	// its queue copy is stored and before its live publish. A seam for tests.
+	publishQueuedGate atomic.Pointer[func(payload []byte)]
 	// resumeGate, when set, is called with each stored filter after it has been
 	// authorised and before it is rebuilt: the window a takeover can land in.
 	resumeGate atomic.Pointer[func(filter string)]

@@ -395,8 +395,11 @@ most of them; these remain, each with why:
   (`restored_away_internal_test.go`). A stress test with six concurrent publishers across a drop and a move to another
   broker (2026-10-13, `restored_concurrent_qos2_test.go`) finds every message once and none sent as new twice, but it
   is weak evidence for this guard: with the delivered-id test removed from `offline.go` and `catchup.go` it still passes,
-  because the replay in that run starts past what was delivered. The out-of-order state still needs a publisher stopped
-  between its queue write and its live publish, which the stress test does not produce.
+  because the replay in that run starts past what was delivered. The out-of-order state is now produced by the broker
+  (2026-10-30, `out_of_order_queue_test.go`): `SetPublishQueuedGate` (test-only) holds one publisher between its queue
+  copy and its live publish while another is delivered, and the detached session's restored rewind sends the held one
+  and not the delivered one again. With the delivered-id test removed from `offline.go` and `catchup.go` that test fails
+  (it is sent again), so it proves the guard.
 - **The cap on stored delivered ids** (`maxStoredDelivered`, 4096): past it a restored rewind repeats
   a QoS 2 message [MQTT-4.3.3-6]. Driven end to end with the bound lowered to 20
   (`TestAClientAheadOfMoreThanTheStoredIDBoundIsWarnedAndRepeatedOnlyPastIt`: a warning on release,

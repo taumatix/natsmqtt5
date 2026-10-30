@@ -137,6 +137,9 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 			return c.rejectPublish(p, packet.ImplementationSpecificError, "the message could not be queued")
 		}
 	}
+	if f := c.broker.publishQueuedGate.Load(); f != nil {
+		(*f)(p.Payload)
+	}
 	// A publish handed to a connected NATS client is written to the socket at
 	// once. If the connection drops before the server read it, the client has
 	// nothing buffered to send again, yet its flush is still answered after the
