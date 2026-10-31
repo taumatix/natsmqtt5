@@ -258,15 +258,17 @@ Not covered: a message pulled but not yet checkpointed when its broker dies goes
 back to the group after AckWait, which a client that already answered it cannot
 tell from a new message (entry 2 narrows it: after PUBREC the record names the PUBREL).
 
-### 2. The ownership point: acknowledge to the group at PUBREC, not at PUBCOMP
+### 2. Done (2026-10-31): the ownership point, acknowledged to the group at PUBREC
 
-Once the PUBREC is received and the record naming the PUBREL is written
-(`handlePubrec`, `checkpointNow`) the message is the member's alone
-([MQTT-4.3.3-8]): the JetStream message is acknowledged then, and `handBackHeld`
-must stop handing back an entry that is `awaitingPubcomp`. Before PUBREC, an
-unsubscribe, a disconnect with a clean start and a session expiry still return the
-message to the group. Test each of those ends, and that a message past PUBREC is
-never delivered to a second member ([MQTT-4.3.3-2], exactly once).
+Once the record naming the PUBREL is written (`handlePubrec`, `settleOwned`) the
+JetStream message is acknowledged, `handBackHeld` skips an entry that
+`awaitingPubcomp`, and a restore acknowledges a `Rel` entry still naming one. Tested
+past PUBREC with an unsubscribe, a clean start, a session expiry, a returning client
+and a SIGKILLed broker; before PUBREC the end of the session still gives the message
+to another member. An UNSUBSCRIBE does not hand back a message already sent (QoS 1
+either): it stays the session's until the exchange ends. Not covered: a broker
+killed after the PUBREC is read and before its record is written (the client has
+answered, the group gets the message after AckWait).
 
 ### 3. Grant QoS 2 on `$share/`
 

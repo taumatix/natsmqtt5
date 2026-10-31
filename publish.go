@@ -313,6 +313,7 @@ func (c *conn) handlePubrec(p *packet.Pubrec) error {
 		return nil
 	}
 	c.checkpointNow()
+	c.sess.settleOwned(p.Ack.PacketID)
 	return c.write(&packet.Pubrel{Ack: packet.Ack{PacketID: p.Ack.PacketID}})
 }
 
@@ -345,6 +346,7 @@ func (c *conn) drainPubrels() {
 		c.relMu.Unlock()
 		c.checkpointNow()
 		for _, id := range ids {
+			c.sess.settleOwned(id)
 			if err := c.write(&packet.Pubrel{Ack: packet.Ack{PacketID: id}}); err != nil {
 				c.close()
 				return

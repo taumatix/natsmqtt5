@@ -70,6 +70,11 @@ func (b *Broker) restoreSessionState(ctx context.Context, s *session, rec *sessi
 	lost := 0
 	for _, st := range entries {
 		o := b.restoreEntry(ctx, s.clientID, st)
+		if st.Rel && st.Ack != "" {
+			// The previous broker wrote the PUBREL's record and was stopped before
+			// it told the group: the message is the client's [MQTT-4.3.3-8].
+			b.ack(st.Ack)
+		}
 		if o == nil {
 			lost++
 			if st.Ack != "" {

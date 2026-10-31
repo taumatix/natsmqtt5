@@ -596,7 +596,7 @@ func (s *session) handBackHeld() {
 	s.mu.Lock()
 	var held []string
 	for _, o := range s.inflight {
-		if o.ackSubject != "" {
+		if o.ackSubject != "" && !o.awaitingPubcomp {
 			held = append(held, o.ackSubject)
 			o.ackSubject = ""
 		}
@@ -791,6 +791,25 @@ func (s *session) awaitPubcomp(id uint16) {
 	defer s.mu.Unlock()
 	if o, ok := s.inflight[id]; ok {
 		o.awaitingPubcomp = true
+	}
+}
+
+// settleOwned acknowledges to its group the shared-subscription backlog message
+// of a QoS 2 entry that is past its PUBREC, and no longer holds it. The client
+// owns that message [MQTT-4.3.3-8], so the group must never give it to another
+// member, whatever happens to the session or to this broker next; what is left
+// to do is a PUBREL, and that needs no backlog message. Called once the record
+// that names the PUBREL has been written, which carries the subject, so that a
+// broker killed before this runs acknowledges it when the session is restored.
+func (s *session) settleOwned(id uint16) {
+	s.mu.Lock()
+	var subject string
+	if o, ok := s.inflight[id]; ok && o.awaitingPubcomp {
+		subject, o.ackSubject = o.ackSubject, ""
+	}
+	s.mu.Unlock()
+	if subject != "" && s.holds != nil {
+		s.holds.ack(subject)
 	}
 }
 
@@ -1588,6 +1607,9 @@ func (s *session) inflightState(blobs *sessionStore) (inflight []storedInflight,
 		switch {
 		case o.awaitingPubcomp:
 			st.Rel = true
+			// Still named until the group has been told, so a broker killed in
+			// between is not the reason the group gives the message away.
+			st.Ack = o.ackSubject
 		case o.queueSeq != 0:
 			st.Seq = o.queueSeq
 			st.Ack = o.ackSubject

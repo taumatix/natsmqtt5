@@ -100,7 +100,7 @@ jobs:
       - name: A killed broker's held shared message
         env:
           NATSMQTT5_SLOW_TESTS: '1'
-        run: .github/scripts/smoke.sh TestAKilledBrokersHeldSharedMessageIsHeldAgainByTheRestoredSession TestAKilledBrokersHeldSharedMessageRestoredLateIsSeenTwiceNotThrice TestAKilledBrokersHeldSharedQoS2MessageIsHeldAgainByTheRestoredSession_MQTT_4_4_0_1
+        run: .github/scripts/smoke.sh TestAKilledBrokersHeldSharedMessageIsHeldAgainByTheRestoredSession TestAKilledBrokersHeldSharedMessageRestoredLateIsSeenTwiceNotThrice TestAKilledBrokersHeldSharedQoS2MessageIsHeldAgainByTheRestoredSession_MQTT_4_4_0_1 TestAKilledBrokersQoS2MessagePastPubrecIsNotGivenToTheGroup_MQTT_4_3_3_8
 
   cluster:
     # The tests that need a three-server NATS cluster (an isolated server, a restart, a long
