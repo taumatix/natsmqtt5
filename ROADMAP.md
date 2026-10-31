@@ -26,8 +26,8 @@ in Tier 2.
 
 ## The replay cursor: what falls back to the time rewind, and what waits for a resume
 
-**Blocked by:** nothing for the recovery shape below (the cursor starting at the next scan), though it is not worked
-out; a clustered, replicated stream to measure the added requests on is *real deployments*.
+**Blocked by:** nothing for (3) below (the record carrying ids past 4096 outside its value, as the in-flight spill
+does); a clustered, replicated stream to measure the added requests on is *real deployments*.
 
 **Today:** a session whose record or memory has a replay cursor (`cursor.go`) is replayed from it; one without is
 replayed from `OfflineQueueRewind` before its release, as before, and keeps the rewind's limits: a message whose live
@@ -36,18 +36,38 @@ sequences below what the session has delivered is not noted [MQTT-4.4.0-1]. A se
 
 1. it was restored from a record written before the cursor existed, until its first replay reads the queue to its
    end (one absence, once, after the upgrade);
-2. it left more than 1024 holes (`maxReplayHoles`), or more than 16384 ids above the cursor (`cursorIDBound`): scans
-   that keep failing, or a connection whose lowest unsent message never moves, pin the cursor while ids pile up;
+2. it left more than 1024 holes (`maxReplayHoles`), or more than 16384 ids above the cursor (`cursorIDBound`);
 3. its record could not carry every id above the cursor (more than `maxStoredDelivered`, 4096, or trimmed to fit a
    value): the record is written without one, so a broker that restores it falls back, though the broker that held
    it does not;
-4. a SUBSCRIBE could not read the queue's last sequence, or its filter cannot be narrowed to queue subjects (a scan
-   then never runs).
+4. a SUBSCRIBE could not read the queue's last sequence, or its filter cannot be narrowed to queue subjects.
 
-A cursor that was dropped comes back only at the next replay that reads to the end, or at a SUBSCRIBE by a session with
-no other non-shared subscription. **Shape (not worked out):** start a cursor at the next scan instead (the ids above the lowest unsent
-message are complete once a replay or catch-up has run), so (2) and (4) recover while connected; let the record carry
-ids past 4096 outside the value (as the in-flight spill does), which closes (3) and the cap below.
+**Recovered while connected (2026-10-31):** after 1024 deliveries without a cursor (`cursorScanAfter`), a restart scan
+(`restartCursor`) reads the session's subjects from where a rewind started now would (`OfflineQueueRewind` ago,
+the cursor's *base*) and sets the cursor with the holes it found. So (1), (2) and the unreadable-sequence half of (4)
+recover without a resume. It promises only what the rewind would, never more, because it cannot know what was owed
+before it. Three interleavings defeat a naive restart (the cursor at the stream's end, or from the scan with no base),
+and each has a guard. The randomized model in `cursor_model_internal_test.go` (400 seeds) fails with either of the
+first two removed; it keeps every id, so the third is a unit test:
+
+- *A live copy below base, late.* Message f, stored more than a rewind ago, has its live copy arrive after the
+  restart, and is unsent when the connection ends; the rewind starts at f (`away.fromSeq`) and sends h, f < h < base,
+  whose live copy never came. The restart never read h. Guard: a live or late copy below base drops the cursor
+  (`addHoleLocked`), and the rewind runs.
+- *The connection holds a message below base* when the restart applies: the same, with f already in hand. Guard: the
+  restart refuses.
+- *A scan longer than the rewind*: the ids delivered from base up are kept for twice the rewind, and are what tell a
+  hole from a delivered message; past that a completed QoS 2 message reads as a hole [MQTT-4.3.3-2]. Guard: refused.
+
+A subscription made or replaced while any scan reads (the plain scan included, since 2026-10-31) makes it throw its
+result away: the new filter may be owed what the scan read past without looking.
+
+**Left:** a restarted cursor stays in memory, not in the record, because a broker of an earlier version would read it
+without its base; a session restored elsewhere falls back to the rewind until its replay starts a cursor. Taking it
+into the record needs a field older brokers refuse, or a major version. (3) and the cap: let the record carry ids
+past 4096 outside the value. The other half of (4), a filter that cannot be narrowed, still never scans. Each restart
+scan reads up to one rewind of the session's subjects per 1024 deliveries while it keeps being refused (a session
+with more than 1024 holes inside one rewind); not measured.
 
 **Also:** a hole is sent only at the next resume. A message whose live copy never comes stays owed while the client is
 connected, which [MQTT-4.4.0-1] allows (it requires the resend on reconnect) but a client cannot tell from a lost one.
@@ -450,12 +470,14 @@ most of them; these remain, each with why:
   drops: the highest-sequence ones, which are the newest and the likeliest to be redelivered. Keeping
   the newest instead would trade one repeat for another; the real fix is a record that is not
   bounded by a count, which needs the ids held outside the session value.
-- **The replay cursor's bounds and its race with a live copy.** That a cursor is dropped past 1024 holes or 16384
-  ids above it, that a record which left ids out carries none, and that a live copy arriving below the cursor while a
-  scan moves it becomes a hole (`noteLiveCopy` under `cursorMu`) are unit tests (`cursor_internal_test.go`); the
-  wire tests (`replay_cursor_test.go`) reach the cursor's normal paths, not those. Driving the bounds over a socket
-  needs thousands of deliveries or a hook to lower them, and the race a publisher stopped at the instant a scan
-  applies.
+- **The replay cursor's bounds and its race with a live copy.** That a cursor is dropped past 16384 ids above it,
+  that a record which left ids out carries none, and that a live copy arriving below the cursor while a scan moves it
+  becomes a hole (`noteLiveCopy` under `cursorMu`) are unit tests (`cursor_internal_test.go`). The hole bound, the
+  restart after it and a live copy below a restarted cursor's base are driven over a socket (`replay_cursor_test.go`,
+  the bound lowered by a hook); the restart's other refusals (a message held below base, a scan longer than the
+  rewind, a subscription made while it read) are unit tests and the randomized model
+  (`cursor_model_internal_test.go`), which drives the session's code with scans applied after other events, not the
+  broker's goroutines.
 - **The offline queue on a broker without JetStream** is not there: a QoS 1 message published while a
   session is away is lost although the CONNACK said Session Present 1 [MQTT-3.1.2-23],
   [MQTT-4.5.0-1]. `TestABrokerWithoutJetStreamStillStartsWithNoQueue` pins it as the known

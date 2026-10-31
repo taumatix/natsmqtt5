@@ -1265,7 +1265,7 @@ func (s *session) awayStateInto(rec *sessionRecord) (dropped int) {
 // known yet. A record without a cursor is replayed from the time rewind.
 func (s *session) cursorIntoLocked(rec *sessionRecord, dropped int) {
 	rec.ReplayCursor, rec.ReplayHoles = 0, nil
-	if s.cur.next == 0 || dropped > 0 || !s.sinceKnownLocked() {
+	if s.cur.next == 0 || s.cur.base != 0 || dropped > 0 || !s.sinceKnownLocked() {
 		return
 	}
 	v := s.cursorViewLocked()
@@ -1385,10 +1385,16 @@ func (s *session) lateCopy(from *conn, seq uint64, id string) (successor *conn, 
 		s.addHoleLocked(seq, id)
 		holed = len(s.cur.holes) != before
 	}
+	// A restarted cursor is not in the record (cursor.go), so what the record
+	// says of a late copy follows the rule without one.
+	safe := s.lateSeqSafeLocked(seq)
+	if s.cur.base != 0 {
+		safe = s.windowSafeLocked(seq)
+	}
 	switch {
 	case s.conn != nil:
 		// Still attached, and ending: detach folds it into the absence.
-		if s.lateSeqSafeLocked(seq) {
+		if safe {
 			s.lateSeq = lowestSeq(s.lateSeq, seq)
 		}
 		return nil, false
@@ -1396,7 +1402,7 @@ func (s *session) lateCopy(from *conn, seq uint64, id string) (successor *conn, 
 		// Nothing is waiting to replay: the session has no absence to correct.
 		return nil, false
 	}
-	if !s.lateSeqSafeLocked(seq) || (s.awayLateSeq != 0 && s.awayLateSeq <= seq) {
+	if !safe || (s.awayLateSeq != 0 && s.awayLateSeq <= seq) {
 		return nil, holed && s.rec != nil
 	}
 	s.awayLateSeq = seq
@@ -1466,7 +1472,9 @@ func (s *session) noteDelivered(id string, seq uint64) (scan bool) {
 		s.maxDeliveredSeq = seq
 	}
 	s.cur.removeHole(id)
-	if s.cur.next != 0 && seq >= s.cur.next {
+	if s.cur.next != 0 && seq >= s.cur.next || s.cur.next == 0 && seq != 0 {
+		// Without a cursor, the count is of deliveries since the last restart
+		// scan (restartCursor).
 		s.cur.above++
 	}
 	// The ids at or above keep are the cursor's (or a replay's that may start
@@ -1487,7 +1495,7 @@ func (s *session) noteDelivered(id string, seq uint64) (scan bool) {
 			s.dropCursorLocked()
 		}
 	}
-	if s.cur.next != 0 && !s.cur.scanning && int64(s.cur.above) >= cursorScanAfter.Load() {
+	if !s.cur.scanning && int64(s.cur.above) >= cursorScanAfter.Load() && (s.cur.next != 0 || s.cur.pin == 0) {
 		s.cur.scanning = true
 		return true
 	}
