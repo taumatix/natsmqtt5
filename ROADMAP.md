@@ -332,20 +332,6 @@ non-persistent ceiling is 0.09 ms). Killed-broker tests cover the burst (`killed
 about 2 ms on a loaded host. That needs a write that is not waited for, which [MQTT-4.3.3-6] does not
 allow, or a faster store. Not measured with `sync_always` on the NATS server.
 
-## A checkpoint of a full in-flight window spends a quarter of a second encoding it
-
-**Blocked by:** nothing.
-
-**Measured (2026-10-31, `TestSpillAcknowledgementCost`, embedded JetStream, 65535 QoS 1 entries each with a 100 byte
-stored PUBLISH, an acknowledgement at the front each time):** an acknowledgement writes 0.94 chunks (never more than 1 of
-the 61), 132 KB, beside the 824 KB session record every checkpoint writes whatever changed. The rewrite is not worth
-more machinery. What the same call costs is CPU: `spillInto` + `commitSpill` took about 250 ms per checkpoint, over half of it
-`spillRecordReusing`'s `fits`, which encodes the whole record again at each step of the search for how many entries stay
-inline (`keep -= keep/8`, about 20 steps), plus one `json.Marshal` of every entry for its size. A client at the full Receive
-Maximum that is slow to acknowledge pays that on each checkpoint tick. Sizing the record from the entry sizes already
-computed (the record without entries once, then the prefix sums) would leave one encode at the end, which keeps the exact
-check the limit relies on.
-
 A session attached to a broker that died still has its unnamed payloads judged only once its record is reclaimed, or
 they age out.
 
