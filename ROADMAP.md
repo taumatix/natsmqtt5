@@ -20,7 +20,7 @@ The whole file was audited against `main` on 2026-10-31.
 No entry is open. The replay cursor (2026-10-31, `cursor.go`, `replay_cursor_test.go`) closed the last two: a
 resume replays from a per-session cursor, so a message whose live copy never came, or came late, is sent however long
 ago it was stored, and nothing completed is sent again [MQTT-4.4.0-1], [MQTT-4.3.3-2], [MQTT-4.3.3-6]. What it left is
-the first Tier 2 entry.
+in Tier 2.
 
 # Tier 2: MUST statements on rare or optional paths
 
@@ -124,19 +124,6 @@ duplicate it prevents. Not implemented.
 **Left, only if a deployment asks:** an opt-in `Options.DedupeUserProperty` naming the User Property to use as the
 `Nats-Msg-Id`, off by default and additive. It would need a documented contract (unique per message, longer than the
 stream's `Duplicates` window) and a test that a reused value is dropped and an absent one is not.
-
-## A Will's queue copy is not retried when the queue refuses it
-
-**Blocked by:** nothing; a pass can take it (it needs a `cutProxy` variant that cuts before the stored ack).
-
-**Decided (2026-10-30):** a Will is not held for `DurablePublish`'s flush. The flush protects a client by letting the
-broker refuse its PUBLISH with 0x83 so it sends again; a Will has no client, and its record is deleted by the
-compare-and-swap that elects the publisher, so a second publication on a failed flush would risk announcing it twice.
-**Left:** `publishWillFor` logs and carries on when the queue stream refuses the copy, so a session that was away
-never gets that Will. With `DurablePublish` set that is the case the option exists to close. **Shape:** retry the keep
-a few times with a short gap before publishing live, only when `DurablePublish` is on; test it with a stream that
-refuses once (the existing `cutProxy` in `durable_flush_fail_test.go` cuts after the stored ack, the wrong moment, so
-it needs a variant that cuts before).
 
 # Tier 3: SHOULD statements
 

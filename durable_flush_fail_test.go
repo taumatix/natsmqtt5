@@ -34,8 +34,11 @@ type cutProxy struct {
 	swallowAfterAck atomic.Bool
 	swallow         atomic.Bool
 	swallowed       atomic.Int64
-	mu              sync.Mutex
-	conns           []net.Conn
+	// dropQueuePubs makes the proxy discard that many client-to-NATS writes that carry a publish to the
+	// queue stream, so the stream never sees them and the broker's publish times out unanswered.
+	dropQueuePubs atomic.Int64
+	mu            sync.Mutex
+	conns         []net.Conn
 }
 
 func newCutProxy(t *testing.T, natsURL string) *cutProxy {
@@ -79,7 +82,10 @@ func newCutProxy(t *testing.T, natsURL string) *cutProxy {
 				for {
 					n, err := in.Read(buf)
 					if n > 0 {
-						if p.swallow.Load() {
+						if p.dropQueuePubs.Load() > 0 && bytes.Contains(buf[:n], []byte(".$queue.")) &&
+							p.dropQueuePubs.Add(-1) >= 0 {
+							p.swallowed.Add(int64(n))
+						} else if p.swallow.Load() {
 							p.swallowed.Add(int64(n))
 						} else if _, werr := out.Write(buf[:n]); werr != nil {
 							break
@@ -273,6 +279,38 @@ func TestDurablePublishRetryAfterARefusedFlushLeavesASecondQueueCopy(t *testing.
 	}, 60*time.Second, time.Second)
 	assert.Equal(t, 2, queuedCopies(t, stream, "dp.retry"),
 		"the retry stored a second copy; if this is 1 the roadmap's duplicate is gone and the entry must go too")
+}
+
+// [MQTT-3.1.2-8] "The Will Message MUST be published after the Network Connection is subsequently closed ..."
+// (§3.1.2.5; wording as in will_durable_test.go). A session that was away is only offered the Will if it
+// is in the queue stream, and a Will has no client to refuse to: when the stream does not answer the
+// broker's first try, with DurablePublish on it tries again. The proxy loses the first publish to the
+// queue stream; the retry's reaches it. Without the retry the stream holds nothing and the Will reaches
+// only the subscribers connected at that moment.
+func TestMQTT_3_1_2_8_DurablePublishRetriesAWillsQueueCopyWhenTheQueueDoesNotAnswer(t *testing.T) {
+	natsURL := startNATS(t)
+	proxy := newCutProxy(t, natsURL)
+	_, addr, _ := startBrokerHandle(t, proxy.url(), func(o *natsmqtt5.Options) { o.DurablePublish = true })
+	other := startBroker(t, natsURL)
+
+	sub, _ := connectClient(t, other, connectOpts("will-retry-sub"))
+	sub.subscribe(paho.SubscribeOptions{Topic: "will/retry", QoS: 1})
+
+	victim := dialRaw(t, addr)
+	cp := rawConnect("will-retry-victim", 0)
+	cp.Will = &packet.Will{Topic: "will/retry", Payload: []byte("gone"), QoS: packet.QoS1}
+	victim.connect(cp)
+
+	proxy.dropQueuePubs.Store(1)
+	require.NoError(t, victim.nc.Close()) // no DISCONNECT: the Will is published
+
+	// The first try waits out offlineKeepTimeout (5 s), so the live Will follows the retry.
+	stream := queueStream(t, natsURL)
+	require.Eventually(t, func() bool { return queuedCopies(t, stream, "will.retry") > 0 },
+		30*time.Second, 100*time.Millisecond, "the retry stored the Will's copy for a session that is away")
+	assert.Equal(t, "gone", queuedPayload(t, stream, "will.retry"))
+	assert.Equal(t, "gone", sub.expectMessage().Payload)
+	assert.Zero(t, proxy.dropQueuePubs.Load(), "the proxy lost the first queue publish")
 }
 
 // readWithin is read with a longer deadline, for a reply that waits on a reconnect.

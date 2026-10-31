@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
+
+	"github.com/nats-io/nats.go"
 
 	"github.com/taumatix/natsmqtt5/packet"
 	"github.com/taumatix/natsmqtt5/topic"
@@ -479,18 +482,47 @@ func (b *Broker) publishWillFor(clientID string, will *packet.Will) {
 	msg := toNATS(full, clientID, p)
 	msg.Header.Set(hdrMsgID, id)
 	if q := b.queue.Load(); q != nil && p.QoS > packet.QoS0 {
-		kctx, cancel := context.WithTimeout(context.Background(), offlineKeepTimeout)
-		if err := q.keep(kctx, b.js, subject, msg); err != nil {
+		if err := b.keepWill(q, subject, msg); err != nil {
 			// A Will has no one to refuse to; it still goes out live.
 			b.logger.Warn("queueing a will message failed", "topic", name, "error", err)
 		}
-		cancel()
 	}
 	if err := b.nc.PublishMsg(msg); err != nil {
 		b.logger.Warn("publishing a will message failed", "topic", name, "error", err)
 		return
 	}
 	b.logger.Info("published will message", "client_id", clientID, "topic", name)
+}
+
+// willKeepAttempts is how many times a Will's queue copy is tried when DurablePublish is on, and
+// willKeepGap the wait between tries. A Will has no client to refuse to, so the broker is the one
+// that sends it again; a try that timed out may have stored its copy, so a retry can leave a second
+// one, which QoS 1 allows ([MQTT-4.3.2-2]).
+const (
+	willKeepAttempts = 3
+	willKeepGap      = 200 * time.Millisecond
+)
+
+// keepWill stores a Will's queue copy. With DurablePublish it tries again after a refusal, so a
+// session that was away is not left without the Will the option exists to keep for it.
+func (b *Broker) keepWill(q *offlineQueue, subject string, msg *nats.Msg) error {
+	attempts := 1
+	if b.opts.DurablePublish {
+		attempts = willKeepAttempts
+	}
+	var err error
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			time.Sleep(willKeepGap)
+		}
+		kctx, cancel := context.WithTimeout(context.Background(), offlineKeepTimeout)
+		err = q.keep(kctx, b.js, subject, msg)
+		cancel()
+		if err == nil {
+			return nil
+		}
+	}
+	return err
 }
 
 // willProperties selects the Will Properties that describe the message itself.
