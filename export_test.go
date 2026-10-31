@@ -17,6 +17,18 @@ func SetSharedFetchHook(t interface{ Cleanup(func()) }, f func(asked, got int)) 
 	t.Cleanup(func() { sharedFetchHook = nil })
 }
 
+// SetPubrecGate makes a connection call f(id) when it has read a PUBREC that
+// accepts the QoS 2 message id, before anything records that the PUBREL is
+// owed: the window in which a broker killed leaves a record that still names
+// the PUBLISH. nil removes it.
+func SetPubrecGate(b *Broker, f func(id uint16)) {
+	if f == nil {
+		b.pubrecGate.Store(nil)
+		return
+	}
+	b.pubrecGate.Store(&f)
+}
+
 // SetResendGate makes a connection's resend call f(id) after it has claimed
 // the in-flight entry for id and before it writes the packet, which is the
 // window in which an acknowledgement can complete an exchange that is about to

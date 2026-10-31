@@ -21,16 +21,14 @@ import (
 //
 // Statement wording, read from the OASIS MQTT 5.0 specification (os edition):
 //
-//	[MQTT-3.8.4-7] "The Server MAY grant a lower Maximum QoS than the
-//	  subscriber requested" (the Reason Code of the SUBACK says which).
+//	[MQTT-3.8.4-7] "This Reason Code MUST either show the maximum QoS that was
+//	  granted for that Subscription or indicate that the subscription failed"
+//	  (the server may grant less than was asked; the SUBACK says what).
 //	[MQTT-4.4.0-1] "When a Client reconnects with Clean Start set to 0 and a
 //	  session is present, both the Client and Server MUST resend any
 //	  unacknowledged PUBLISH packets (where QoS > 0) and PUBREL packets using
 //	  their original Packet Identifiers."
-//
-// [MQTT-3.8.4-7]'s wording above is a paraphrase, not a quotation: the
-// specification text was not reachable when this was written, so the ids are
-// what to check against the specification.
+
 func sharedQoS2(o *natsmqtt5.Options) { o.SharedQoS2 = true }
 
 func (f sharedFleet) publishQoS2(t *testing.T, payload string) {
