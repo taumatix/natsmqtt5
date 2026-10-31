@@ -138,19 +138,19 @@ compatibility cost.
 
 ## DurablePublish: a retry after a refused flush leaves a second queue copy
 
-**Blocked by:** a decision, taken: not implemented. The opt-in below waits for real deployments to ask.
+**Done (2026-10-31):** `Options.DurablePublishDedupe` (off, needs `DurablePublish`). The 2026-10-30 decision rejected
+deriving the id from the packet id, because a packet id is reused after its PUBACK and a later message would be
+dropped, and asked for a client-chosen id. The broker can keep the packet id safe without the client: the id of a
+publish is held per session only until it is acknowledged, and a PUBLISH reuses it only when it is marked DUP and
+has the same topic and payload. So an acknowledged publish is never matched, and a different message under a refused
+packet id is queued (`durable_dedupe_test.go`, over a socket with real NATS and the flush refused by `cutProxy`; the
+default-off behaviour stays pinned by `TestDurablePublishRetryAfterARefusedFlushLeavesASecondQueueCopy`).
 
-**Decided (2026-10-30):** left as it is, and tested (`TestDurablePublishRetryAfterARefusedFlushLeavesASecondQueueCopy`,
-`durable_flush_fail_test.go`): after the 0x83 the queue stream holds the first copy, the client's retry stores a second,
-and a session that was away is offered the message twice. QoS 1 allows that ([MQTT-4.3.2-2], at least once). A
-`Nats-Msg-Id` on the queue publish would drop the second copy within JetStream's duplicate window, but the id has to
-come from the client and be unique per message, never from the packet id (reused after its PUBACK, so a later, different
-message would be dropped as the duplicate). MQTT 5 has no such field; the only carrier is a User Property whose name
-and rules the broker would invent, and a client that reuses a value silently loses a message, which is worse than the
-duplicate it prevents. Not implemented.
-**Left, only if a deployment asks:** an opt-in `Options.DedupeUserProperty` naming the User Property to use as the
-`Nats-Msg-Id`, off by default and additive. It would need a documented contract (unique per message, longer than the
-stream's `Duplicates` window) and a test that a reused value is dropped and an absent one is not.
+**Left:** off by default, so the duplicate stays for anyone who does not set it. A retry after the stream's duplicate
+window (2 minutes unless the operator raised `Duplicates`), after a Clean Start that dropped the session, or from a
+client that does not set DUP is still queued twice, and the live copy is sent again either way, so a connected
+subscriber can see it twice (QoS 1 allows both). A client-chosen User Property id is still the only way to cover
+those, and is not built.
 
 # Tier 3: SHOULD statements
 

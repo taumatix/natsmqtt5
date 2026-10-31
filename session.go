@@ -275,6 +275,9 @@ type session struct {
 	// forwarded. They are not written to the session record: a client whose
 	// broker died before forwarding must be able to send the PUBLISH again.
 	qos2Forwarding map[uint16]struct{}
+	// publishIDs keeps the message id of a refused publish for its retry (Options.DurablePublishDedupe).
+	// It has its own lock.
+	publishIDs publishIDs
 	// withdrawn holds the Packet Identifiers of in-flight messages the broker
 	// took back rather than resent, because the filter that earned them was
 	// denied on resume. The client was sent those messages and may still owe an
