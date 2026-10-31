@@ -478,6 +478,22 @@ and a slow-consumer report on the broker's one shared connection.
 no copy. The limit is the fixed 2048 (`deliveryQueueDepth`), not an option; a deployment that wants a lower or higher
 one should say so. QoS 0, and messages published straight onto NATS, are dropped without closing, as with the queue on.
 
+## A `Broker.Close` hang reported by #216, not reproduced
+
+**Blocked by:** *real deployments* (a hang needs a trigger the tests did not find).
+
+#216's author saw a `Broker.Close` hang and did not investigate. Looked for on 2026-10-31 with no result: the
+three #216 test files and `ReconnectCatchUp|Ingest|SpillChunk|ReplayCursor` under `-race -count=8` (200s, green;
+`-count=5 -timeout 120s` is *not* a hang, those tests need about 130s, and its goroutine dump shows tests still
+running), the whole suite under `-race` twice (about 520s each, green), and `close_down_test.go`: `Close` with
+NATS cut and a client connected, and with a catch-up read held by a client at Receive Maximum 2 while NATS is cut,
+both return in under a millisecond. Reading `Close`: it waits on `b.wg` (the connections), and `closeNATS` drains
+with nats.go's own 30s drain timeout, so the bounded-by-a-deadline guarantee rests on `conn.shutdown` always ending
+the connection. Not yet looked at: a connection whose client socket accepts no writes while its delivery loop is
+inside a write (the DISCONNECT write has a deadline only on the close-behind path), and `Close` racing the
+`catchUpAfterReconnect` goroutine, which is not in `b.wg`. **Next:** a test with a client that never reads, a full
+send buffer and `Close`, under a deadline; if it hangs, give `shutdown`'s write the same short deadline.
+
 ## Statements covered only by unit tests
 
 **Blocked by:** a decision for the JetStream-less queue (undecided); nothing for the rest, though driving the cursor's

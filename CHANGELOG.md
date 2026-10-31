@@ -11,6 +11,8 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Tests:** `Broker.Close` is shown to return with NATS cut and a catch-up read held (a `Close` hang reported by #216 was looked for and not reproduced; see ROADMAP), and `retryAfterDrop` is covered end to end: a catch-up read cut by a reconnect is started again and the client gets every message once. No API change.
+
 - **Fixed:** a SUBSCRIBE read the retained messages it owed after writing its SUBACK, so a publisher that stored a retained message in between had it delivered twice, the second time with RETAIN set [MQTT-3.3.1-6], [MQTT-3.3.1-12]. The set is now read before the SUBACK.
 - **Fixed:** an adoption of a Will Message whose update got no answer from the store (an election, a timeout) but was applied left a record owned by the adopter and published by nobody; the adopter now looks again and publishes it. A failed adoption is logged.
 - **Tests:** end-to-end tests where only unit tests stood: `NATSIngest` with the queue stream gone and with `DurablePublish`'s flush unconfirmed, the delivered-id chunks when the payload bucket is gone or a chunk is purged, and a `ReconnectCatchUp` read held by a slow client across a second NATS drop. No API change.
