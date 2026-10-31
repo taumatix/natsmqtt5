@@ -11,19 +11,23 @@ today and cites the statements it touches.
 or UNSURE row (a test enforces it). Tiers 1 and 2 are windows inside MUSTs the table counts as met:
 each needs a particular failure (a broker killed at one instant, a payload near `max_payload`) and
 names it. Entries are checked against the code each time the review is re-run (last: 2026-10-09; the Receive Maximum entry, which §4.13.1-1 made a MUST, was done in v0.11.3).
+Every entry opens with a **Blocked by:** line saying what stops it: *nothing* (a pass can take it), *a decision*,
+*a release*, *a major version*, *a cross-broker design*, or *real deployments* (evidence only a user's workload gives).
+The whole file was audited against `main` on 2026-10-31.
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
-No entry is open. The last two, "The replay's time rewind is a bound, not a guarantee" and "A live copy for a
-session that has since delivered 8192 more sequences is not noted", were closed by the replay cursor (2026-10-31,
-`cursor.go`, `replay_cursor_test.go`): a resume replays from a per-session cursor, so a message whose live copy never
-came, or came after the release below any number of later sequences, is sent however long ago it was stored, on any
-broker and after a kill, and nothing completed is sent again [MQTT-4.4.0-1], [MQTT-4.3.3-2], [MQTT-4.3.3-6]. What it
-left is below.
+No entry is open. The replay cursor (2026-10-31, `cursor.go`, `replay_cursor_test.go`) closed the last two: a
+resume replays from a per-session cursor, so a message whose live copy never came, or came late, is sent however long
+ago it was stored, and nothing completed is sent again [MQTT-4.4.0-1], [MQTT-4.3.3-2], [MQTT-4.3.3-6]. What it left is
+the first Tier 2 entry.
 
 # Tier 2: MUST statements on rare or optional paths
 
 ## The replay cursor: what falls back to the time rewind, and what waits for a resume
+
+**Blocked by:** nothing for the recovery shape below (the cursor starting at the next scan), though it is not worked
+out; a clustered, replicated stream to measure the added requests on is *real deployments*.
 
 **Today:** a session whose record or memory has a replay cursor (`cursor.go`) is replayed from it; one without is
 replayed from `OfflineQueueRewind` before its release, as before, and keeps the rewind's limits: a message whose live
@@ -52,6 +56,9 @@ stream info request and each 1024 deliveries a filtered read; neither is measure
 
 ## The replay's read: shared-only sessions and a clustered stream
 
+**Blocked by:** nothing for skipping the read of a session with only shared subscriptions and for reading holes by
+sequence; the clustered measurement needs the three-server harness (`NATSMQTT5_CLUSTER_TESTS`).
+
 **Measured** (2026-10-10, `TestReplayReadCost`, one embedded NATS server, file storage): an unfiltered resume read
 the whole window at about 2.4 us a message (a million messages: 2.4 s), and 50 sessions resuming at once over 100,000
 messages took 7.6 s to the slowest, 200 sessions 31.6 s, since each pays the whole read. The replay reads only the
@@ -65,18 +72,18 @@ replicated stream.
 
 ## Self-fencing on a cluster: what is left
 
-**Done (2026-10-23):** `TestClusterWillOfAClientOnAnIsolatedNATSServerIsPublishedOnceAfterItsConnectionCloses` isolates
-the server a broker uses from the other two (three real servers in containers, `natscluster_test.go`), watches the
-client's socket close before the survivor publishes, heals, and counts one publication. It found that the fenced
-broker's own disconnect path published the Will again when the removal of the record timed out; `fire` now retries
-the removal until the store answers. Left, precisely, and none of it changes behaviour a user relies on, so it waits for a pass with the cluster harness at
-hand: (1) the isolation test does not choose whether the isolated server leads the Will bucket, so it runs one of the
-two shapes by chance (pin each with `StopServer` of the leader first); (2) a partition that leaves the broker's server
-with a majority and cuts the *broker* off is the proxy test, not a cluster one; (3) a partition longer than `retryFor`
-with the broker still cut off waits for the store for as long as it takes, by design, so there is nothing to assert
-but that it does not publish.
+**Blocked by:** nothing, and little is worth building. `TestClusterWillOfAClientOnAnIsolatedNATSServerIsPublishedOnceAfterItsConnectionCloses`
+isolates the server a broker uses from the other two (three real servers in containers, `natscluster_test.go`), watches
+the client's socket close before the survivor publishes, heals, and counts one publication. It found that the fenced
+broker's own disconnect path published the Will again when the removal of the record timed out; `fire` retries the removal
+until the store answers. Since 2026-10-31 it runs both shapes, the isolated server leading the Will bucket and a survivor
+leading it (`natsCluster.LeadStream`). Left: (1) a partition that leaves the broker's server with a majority and cuts the
+*broker* off is the proxy test, not a cluster one; (2) a partition longer than `retryFor` with the broker still cut off
+waits for the store for as long as it takes, by design, so there is nothing to assert but that it does not publish.
 
 ## Durable Wills on by default
+
+**Blocked by:** a major version (or a minor one behind an opt-in), and a decision to take it.
 
 **Today:** `DurableWills` is off. Turning it on by default is a behaviour change for every deployment that does not
 set it: the broker would create a bucket, need JetStream where it ran without, hold Will payloads in clear text on
@@ -91,6 +98,9 @@ sessions already need it, with a CHANGELOG entry that says so and `DisableDurabl
 
 ## DurablePublish does not cover live delivery to subscribers on other brokers
 
+**Blocked by:** a cross-broker design (a subject layout change or per-subscription JetStream consumers) and the
+compatibility decision it carries.
+
 `Options.DurablePublish` makes the PUBACK wait for the queue stream's copy and for a NATS flush of
 the live copy. The live copy itself is still core NATS: a subscriber connected to another broker
 whose NATS connection drops at the wrong moment misses it, and nothing re-sends it to a session
@@ -100,6 +110,8 @@ either a subject layout change or per-subscription JetStream consumers. A decisi
 compatibility cost.
 
 ## DurablePublish: a retry after a refused flush leaves a second queue copy
+
+**Blocked by:** a decision, taken: not implemented. The opt-in below waits for real deployments to ask.
 
 **Decided (2026-10-30):** left as it is, and tested (`TestDurablePublishRetryAfterARefusedFlushLeavesASecondQueueCopy`,
 `durable_flush_fail_test.go`): after the 0x83 the queue stream holds the first copy, the client's retry stores a second,
@@ -115,6 +127,8 @@ stream's `Duplicates` window) and a test that a reused value is dropped and an a
 
 ## A Will's queue copy is not retried when the queue refuses it
 
+**Blocked by:** nothing; a pass can take it (it needs a `cutProxy` variant that cuts before the stored ack).
+
 **Decided (2026-10-30):** a Will is not held for `DurablePublish`'s flush. The flush protects a client by letting the
 broker refuse its PUBLISH with 0x83 so it sends again; a Will has no client, and its record is deleted by the
 compare-and-swap that elects the publisher, so a second publication on a failed flush would risk announcing it twice.
@@ -128,6 +142,9 @@ it needs a variant that cuts before).
 
 ## A held shared message: the killed-broker window and the packet identifier
 
+**Blocked by:** real deployments for a per-group `SharedHoldLimit` (no known need); the Receive Maximum slot is held
+by [MQTT-3.3.4-9], which no change releases earlier.
+
 `SharedHoldLimit` is off by default and applies to every group alike; a per-group value (which
 would be an `Options` map or a callback) is a possible follow-up, with no known need yet. A
 message it hands back is withdrawn from the slow member (no resend on reconnect, a late PUBACK
@@ -139,6 +156,9 @@ The killed-broker window is pinned (`shared_killed_test.go`, `NATSMQTT5_SLOW_TES
 message is seen twice at worst, never lost.
 
 ## A shared subscription's membership: the edges left
+
+**Blocked by:** JetStream, which has no conditional consumer delete (the last-leaver race); the killed-broker edge
+waits on the session store's own reclaim and needs nothing built.
 
 A shared subscription ends when its last session does (`sharedmembers.go`). What remains:
 
@@ -155,6 +175,8 @@ A shared subscription ends when its last session does (`sharedmembers.go`). What
 
 ## Restricting `$` topics by default
 
+**Blocked by:** a major version (and a `MIGRATION.md` written in that release).
+
 `Options.RestrictDollarTopics` (opt in) refuses every `$` topic but
 `$share/...`, which is the spec's advice (MQTT-5.0 §4.7.2). Defaulting it on breaks anyone using
 `$app/...`, so it waits for the next major version. The release that logs a warning the first time a client uses a
@@ -169,6 +191,9 @@ none is drafted now. Also still open:
   rather than serving it.
 
 ## A message's wait is counted from this broker's receipt, and in whole seconds
+
+**Blocked by:** real deployments (brokers apart enough for the difference to matter) and a decision on trusting two
+brokers' clocks.
 
 **Today:** the interval is whole seconds on the wire and the time waited is counted in whole seconds,
 rounded down (README, "What it does not do"). A live message's wait starts when this broker's NATS
@@ -193,6 +218,8 @@ with `Freeze`/`Thaw` on the server between the brokers. Take it when a deploymen
 # Tier 4: features MQTT 5 defines that the broker does not offer
 
 ## Outbound topic aliases: on by default, and measured
+
+**Blocked by:** a major version for the default, and real deployments for how clients in the field handle aliases.
 
 **Today:** `Options.OutboundTopicAliases` ships off (2026-10-23): a client that offers a Topic Alias Maximum is sent
 aliases when it is on. **Left:** the decision to default it on (a behaviour change for clients that advertise a
@@ -219,6 +246,10 @@ its second sighting instead of its first; neither is done. Not measured: CPU of 
 on a miss), and clients in the field that mishandle aliases, which only a trial tells.
 
 ## QoS 2 on shared subscriptions
+
+**Blocked by:** a release: entry 3 waits for a release that carries `SharedQoS2` (entries 1 and 2 are on `main`,
+unreleased). Two windows remain (below), both after a client answered; neither blocks the switch but both are named
+for whoever flips it.
 
 **Today:** a QoS 2 request on a `$share/` filter is granted QoS 1, reported
 honestly in the SUBACK, which [MQTT-3.8.4-7] permits.
@@ -276,6 +307,8 @@ granted QoS 1.
 
 ## A lone QoS 2 message still waits for two record writes
 
+**Blocked by:** a decision the spec has taken: a write not waited for breaks [MQTT-4.3.3-6]; only a faster store helps.
+
 **Done (2026-10-30):** messages waiting together share the record written before their PUBLISH
 (`deliverBurst`, `subscribe.go`) and PUBRELs queued while a record is written share the next one
 (`queuePubrel`, `publish.go`), so a burst of 32 costs 0.42 ms a message instead of 1.43
@@ -286,6 +319,9 @@ about 2 ms on a loaded host. That needs a write that is not waited for, which [M
 allow, or a faster store. Not measured with `sync_always` on the NATS server.
 
 ## Spilled in-flight entries: a message acknowledged at the front rewrites every chunk
+
+**Blocked by:** nothing; a pass can take it (fixed-boundary chunks), though it changes the stored layout, which an older
+broker in a mixed fleet must still read.
 
 **Done (2026-10-30):** a checkpoint names a chunk whose content did not change without writing it
 (`spillRecordReusing`; a message appended writes the last chunk only, 1 of 10 in the test), until
@@ -299,38 +335,33 @@ checkpoint), so judging them needs the record's age and the broker's own livenes
 
 ## Other tests still sleep for a checkpoint or a publish
 
-**Today:** every test that slept 100 to 300 ms after a client's connection ended now waits on `waitDetached` (or
-`waitDetachedTimes` for a client id that connects more than once), which returns when the broker has logged the
-disconnect, after it released the session (2026-10-11: `restore_nocopy_test.go`, `spec_integration_test.go`,
-`restored_rewind_test.go`). What remains are sleeps that wait for something else. The checkpoint-with-a-message-in-flight sleeps are gone
-(2026-10-11: `awaitCheckpointedInflight` polls the stored record for the packet id, with its PUBREL out for QoS 2, in
-`killed_broker_test.go`, `killed_inflight_test.go`, `restore_nocopy_test.go`). (2026-10-30: the 700 ms in
-`killed_broker_test.go` is gone; the test waits for the record to list both messages as delivered with nothing in flight.)
-Left: the 1 s in `restore_nocopy_test.go` and
-`oversize_inflight_test.go` that ages a message past the checkpoint skew (a clock condition, not an event), 1500 ms for a
-session's expiry to pass (`spec_integration_test.go`), (2026-10-13: the two in `oversize_inflight_test.go` that followed a dropped connection now use `waitDetached`; the "a session that is only away keeps its payload" check is a negative one, so it proves the payload survived the release, not an unbounded wait. Also 2026-10-13: the 100 ms in
-`restored_rewind_test.go` and the four 200 ms after a retained QoS 1 publish in `oversize_inflight_test.go` are gone; the
-broker stores a retained message before it acknowledges, so the PUBACK already was the condition.) Same flake risk; each needs a condition to wait on rather than a drop log. `TestSmokeSessionMovesBetweenBrokers` keeps its 200 ms: it is the back-off of a retry loop against brokers in
-containers, whose logs the test cannot read.
+**Blocked by:** nothing; each remaining sleep needs a condition to wait on.
+
+**Today:** tests that slept after a connection ended wait on `waitDetached` / `waitDetachedTimes`, and the
+checkpoint-with-a-message-in-flight sleeps poll the stored record (`awaitCheckpointedInflight`). What remains are sleeps
+that wait for something else: the 1 s in `restore_nocopy_test.go` and `oversize_inflight_test.go` that ages a message
+past the checkpoint skew (a clock condition, not an event), 1500 ms for a session's expiry to pass
+(`spec_integration_test.go`), and the "a session that is only away keeps its payload" check, which is negative by nature.
+`TestSmokeSessionMovesBetweenBrokers` keeps its 200 ms: the back-off of a retry loop against brokers in containers,
+whose logs the test cannot read. Same flake risk; each needs a condition to wait on rather than a drop log.
 
 ## Retained view: a stale entry that cancels an unseen one
 
-**Done:** a broker cut off from NATS past `RetainedTombstoneTTL` missed a clear whose tombstone was then purged and
-kept serving the cleared message (reproduced about once in two runs by
-`TestClusterARetainedClearMissedDuringAnOutageIsAppliedAfterTheTombstoneIsPurged`). The sweep now compares the local
-view's size with the stream's message count and, on a surplus, drops entries the stream no longer holds. The purge also
-treats the server's error 10043 ("sequence N not found") as already purged.
+**Blocked by:** nothing for the window up to the next sweep; a partition shorter than the NATS client's ping interval
+is not detectable from the broker (*real deployments*).
 
-**Done (2026-10-31):** after the NATS client has reconnected, the sweep checks every entry of the view against the stream
-whatever the counts say: an entry whose message is gone and whose topic is cleared is dropped, and one whose topic was
-retained again is replaced by the stream's message without waiting for the consumer. It costs one lookup per entry per
-reconnect, not a replay, so it was not made conditional. The three-server test above still passes;
-`TestARetainedViewIsVerifiedAfterANATSReconnectEvenWhenTheCountsAgree` puts the view in the state a count cannot see.
+**Done:** a broker cut off past `RetainedTombstoneTTL` no longer serves a retained message another broker cleared
+(the sweep compares the view with the stream's count; the purge treats error 10043 as already purged), and after a NATS
+reconnect the sweep checks every entry of the view against the stream whatever the counts say (2026-10-31,
+`TestARetainedViewIsVerifiedAfterANATSReconnectEvenWhenTheCountsAgree`). One lookup per entry per reconnect.
 
 **Left:** a stale entry is still served until the next sweep after the reconnect (up to `SessionSweepInterval`), and a
 reconnect the broker's NATS client did not notice (a partition shorter than its ping interval) triggers nothing.
 
 ## The weekly scans fail where no pass reads them
+
+**Blocked by:** nothing in this repository. The remaining work is in the host (`check-repo-health.py` counting the
+`Vulnerability scan` schedule run), outside this repo.
 
 **Done:** CI runs `staticcheck` and `golangci-lint` (errcheck, gosec; both pinned, config in `.golangci.yml`) beside
 `go vet`; every finding was fixed or carries a one-line reason, and `CONTRIBUTING.md` ("Scheduled runs nobody is
@@ -344,6 +375,8 @@ unchanged code, and nothing routes a failed scheduled run to a pass; the mainten
 that is red because of a standard-library finding is also not this module's to fix: it clears when the runner's Go does.
 
 ## Offline queue for messages published by plain NATS clients
+
+**Blocked by:** a cross-broker design (a decision against the membership bucket with a revision check).
 
 Only messages that pass through a broker are copied to the queue. They also
 reach a shared subscription only through its NATS queue group, as QoS 0
@@ -361,6 +394,8 @@ reconnect before the CONNACK, which is a design of its own.
 
 ## A frozen NATS server still costs a connection one deadline per payload it stores
 
+**Blocked by:** nothing; a pass can add the test (a broker without the queue and entries larger than the record allows).
+
 **Done (2026-10-30):** audited every JetStream and NATS call the delivery goroutine and the connection's end make.
 Each has a deadline (`sessionOpTimeout`, `natsFlushTimeout`) except the stream reads (`streamContext`,
 `catchup.go`), which go at the client's pace on purpose and are cancelled by `c.done`, which `finish` closes before it
@@ -375,6 +410,8 @@ name queue copies and nothing is stashed, so it covers the end of a connection o
 bound. A test that stashes many payloads needs a broker without the queue and entries larger than the record allows.
 
 ## A default queue that failed at startup: shared subscriptions made before it came up
+
+**Blocked by:** nothing; a pass can take it.
 
 **Done (2026-10-11):** the broker retries a default queue it could not create, with a doubling wait from 5 s to a
 minute, logs at info when it comes up, and `Broker.OfflineQueueActive` says whether it is on.
@@ -394,6 +431,8 @@ path SUBSCRIBE takes), with a test that publishes to a member that subscribed be
 
 ## Without the queue, a client that falls behind still loses QoS 1 and 2
 
+**Blocked by:** real deployments without JetStream asking for the opt-in limit.
+
 **Decided (2026-10-30):** documented (README, "What it does not do"), and back-pressure is not built. With
 `DisableOfflineQueue` or without JetStream there is no copy to catch up from, so past 2048 waiting messages the broker
 drops, as before, and says so in its log. Blocking the subscription's NATS handler holds back only that client's
@@ -407,6 +446,9 @@ QoS 0, and messages published straight onto NATS, are dropped the same way with 
 failure visible to the client. It would need a test with a client that stops reading.
 
 ## Statements covered only by unit tests
+
+**Blocked by:** a decision for the JetStream-less queue (undecided); nothing for the rest, though driving the cursor's
+bounds over a socket needs a hook to lower them.
 
 Found by the 2026-10-08 audit of the offline-queue, session and replay work (v0.9.1 to v0.10.0 and
 after) against the rule in [CONTRIBUTING.md](CONTRIBUTING.md): each statement a change touches needs
