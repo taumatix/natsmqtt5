@@ -82,6 +82,9 @@ type Broker struct {
 	// is off, and is set later than start-up when the default queue could
 	// not be created then (queueretry.go).
 	queue atomic.Pointer[offlineQueue]
+	// natsWatch holds live copies back while the NATS connection is down, for
+	// Options.ReconnectCatchUp; see reconnect.go.
+	natsWatch natsWatch
 	// reauthSub answers other brokers' Reauthorize; see reauthorize.go.
 	reauthSub *nats.Subscription
 	// ingestSub takes messages from the ingest subject, with
@@ -222,6 +225,9 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 	if q := b.queue.Load(); q != nil {
 		b.startQueueLoops(q)
 	}
+	if r.ReconnectCatchUp {
+		b.watchReconnects()
+	}
 	if queueRetryNeeded {
 		b.wg.Add(1)
 		// The start-up context ends when New returns; the loop outlives it and ends on b.shutdown.
@@ -331,6 +337,7 @@ func (b *Broker) Close() error {
 	b.closeWills()
 	b.closeSessionStore()
 	b.closeRetain()
+	b.unwatchReconnects()
 	b.closeNATS()
 	return nil
 }

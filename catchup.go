@@ -129,8 +129,15 @@ func (c *conn) catchUp() error {
 
 	for {
 		c.catchMu.Lock()
-		from := c.fromSeq
-		c.fromSeq = 0
+		if c.held {
+			// The broker is off NATS and its reconnect has not said where the
+			// read starts: a round now would send newer copies before what the
+			// drop lost. releaseLive wakes the loop again.
+			c.catchMu.Unlock()
+			return nil
+		}
+		from, owedOnly := c.fromSeq, c.owedOnly
+		c.fromSeq, c.owedOnly = 0, false
 		if from == 0 {
 			c.behind = false
 			c.catchMu.Unlock()
@@ -139,6 +146,7 @@ func (c *conn) catchUp() error {
 		c.streamNext.Store(from)
 		c.catchMu.Unlock()
 
+		reconnects := c.natsReconnects()
 		delivered := c.sess.deliveredIDs()
 		ctx, cancel := c.streamContext()
 		var deliverErr error
@@ -149,7 +157,7 @@ func (c *conn) catchUp() error {
 			seq := queueSeq(msg)
 			id := messageID(msg)
 			if id != "" && !delivered[id] && !c.wasReplayed(id) && !sent[seq] {
-				deliverErr = c.deliverQueued(id, msg)
+				deliverErr = c.deliverQueuedOwed(id, msg, owedOnly)
 			}
 			// Not once the connection has ended: deliver then returns without
 			// sending, and the message has not been handled.
@@ -162,12 +170,47 @@ func (c *conn) catchUp() error {
 			return deliverErr
 		}
 		if err != nil && !errors.Is(err, context.Canceled) {
+			if c.retryAfterDrop(reconnects, from, owedOnly) {
+				return nil
+			}
 			return err
 		}
 		if err == nil {
 			c.streamNext.Store(0)
 		}
 	}
+}
+
+// natsReconnects is how many times the broker's NATS connection has
+// reconnected, read only when Options.ReconnectCatchUp is on (0 otherwise).
+func (c *conn) natsReconnects() uint64 {
+	if !c.broker.opts.ReconnectCatchUp {
+		return 0
+	}
+	return c.broker.nc.Stats().Reconnects
+}
+
+// retryAfterDrop keeps a catch-up round that failed because the NATS
+// connection dropped while it read, with Options.ReconnectCatchUp: the round's
+// position is owed again, and the reconnect's releaseLive wakes the loop (or
+// already has: its signal waits in the channel). Without the option, or when
+// the connection stayed up, the failure ends the connection as before.
+func (c *conn) retryAfterDrop(reconnects, from uint64, owedOnly bool) bool {
+	if !c.broker.opts.ReconnectCatchUp ||
+		c.broker.nc.IsConnected() && c.broker.nc.Stats().Reconnects == reconnects {
+		return false
+	}
+	at := c.streamNext.Load()
+	if at == 0 {
+		at = from
+	}
+	c.catchMu.Lock()
+	c.noteOwedLocked(at)
+	c.owedOnly = c.owedOnly || owedOnly
+	c.catchMu.Unlock()
+	c.streamNext.Store(0)
+	c.logger.Debug("a catch-up read was cut by a NATS reconnect; it starts again after it", "from_seq", at)
+	return true
 }
 
 // streamContext is the context for reading the queue stream. It has no

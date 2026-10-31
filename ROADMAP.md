@@ -105,16 +105,39 @@ sessions already need it, with a CHANGELOG entry that says so and `DisableDurabl
 
 ## DurablePublish does not cover live delivery to subscribers on other brokers
 
-**Blocked by:** a cross-broker design (a subject layout change or per-subscription JetStream consumers) and the
-compatibility decision it carries.
+**Blocked by:** real deployments, for what is left: a copy lost while both brokers stay connected has no event
+to react to, and the only ways to see it (a periodic read of the queue per connected session, or per-subscription
+JetStream consumers) cost every session all the time for a loss nobody has reported.
 
-`Options.DurablePublish` makes the PUBACK wait for the queue stream's copy and for a NATS flush of
-the live copy. The live copy itself is still core NATS: a subscriber connected to another broker
-whose NATS connection drops at the wrong moment misses it, and nothing re-sends it to a session
-that was connected (only to one that was away). Closing that needs a stream capturing the live
-subjects, which overlaps the retained stream's subjects (JetStream refuses overlap), so it needs
-either a subject layout change or per-subscription JetStream consumers. A decision with a
-compatibility cost.
+**Design (2026-10-31).** No new stream and no subject change: the queue stream already holds a copy of every QoS 1
+and 2 message published through a broker, stored before its live copy goes out (`offlineQueue.keep`), and a
+connected session can already read it in order (the catch-up of `catchup.go`). So the smallest closure is to make a
+connected session catch up when its broker knows it missed live copies. The one event a broker sees is its own NATS
+connection dropping (nats.go's disconnect and reconnect handlers, chained onto any the caller set). A stream over
+the live subjects would overlap `$retained.>` (JetStream refuses it) and needs a subject layout change; per-session
+JetStream consumers cost a consumer per subscription. Neither is needed for the drop.
+
+**Done (2026-10-31):** `Options.ReconnectCatchUp` (`-reconnect-catch-up`), off by default, an error with
+`DisableOfflineQueue` (`reconnect.go`). On the drop every connected session holds its live QoS 1 and 2 copies back;
+on the reconnect each reads the queue from `OfflineQueueRewind` before the drop, or from just after the newest
+sequence the broker had seen if lower (a server dead behind an open socket is noticed only when the pings fail), no
+lower than it can read without sending a delivered id twice (`session.catchUpFloor`), and only what was stored after
+each subscription (`subscription.since`). A catch-up read cut by a second drop starts again after it rather than
+closing the client. Tests: `reconnect_catchup_test.go` (two brokers on one NATS, a proxy that drops or stalls one
+broker's connection: QoS 1 in order, QoS 2 once, repeated drops, a stall noticed past the rewind, a subscription
+made after the message) and `TestClusterReconnectCatchUpSendsWhatWasPublishedWhileTheSubscribersServerWasDown`
+(three servers, the subscriber's server killed and restarted).
+
+**Left:**
+
+1. A live copy lost between two NATS servers of a cluster (a route that drops) while both brokers stay connected:
+   no event reaches either broker. A session with a replay cursor gets it on its next resume (a cursor scan makes
+   it a hole); a connected one does not.
+2. A live copy nats.go drops on the broker's side as a slow consumer (its pending limits): reported through the
+   connection's error handler, not handled. The same catch-up from the stream would serve, started from the
+   subscription's last delivered sequence.
+3. A message the drop lost that a cursor scan made a hole before the reconnect's catch-up started (the catch-up
+   starts at the cursor): sent on the session's next resume, not at once.
 
 ## DurablePublish: a retry after a refused flush leaves a second queue copy
 

@@ -141,6 +141,10 @@ type conn struct {
 	behind  bool
 	fromSeq uint64
 	catchup chan struct{}
+	// held is set while the broker's NATS connection is down and the catch-up
+	// that follows has no start yet; owedOnly while a catch-up reads from
+	// before the drop (reconnect.go). Both are guarded by catchMu.
+	held, owedOnly bool
 
 	// Where this connection stands in the queue stream, for the replay after
 	// it ends; see awayFloor. All but loopDone belong to the delivery

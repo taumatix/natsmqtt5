@@ -152,6 +152,7 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 		durableDedupe   = fs.Bool("durable-publish-dedupe", false, "with -durable-publish, let the queue stream drop the copy a client's retry of a refused publish would add (inside its duplicate window)")
 		durablePub      = fs.Bool("durable-publish", false, "acknowledge QoS 1 and 2 publishes only once the offline queue has stored them and NATS has confirmed the live copy (implies -offline-queue)")
 		natsIngest      = fs.Bool("nats-ingest", false, "take messages plain NATS clients publish on <subject-prefix>.$ingest.<subject> and publish them as an MQTT client's, queue copy included")
+		reconnectCatch  = fs.Bool("reconnect-catch-up", false, "after the broker's NATS connection comes back, send each connected session the QoS 1 and 2 messages published while it was down, from the offline queue")
 		escapeWildcards = fs.Bool("escape-nats-wildcards", false, "accept topics containing *, >, spaces and other whitespace by escaping them in the NATS subject (not readable by nats-server's own MQTT listener; choose before you have data)")
 		restrictDollar  = fs.Bool("restrict-dollar-topics", false, "refuse publishes and subscriptions on topics starting with $ (MQTT 5.0 section 4.7.2), except $share/ subscriptions")
 		maxQoS          = fs.Int("max-qos", 2, "highest QoS the broker accepts (0, 1 or 2)")
@@ -235,6 +236,7 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 			DurablePublish:            *durablePub,
 			DurablePublishDedupe:      *durableDedupe,
 			NATSIngest:                *natsIngest,
+			ReconnectCatchUp:          *reconnectCatch,
 			OfflineQueue:              *offlineQueue,
 			DisableOfflineQueue:       *noOffline,
 			CloseBehindClients:        *closeBehind,

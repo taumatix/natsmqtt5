@@ -369,7 +369,8 @@ the stream's replication) and the NATS server has routed the live copy. A sessio
 it from the queue; a connected subscriber gets it once, as without the option.
 
 What it is not: live delivery stays core NATS, at most once per hop, so a connected subscriber whose
-own NATS path fails at the wrong moment can still miss it ([ROADMAP.md](ROADMAP.md)). A retry after
+own NATS path fails at the wrong moment can still miss it; `ReconnectCatchUp` below closes the case
+where that path is its broker's NATS connection ([ROADMAP.md](ROADMAP.md)). A retry after
 a refusal can leave a second queue copy; `Options.DurablePublishDedupe` (`-durable-publish-dedupe`,
 `NATSMQTT5_DURABLE_PUBLISH_DEDUPE=true`, off by default) gives the publish a `Nats-Msg-Id` so the
 stream drops the retransmission (same packet identifier, DUP set, same topic and payload) inside its
@@ -377,6 +378,25 @@ duplicate window, 2 minutes unless you changed the stream's. The live copy is st
 the queue's keep like any other message but is not flushed, because there is no client to refuse to
 and nothing a refusal could ask it to retry; the record of a durable Will is already removed by the
 broker that publishes it ([ROADMAP.md](ROADMAP.md)).
+
+### Messages published while a broker was off NATS
+
+A broker whose NATS connection drops has no interest on the server until it reconnects, so a
+message another broker publishes meanwhile reaches none of its connected sessions, and by default
+nothing sends it later: only a session that was away is replayed. `Options.ReconnectCatchUp`
+(`-reconnect-catch-up`, `NATSMQTT5_RECONNECT_CATCH_UP=true`) closes that for QoS 1 and 2 messages
+that have a queue copy. When the connection drops, the broker holds its sessions' live QoS 1 and 2
+copies back; when it is back, each connected session reads the queue from `OfflineQueueRewind`
+before the drop, or from just after the newest message the broker had seen if that is earlier (a
+server that died behind an open socket is noticed only when the pings fail). What the session has
+not been sent goes out in stream order, then live delivery resumes, so nothing newer overtakes
+it. The ids each session keeps stop a message going out twice, and a subscription is sent only
+what was stored after it was made. Off by default; an error with `DisableOfflineQueue`.
+
+It costs one read of the queue stream per connected session after each reconnect, filtered to the
+session's subjects. It does not see a live copy lost between two servers of a NATS cluster while
+both brokers stay connected, nor messages published straight onto a live subject, which have no
+queue copy (publish them through `NATSIngest` instead; [ROADMAP.md](ROADMAP.md)).
 
 ## How MQTT maps onto NATS
 
