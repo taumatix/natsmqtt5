@@ -552,6 +552,18 @@ one with fewer features:
   is dropped. Brokers sharing a `SubjectPrefix` must agree on the queue, or a
   message can reach a group twice. QoS 0 messages always go through the queue
   group.
+- **Without the queue, a client that falls behind loses QoS 1 and 2.** A
+  connection holds 2048 messages waiting for its client; with the queue on, a
+  client slower than its publishers reads the rest from the stream, and with
+  `DisableOfflineQueue` (or no JetStream) there is no copy to read, so the
+  broker drops what does not fit and logs "dropping a message: the client is not
+  keeping up". That is a deviation from [MQTT-4.1.0-1] and [MQTT-4.5.0-1] that
+  the queue exists to close, and there is no option to hold publishers back
+  instead: the only place to block is the NATS subscription's handler, which
+  does not slow a publisher down, it moves the loss into the NATS client's
+  pending buffer (and the server's slow-consumer handling of the broker's one
+  connection, which every client shares). Run with the queue on if QoS 1 and 2
+  must not be lost to a slow client.
 - **Retransmission on reconnect reaches as far as the broker's memory.** A
   client that reconnects with Clean Start 0 to a broker still holding its
   session is resent the PUBLISH and PUBREL packets that connection left

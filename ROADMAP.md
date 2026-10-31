@@ -403,11 +403,17 @@ path SUBSCRIBE takes), with a test that publishes to a member that subscribed be
 
 ## Without the queue, a client that falls behind still loses QoS 1 and 2
 
-With `DisableOfflineQueue` or without JetStream there is no copy to catch up from, so past 2048
-waiting messages the broker drops, as before. Back-pressure (blocking the subscription's NATS
-handler, which holds back only that client's subscriptions) would move the limit to nats.go's
-pending limits rather than remove it. QoS 0, and messages published straight onto NATS, are
-dropped the same way with the queue on.
+**Decided (2026-10-30):** documented (README, "What it does not do"), and back-pressure is not built. With
+`DisableOfflineQueue` or without JetStream there is no copy to catch up from, so past 2048 waiting messages the broker
+drops, as before, and says so in its log. Blocking the subscription's NATS handler holds back only that client's
+subscriptions, but it does not slow the publishers: messages pile up in nats.go's per-subscription pending buffer,
+which has a count and byte limit, and past it nats.go drops them and reports a slow consumer on the broker's one
+shared connection. That moves the loss to a place with less information and a wider blast radius, and the memory
+held until then is bounded only by those pending limits. Reasoned from nats.go's documented behaviour, not measured.
+QoS 0, and messages published straight onto NATS, are dropped the same way with the queue on.
+**Left, only if a deployment without JetStream asks:** an opt-in per-connection limit that closes a connection that is
+2048 messages behind and leaves the session to resume, which loses nothing it had not already lost and makes the
+failure visible to the client. It would need a test with a client that stops reading.
 
 ## Statements covered only by unit tests
 
