@@ -61,6 +61,8 @@ type cursorRig struct {
 	qos     packet.QoS
 	sub     *rawClient
 	pub     *testClient
+	// withheldAt is when the latest sendWithheld returned, which is after its message was stored.
+	withheldAt time.Time
 }
 
 func newCursorRig(t *testing.T, natsURL, id string, qos packet.QoS, customise ...func(*natsmqtt5.Options)) *cursorRig {
@@ -107,6 +109,7 @@ func (r *cursorRig) sendWithheld(payload string) *nats.Msg {
 	r.pub.publish(&paho.Publish{Topic: r.topic, QoS: byte(r.qos), Payload: []byte(payload)})
 	select {
 	case m := <-held:
+		r.withheldAt = time.Now()
 		return m
 	case <-time.After(5 * time.Second):
 		r.t.Fatal("the publish never reached the live-copy gate")
@@ -116,12 +119,19 @@ func (r *cursorRig) sendWithheld(payload string) *nats.Msg {
 
 // dropPastTheRewind waits until the withheld copy is older than the rewind
 // reaches, then drops the subscriber's network connection and waits for the
-// broker to let go of the session.
+// broker to let go of the session. The record's delivered ids reach back a rewind and a checkpoint
+// skew before the release, so a copy is out of reach once it is older than both; its age is measured
+// from sendWithheld, not guessed from how long the steps in between happened to take. The broker logs the end of a connection after it has written the
+// session record, so once that line is seen the record and the log lines written with it are complete.
+// A rig that drops more than once counts the connections already ended: waiting for "a" line would be
+// satisfied by the first drop's and return before the second release had run.
 func (r *cursorRig) dropPastTheRewind() {
 	r.t.Helper()
 	time.Sleep(3 * cursorRewind)
+	time.Sleep(time.Until(r.withheldAt.Add(cursorRewind + natsmqtt5.CheckpointSkew + cursorRewind/2)))
+	ended := detachedCount(r.logs, r.id)
 	r.sub.drop()
-	waitDetached(r.t, r.logs, r.id)
+	waitDetachedTimes(r.t, r.logs, r.id, ended+1)
 }
 
 // resume connects back as the rig's client on addr and returns what it is

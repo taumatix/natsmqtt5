@@ -391,6 +391,10 @@ func SetLiveCopyGate(b *Broker, f func(live *nats.Msg) bool) {
 	b.liveCopyGate.Store(&f)
 }
 
+// CheckpointSkew is how far before a release a session record's delivered ids reach, beyond the
+// replay rewind.
+const CheckpointSkew = checkpointSkew
+
 // SetCursorScanAfter changes how many delivered ids pile up above a session's
 // replay cursor before a scan moves it, for the rest of the test.
 func SetCursorScanAfter(t interface{ Cleanup(func()) }, n int) {

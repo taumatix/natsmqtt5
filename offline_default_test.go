@@ -152,12 +152,17 @@ func waitDetached(t *testing.T, logs *syncBuffer, clientID string) {
 func waitDetachedTimes(t *testing.T, logs *syncBuffer, clientID string, n int) {
 	t.Helper()
 	require.Eventually(t, func() bool {
-		seen := 0
-		for _, line := range strings.Split(logs.String(), "\n") {
-			if strings.Contains(line, `msg="mqtt client disconnected"`) && strings.Contains(line, "client_id="+clientID+" ") {
-				seen++
-			}
-		}
-		return seen >= n
+		return detachedCount(logs, clientID) >= n
 	}, 5*time.Second, 5*time.Millisecond, "the broker never detached %s (%d)", clientID, n)
+}
+
+// detachedCount is how many connections of clientID the broker logging to logs has ended.
+func detachedCount(logs *syncBuffer, clientID string) int {
+	seen := 0
+	for _, line := range strings.Split(logs.String(), "\n") {
+		if strings.Contains(line, `msg="mqtt client disconnected"`) && strings.Contains(line, "client_id="+clientID+" ") {
+			seen++
+		}
+	}
+	return seen
 }
