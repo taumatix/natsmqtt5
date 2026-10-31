@@ -11,6 +11,7 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Changed:** the session store sweep deletes a payload in the in-flight payload bucket that belongs to a session attached to the sweeping broker and that neither the session's record nor the broker's memory names, once it is older than the grace period. Before, such payloads stayed until the bucket's TTL. No API change.
 - **Changed:** a resume reads each hole of its replay cursor (a message it was owed and never sent) by its sequence, and the queue stream from the cursor, instead of reading the stream from the lowest hole on: a hole kept for hours no longer costs every message stored above it on each resume. Measured on a three-way replicated stream (`TestClusterReplayReadCost`): with a hole below 2000 completed messages, the owed message above them arrives in 77 ms instead of 112 ms. No API change.
 - **Fixed:** a broker started with `DisableRetained` (`-no-retained`) crashed with a nil pointer dereference at its first session sweep, one `SessionSweepInterval` (a minute by default) after it started. Introduced in v0.12.0.
 - **Fixed:** after its NATS connection reconnects, a broker checks its retained view against the stream at once, not at the next session sweep (up to `SessionSweepInterval`, a minute by default, later), so a retained message another broker cleared while this one was cut off stops being sent to new subscribers within moments [MQTT-3.3.1-6]. The broker listens for the reconnect without replacing a reconnect handler set on `Options.Conn`. No API change.
