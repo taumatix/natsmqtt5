@@ -427,3 +427,67 @@ func publishLate(t *testing.T, natsURL string, live *nats.Msg) {
 	require.NoError(t, nc.PublishMsg(live))
 	require.NoError(t, nc.Flush())
 }
+
+// restartAfterADrop leaves r's session connected with a cursor restarted after
+// a drop: a withheld message makes a hole past a bound of none, which drops the
+// cursor; once that message is older than the rewind, a delivery starts a
+// restart scan, which reads from the rewind and finds nothing owed. It returns
+// the withheld copy, which neither the rewind nor the restarted cursor reaches.
+func restartAfterADrop(t *testing.T, r *cursorRig) *nats.Msg {
+	t.Helper()
+	natsmqtt5.SetMaxReplayHoles(t, 0)
+	r.send("before")
+	gone := r.sendWithheld("gone")
+	r.send("drops-it")
+	require.Eventually(t, func() bool {
+		next, _ := natsmqtt5.ReplayCursor(r.b, r.id)
+		return next == 0
+	}, 5*time.Second, 20*time.Millisecond, "a hole past the bound drops the cursor")
+	natsmqtt5.SetMaxReplayHoles(t, 1024)
+	time.Sleep(3 * cursorRewind)
+	r.send("restarts-it")
+	require.Eventually(t, func() bool {
+		next, holes := natsmqtt5.ReplayCursor(r.b, r.id)
+		return next > seqOf(t, gone) && len(holes) == 0
+	}, 5*time.Second, 20*time.Millisecond, "a restart scan starts the cursor again, past the message older than the rewind")
+	return gone
+}
+
+// A cursor dropped while the client stays connected comes back without a
+// resume, and the next absence is replayed from it: a message whose live copy
+// never came, stored after the restart and three rewinds before the
+// connection ended, is sent, which falling back to the rewind would not do;
+// nothing the client completed comes back as new.
+func TestACursorDroppedWhileConnectedRestartsAndReplaysTheHole_MQTT_4_4_0_1_MQTT_4_3_3_2(t *testing.T) {
+	natsmqtt5.SetCursorScanAfter(t, 1)
+	natsURL := startNATS(t)
+	r := newCursorRig(t, natsURL, "cur-restart", packet.QoS2)
+	restartAfterADrop(t, r)
+
+	lost := seqOf(t, r.sendWithheld("lost"))
+	r.send("after")
+	awaitHole(t, r.b, r.id, lost)
+	r.dropPastTheRewind()
+
+	assert.Equal(t, []string{"lost"}, r.resume(r.addr),
+		"[MQTT-4.4.0-1] the restarted cursor sends the hole the rewind no longer reaches; "+
+			"[MQTT-4.3.3-2], [MQTT-4.3.3-6] nothing completed comes back")
+}
+
+// A live copy below a restarted cursor's base names a message the rewind would
+// start at, with whatever lies between it and the base, which the restart did
+// not read: the copy is delivered and the cursor goes, so the session falls
+// back to the rewind rather than skip what that would send [MQTT-4.4.0-1].
+func TestALiveCopyBelowARestartedCursorsBaseDropsIt_MQTT_4_4_0_1(t *testing.T) {
+	natsmqtt5.SetCursorScanAfter(t, 1)
+	natsURL := startNATS(t)
+	r := newCursorRig(t, natsURL, "cur-restart-below", packet.QoS1)
+	gone := restartAfterADrop(t, r)
+
+	publishLate(t, natsURL, gone)
+	completeOne(t, r.sub, "gone")
+	require.Eventually(t, func() bool {
+		next, _ := natsmqtt5.ReplayCursor(r.b, r.id)
+		return next == 0
+	}, 5*time.Second, 20*time.Millisecond, "the cursor goes")
+}

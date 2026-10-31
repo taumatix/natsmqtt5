@@ -190,3 +190,111 @@ func TestReplacingASubscriptionKeepsItsSinceUnlessItNowOwesMore(t *testing.T) {
 		})
 	}
 }
+
+// sessionWithoutCursor is a connected session's state after its cursor was
+// dropped: one subscription whose since is known.
+func sessionWithoutCursor() (*session, []*subscription) {
+	s := newSession("c")
+	s.rewind = time.Minute
+	sub := &subscription{filter: "f"}
+	sub.since.Store(0)
+	s.subs[sub.filter] = sub
+	return s, []*subscription{sub}
+}
+
+func restartAt(s *session, r restartScan, floor uint64, now time.Time) bool {
+	s.cursorMu.Lock()
+	defer s.cursorMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.restartCursorLocked(r, floor, now)
+}
+
+// A restart scan read from base to last: what it found owed and not delivered
+// below next is a hole, and a live copy below base drops the cursor, since the
+// rewind would start there.
+func TestARestartedCursorKeepsWhatItReadAndDropsForACopyBelowItsBase(t *testing.T) {
+	s, subs := sessionWithoutCursor()
+	s.noteDelivered("eleven", 11)
+	now := time.Now()
+	read := []scanned{{seq: 10, id: "ten", owed: true}, {seq: 11, id: "eleven", owed: true}, {seq: 12, id: "twelve"}}
+
+	require.True(t, restartAt(s, restartScan{subs: subs, began: now, base: 10, last: 12, read: read}, 0, now))
+	next, holes := cursorOf(s)
+	assert.Equal(t, uint64(13), next)
+	assert.Equal(t, map[uint64]string{10: "ten"}, holes, "delivered and never-owed messages are not holes")
+
+	s.noteLiveCopy(11, "eleven")
+	next, _ = cursorOf(s)
+	require.Equal(t, uint64(13), next, "at or above base a copy is judged as under any cursor")
+	s.noteLiveCopy(9, "nine")
+	next, _ = cursorOf(s)
+	assert.Zero(t, next, "below base the rewind would start at it; the cursor goes")
+}
+
+// Each thing a restart depends on refuses it when it does not hold.
+func TestARestartIsRefusedUnlessItIsAsSafeAsTheRewind(t *testing.T) {
+	now := time.Now()
+	scan := func(subs []*subscription) restartScan {
+		return restartScan{subs: subs, began: now, base: 10, last: 20}
+	}
+	t.Run("the connection holds a message below base", func(t *testing.T) {
+		s, subs := sessionWithoutCursor()
+		assert.False(t, restartAt(s, scan(subs), 9, now))
+	})
+	t.Run("the scan took a rewind, so ids from base up may be gone", func(t *testing.T) {
+		s, subs := sessionWithoutCursor()
+		assert.False(t, restartAt(s, scan(subs), 0, now.Add(time.Minute)))
+	})
+	t.Run("a subscription changed while it read", func(t *testing.T) {
+		s, subs := sessionWithoutCursor()
+		other := &subscription{filter: "g"}
+		other.since.Store(0)
+		s.subs["g"] = other
+		assert.False(t, restartAt(s, scan(subs), 0, now))
+	})
+	t.Run("a cursor was set meanwhile", func(t *testing.T) {
+		s, subs := sessionWithoutCursor()
+		r := scan(subs)
+		s.cur.gen++
+		assert.False(t, restartAt(s, r, 0, now))
+	})
+	t.Run("a resume replay holds a pin", func(t *testing.T) {
+		s, subs := sessionWithoutCursor()
+		s.pinForReplay(5)
+		assert.False(t, restartAt(s, scan(subs), 0, now))
+	})
+	t.Run("more holes than a cursor keeps", func(t *testing.T) {
+		was := maxReplayHoles.Swap(1)
+		t.Cleanup(func() { maxReplayHoles.Store(was) })
+		s, subs := sessionWithoutCursor()
+		r := scan(subs)
+		r.read = []scanned{{seq: 10, id: "a", owed: true}, {seq: 11, id: "b", owed: true}}
+		assert.False(t, restartAt(s, r, 0, now))
+	})
+	t.Run("all hold", func(t *testing.T) {
+		s, subs := sessionWithoutCursor()
+		assert.True(t, restartAt(s, scan(subs), 15, now))
+		next, _ := cursorOf(s)
+		assert.Equal(t, uint64(15), next, "next stops at what the connection holds")
+	})
+}
+
+// A restarted cursor is not written to the record, which then reads as one
+// without a cursor; and a late copy reaching the released session is noted for
+// that record by the rule without one.
+func TestARestartedCursorStaysOutOfTheRecord(t *testing.T) {
+	s, subs := sessionWithoutCursor()
+	now := time.Now()
+	require.True(t, restartAt(s, restartScan{subs: subs, began: now, base: 10, last: 20}, 0, now))
+	s.markAwayLocked(away{at: now})
+
+	s.lateCopy(nil, 15, "late")
+	_, holes := cursorOf(s)
+	assert.Equal(t, map[uint64]string{15: "late"}, holes, "the cursor held in memory keeps it as a hole")
+
+	var rec sessionRecord
+	s.awayStateInto(&rec)
+	assert.Zero(t, rec.ReplayCursor)
+	assert.Equal(t, uint64(15), rec.AwayLateSeq, "the record names the late copy, as one without a cursor does")
+}

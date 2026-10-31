@@ -2,6 +2,7 @@ package natsmqtt5
 
 import (
 	"context"
+	"log/slog"
 	"math"
 	"sort"
 	"sync/atomic"
@@ -58,6 +59,20 @@ import (
 // back to the time rewind, when the ids above it or the holes outgrow their
 // bound, when the stream was reset under it, or when a record cannot carry all
 // of the ids above it.
+//
+// A connected session without a cursor gets one back by a restart scan
+// (restartCursor), once cursorScanAfter queued messages were delivered without
+// one. It cannot know what was owed and never sent before it lost its cursor, so
+// it promises only what the time rewind would: it reads from where a rewind
+// started now would (Options.OfflineQueueRewind ago, base) and sets next with the
+// holes it found in [base, next). A rewind started at any later release reaches
+// no lower than base by time, so below base the rewind sends only what a
+// sequence names: the lowest message the connection holds (owedFloor), or a
+// late copy. A restart refuses while the connection holds one below base, and a
+// live or late copy below base drops the restarted cursor (addHoleLocked), so
+// the rewind, which would have started there, does. A restarted cursor is not
+// written to the session's record: a broker that restores the record replays
+// it from the time rewind, which an older broker ignoring base would not.
 
 // sinceUnknown marks a subscription whose since has not been read yet.
 const sinceUnknown = math.MaxUint64
@@ -101,6 +116,9 @@ type replayCursor struct {
 	// pin keeps the ids at or above it while a replay that may start a cursor
 	// runs; 0 when there is none.
 	pin uint64
+	// base is the lowest sequence a restarted cursor accounts for (see
+	// restartCursor); 0 for one that accounts for everything below next.
+	base uint64
 }
 
 func (r *replayCursor) addHole(seq uint64, id string) {
@@ -165,6 +183,7 @@ func (s *session) setCursorLocked(next uint64) {
 	s.cur.gen++
 	s.cur.above = 0
 	s.cur.pin = 0
+	s.cur.base = 0
 }
 
 // dropCursorLocked forgets the cursor: the session's replays start at a time
@@ -179,6 +198,7 @@ func (s *session) dropCursorLocked() {
 	s.cur.gen++
 	s.cur.above = 0
 	s.cur.pin = 0
+	s.cur.base = 0
 	if s.lateSeq != 0 && !s.windowSafeLocked(s.lateSeq) {
 		s.lateSeq = 0
 	}
@@ -188,9 +208,16 @@ func (s *session) dropCursorLocked() {
 }
 
 // addHoleLocked records a message the session is owed below next, unless it was
-// delivered. It drops the cursor when the holes outgrow their bound and reports
-// whether the cursor is still set.
+// delivered. It drops the cursor when the holes outgrow their bound, or when
+// seq is below a restarted cursor's base, and reports whether the cursor is
+// still set.
 func (s *session) addHoleLocked(seq uint64, id string) bool {
+	if seq < s.cur.base {
+		// The rewind would start at seq, and send what lies between it and
+		// base, which a restarted cursor does not know [MQTT-4.4.0-1].
+		s.dropCursorLocked()
+		return false
+	}
 	if id == "" {
 		// A copy without an id cannot be told from a delivered one.
 		s.dropCursorLocked()
@@ -337,7 +364,14 @@ func (c *conn) scanOnce() (moved bool) {
 	s.mu.Lock()
 	start, gen := s.cur.next, s.cur.gen
 	known := s.sinceKnownLocked()
+	pinned := s.cur.pin != 0
+	if start == 0 {
+		s.cur.above = 0 // the next restart waits for as many deliveries again
+	}
 	s.mu.Unlock()
+	if start == 0 && known && !pinned {
+		c.restartCursor(q, gen)
+	}
 	if start == 0 || !known {
 		return false
 	}
@@ -367,7 +401,7 @@ func (c *conn) scanOnce() (moved bool) {
 		c.logger.Debug("could not scan the offline queue for the replay cursor", "error", err)
 		return false
 	}
-	return c.applyScan(gen, start, last, read)
+	return c.applyScan(gen, start, last, subs, read)
 }
 
 func hasNonShared(subs []*subscription) bool {
@@ -380,28 +414,47 @@ func hasNonShared(subs []*subscription) bool {
 }
 
 // applyScan moves the cursor past what a scan from start read up to last,
-// unless the cursor or the session's connection changed meanwhile. It reports
-// whether the cursor moved.
-func (c *conn) applyScan(gen, start, last uint64, read []scanned) (moved bool) {
+// unless the cursor, the session's subscriptions (subs when the scan began) or
+// its connection changed meanwhile. It reports whether the cursor moved.
+func (c *conn) applyScan(gen, start, last uint64, subs []*subscription, read []scanned) (moved bool) {
 	s := c.sess
 	s.cursorMu.Lock()
 	defer s.cursorMu.Unlock()
 	floor := c.owedFloor()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.cur.gen != gen || s.cur.next != start || s.conn != c || c.isClosed() {
+	if s.conn != c || c.isClosed() {
 		return false
+	}
+	moved, applied := s.applyScanLocked(c.logger, gen, start, last, subs, read, floor)
+	if applied {
+		// The cursor and its holes are in the record: a checkpoint that saw no
+		// other activity since its last write would otherwise skip them, and a
+		// broker killed now would leave a record without the hole [MQTT-4.4.0-1].
+		c.activity.Add(1)
+	}
+	return moved
+}
+
+// applyScanLocked is applyScan with s.cursorMu and s.mu held and floor the
+// connection's owedFloor. applied reports whether the cursor changed.
+func (s *session) applyScanLocked(logger *slog.Logger, gen, start, last uint64, subs []*subscription,
+	read []scanned, floor uint64) (moved, applied bool) {
+	if s.cur.gen != gen || s.cur.next != start {
+		return false, false
 	}
 	if last+1 < start {
 		// The stream ends below the cursor: it was purged or made again, and
 		// the sequences the cursor names are not the ones it counted.
-		c.logger.Warn("the offline queue restarted below the session's replay cursor; "+
+		logger.Warn("the offline queue restarted below the session's replay cursor; "+
 			"the session falls back to the time rewind", "client_id", s.clientID)
 		s.dropCursorLocked()
-		return false
+		return false, false
 	}
-	if !s.sinceKnownLocked() {
-		return false
+	if !s.sinceKnownLocked() || !s.sameSubsLocked(subs) {
+		// A subscription made since the scan began may be owed what it read
+		// past without looking.
+		return false, false
 	}
 	next := last + 1
 	if floor != 0 && floor < next {
@@ -415,19 +468,150 @@ func (c *conn) applyScan(gen, start, last uint64, read []scanned) (moved bool) {
 			continue
 		}
 		if !s.addHoleLocked(m.seq, m.id) {
-			c.logger.Warn("the session is owed more messages than its replay cursor keeps; "+
+			logger.Warn("the session is owed more messages than its replay cursor keeps; "+
 				"it falls back to the time rewind", "client_id", s.clientID)
-			return false
+			return false, false
 		}
 	}
 	moved = next > s.cur.next
 	s.cur.next = next
 	s.cur.above = s.countAboveLocked(next)
-	// The cursor and its holes are in the record: a checkpoint that saw no
-	// other activity since its last write would otherwise skip them, and a
-	// broker killed now would leave a record without the hole [MQTT-4.4.0-1].
-	c.activity.Add(1)
-	return moved
+	return moved, true
+}
+
+// sameSubsLocked reports whether the session's subscriptions are subs. s.mu is
+// held.
+func (s *session) sameSubsLocked(subs []*subscription) bool {
+	if len(subs) != len(s.subs) {
+		return false
+	}
+	for _, sub := range subs {
+		found := false
+		for _, held := range s.subs {
+			if held == sub {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+// restartScan is what a restart scan read: from began less the rewind, base
+// is the first sequence it read (last+1 when none), read what the session's
+// subscriptions (subs) match, up to last.
+type restartScan struct {
+	gen        uint64
+	subs       []*subscription
+	began      time.Time
+	base, last uint64
+	read       []scanned
+}
+
+// restartCursor gives a connected session without a cursor one, from what a
+// time rewind started now would read (see the comment at the top of this
+// file). It changes nothing a client is sent, and nothing when it cannot be
+// as safe as the rewind.
+func (c *conn) restartCursor(q *offlineQueue, gen uint64) {
+	s := c.sess
+	subs := s.subscriptions()
+	filters := q.replayFilters(subs)
+	if filters == nil || !hasNonShared(subs) {
+		// No subscription a replay serves, or a filter that cannot be
+		// narrowed to subjects: a SUBSCRIBE starts the cursor, or none does.
+		return
+	}
+	ctx, cancel := c.streamContext()
+	defer cancel()
+	r := restartScan{gen: gen, subs: subs, began: time.Now()}
+	last, err := q.replay(ctx, r.began.Add(-s.window()), filters, func(msg *nats.Msg) {
+		seq := queueSeq(msg)
+		if r.base == 0 {
+			r.base = seq
+		}
+		if matched, owed := c.owedBy(subs, msg, seq); matched {
+			r.read = append(r.read, scanned{seq: seq, id: messageID(msg), owed: owed})
+		}
+	})
+	if err != nil {
+		c.logger.Debug("could not scan the offline queue to restart the replay cursor", "error", err)
+		return
+	}
+	r.last = last
+	if r.base == 0 {
+		r.base = last + 1
+	}
+	if c.applyRestart(r) {
+		c.logger.Debug("restarted the replay cursor", "client_id", s.clientID, "base", r.base)
+	}
+}
+
+// applyRestart sets the cursor a restart scan found, unless anything it
+// depends on changed. It reports whether it did.
+func (c *conn) applyRestart(r restartScan) bool {
+	s := c.sess
+	s.cursorMu.Lock()
+	defer s.cursorMu.Unlock()
+	floor := c.owedFloor()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.conn != c || c.isClosed() || c.resume.Load() != nil {
+		return false
+	}
+	return s.restartCursorLocked(r, floor, time.Now())
+}
+
+// restartCursorLocked is applyRestart with s.cursorMu and s.mu held, floor the
+// connection's owedFloor and now the time.
+func (s *session) restartCursorLocked(r restartScan, floor uint64, now time.Time) bool {
+	if s.cur.next != 0 || s.cur.gen != r.gen || s.cur.pin != 0 ||
+		!s.sinceKnownLocked() || !s.sameSubsLocked(r.subs) {
+		return false
+	}
+	if now.Sub(r.began) >= s.window() {
+		// The ids delivered from base up are kept for twice the rewind, and
+		// they are what tells a hole from a delivered message.
+		return false
+	}
+	if floor != 0 && floor < r.base {
+		// The connection holds a message below base: a rewind would start at
+		// it, and send what lies between, which this scan did not read.
+		return false
+	}
+	next := r.last + 1
+	if floor != 0 && floor < next {
+		next = floor
+	}
+	var holes []scanned
+	for _, m := range r.read {
+		if m.seq >= next {
+			break
+		}
+		if _, delivered := s.delivered[m.id]; !m.owed || delivered {
+			continue
+		}
+		if m.id == "" {
+			return false
+		}
+		holes = append(holes, m)
+	}
+	if int64(len(holes)) > maxReplayHoles.Load() {
+		return false
+	}
+	above := s.countAboveLocked(next)
+	if int64(above) > cursorIDBound.Load() {
+		return false
+	}
+	s.setCursorLocked(next)
+	s.cur.base = r.base
+	for _, m := range holes {
+		s.cur.addHole(m.seq, m.id)
+	}
+	s.cur.above = above
+	return true
 }
 
 // countAboveLocked counts the delivered ids at or above seq.
