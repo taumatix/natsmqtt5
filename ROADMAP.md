@@ -88,26 +88,6 @@ for this session" and sends nothing until the next resume, though the cursor did
 the client stays connected would close that. And each SUBSCRIBE now costs a
 stream info request and each 1024 deliveries a filtered read; neither is measured over a clustered, replicated stream.
 
-## Self-fencing on a cluster: what is left
-
-**Blocked by:** nothing, and little is worth building. `TestClusterWillOfAClientOnAnIsolatedNATSServerIsPublishedOnceAfterItsConnectionCloses`
-isolates the server a broker uses from the other two (three real servers in containers, `natscluster_test.go`), watches
-the client's socket close before the survivor publishes, heals, and counts one publication. It found that the fenced
-broker's own disconnect path published the Will again when the removal of the record timed out; `fire` retries the removal
-until the store answers. Since 2026-10-31 it runs both shapes, the isolated server leading the Will bucket and a survivor
-leading it (`natsCluster.LeadStream`). **Fixed (2026-10-31):** the fence proved reachability with a read of the Will
-bucket, which every replica answers: the isolated broker never fenced and a survivor published the Will of a client still
-connected [MQTT-3.1.2-8], while a survivor's read, routed now and then to the isolated replica, timed out often enough to
-fence the survivor (the three red `cluster` runs of PR #187). The probe is a write a majority must accept; the test's
-socket-close helper had hidden the first half by reading its own read deadline as the close.
-Left: (1) a partition that leaves the broker's server with a majority and cuts the
-*broker* off is the proxy test, not a cluster one; (2) a partition longer than `retryFor` with the broker still cut off
-waits for the store for as long as it takes, by design, so there is nothing to assert but that it does not publish;
-(3) a Will bucket leader election longer than twice `WillCheckInterval` fences every broker (writes stop until it ends;
-NATS starts one 4 to 9 s after the leader goes quiet, against 10 s at the default interval). Not measured on a killed
-leader yet; a cluster test that SIGKILLs the bucket's leader and counts closed clients would say whether the default
-needs to rise.
-
 ## Durable Wills on by default
 
 **Blocked by:** a major version (or a minor one behind an opt-in), and a decision to take it.
@@ -352,27 +332,22 @@ non-persistent ceiling is 0.09 ms). Killed-broker tests cover the burst (`killed
 about 2 ms on a loaded host. That needs a write that is not waited for, which [MQTT-4.3.3-6] does not
 allow, or a faster store. Not measured with `sync_always` on the NATS server.
 
-## Spilled in-flight entries: what an acknowledgement still rewrites
+## A checkpoint of a full in-flight window spends a quarter of a second encoding it
 
-**Blocked by:** nothing, though nothing has measured the rewrite as a cost.
+**Blocked by:** nothing.
 
-**Done (2026-10-30):** a checkpoint names a chunk whose content did not change without writing it
-(`spillRecordReusing`; a message appended writes the last chunk only, 1 of 10 in the test), until
-its payloads near the bucket's TTL, when all are rewritten. The sweep deletes the unnamed payloads
-(and counts the chunks as named) of an owner whose record was released.
-**Done (2026-10-31):** chunks also end at a fixed identifier count (`defaultSpillChunkIDs`, 1024: a chunk ends after
-an entry whose identifier is a multiple of it, or when size cuts it), so an acknowledgement at the front or a message
-appended changes the chunk it touches and no other (`TestSpillAnAcknowledgementAtTheFrontWritesFewChunks`). The layout
-is still an ordered list of chunk keys, which an older broker reads as before.
-**Done (2026-10-31):** the sweep judges the payloads of a session attached to the broker running it by what that
-broker holds in memory as well as by the record, so a payload under the owner that neither names is deleted once
-older than the grace period instead of waiting for the bucket's TTL
-(`TestTheSweepDeletesAnAttachedSessionsUnnamedPayloadAndKeepsTheOneItHolds_MQTT_4_4_0_1`). A session attached to
-another broker is left to that broker's sweep.
-**Left:** an acknowledgement still re-cuts the first spilled chunk (where the inline part ends), and a chunk cut by
-size rather than by identifier shifts as before; identifiers that do not cycle in send order (a client that acknowledges
-out of order leaves gaps) make the chunks uneven, not wrong. A session attached to a broker that died has its unnamed payloads judged only once
-its record is reclaimed, or they age out.
+**Measured (2026-10-31, `TestSpillAcknowledgementCost`, embedded JetStream, 65535 QoS 1 entries each with a 100 byte
+stored PUBLISH, an acknowledgement at the front each time):** an acknowledgement writes 0.94 chunks (never more than 1 of
+the 61), 132 KB, beside the 824 KB session record every checkpoint writes whatever changed. The rewrite is not worth
+more machinery. What the same call costs is CPU: `spillInto` + `commitSpill` took about 250 ms per checkpoint, over half of it
+`spillRecordReusing`'s `fits`, which encodes the whole record again at each step of the search for how many entries stay
+inline (`keep -= keep/8`, about 20 steps), plus one `json.Marshal` of every entry for its size. A client at the full Receive
+Maximum that is slow to acknowledge pays that on each checkpoint tick. Sizing the record from the entry sizes already
+computed (the record without entries once, then the prefix sums) would leave one encode at the end, which keeps the exact
+check the limit relies on.
+
+A session attached to a broker that died still has its unnamed payloads judged only once its record is reclaimed, or
+they age out.
 
 ## Retained view: a stale entry that cancels an unseen one
 
