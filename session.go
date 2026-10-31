@@ -550,6 +550,27 @@ func (s *session) expireIfDue() (subs []*subscription, ok bool) {
 // leaves its shared subscriptions' members (Broker.leaveGroups), a moved one
 // has not left them.
 func (s *session) discard() []*subscription {
+	subs := s.discardKeeping()
+	s.handBackHeld()
+	return subs
+}
+
+// discardMoved is discard for a session another broker has claimed. The messages
+// it holds are not handed back: they are the session's still, and the broker that
+// claimed it reads them from the stored record and holds them. Handing them back
+// would give the group's other members a message the client is about to be sent
+// again, or, for a QoS 2 message, one it may already own [MQTT-4.3.3-8].
+func (s *session) discardMoved() []*subscription {
+	subs := s.discardKeeping()
+	s.mu.Lock()
+	for _, o := range s.inflight {
+		o.ackSubject = ""
+	}
+	s.mu.Unlock()
+	return subs
+}
+
+func (s *session) discardKeeping() []*subscription {
 	s.mu.Lock()
 	held := s.subs
 	s.subs = make(map[string]*subscription)
@@ -562,7 +583,6 @@ func (s *session) discard() []*subscription {
 		unsubscribeAll(sub)
 		subs = append(subs, sub)
 	}
-	s.handBackHeld()
 	return subs
 }
 

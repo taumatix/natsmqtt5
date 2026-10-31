@@ -299,6 +299,12 @@ type Options struct {
 	// Ptr(uint8(0)) can express a broker that only does QoS 0, which the zero
 	// value would otherwise make unreachable.
 	MaximumQoS *uint8
+	// SharedQoS2 grants QoS 2 on a shared subscription ($share/...) when a
+	// client asks for it; by default the SUBACK grants QoS 1, which
+	// [MQTT-3.8.4-7] permits. Off until the exactly-once guarantee for a message
+	// a shared member holds is complete (ROADMAP.md, "QoS 2 on shared
+	// subscriptions"); turning it on earlier is for trials.
+	SharedQoS2 bool
 	// TopicAliasMaximum is advertised in CONNACK. Zero disables inbound topic
 	// aliases; leave it unset for DefaultTopicAliasMaximum.
 	TopicAliasMaximum *uint16

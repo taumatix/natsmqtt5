@@ -147,6 +147,7 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 		escapeWildcards = fs.Bool("escape-nats-wildcards", false, "accept topics containing *, >, spaces and other whitespace by escaping them in the NATS subject (not readable by nats-server's own MQTT listener; choose before you have data)")
 		restrictDollar  = fs.Bool("restrict-dollar-topics", false, "refuse publishes and subscriptions on topics starting with $ (MQTT 5.0 section 4.7.2), except $share/ subscriptions")
 		maxQoS          = fs.Int("max-qos", 2, "highest QoS the broker accepts (0, 1 or 2)")
+		sharedQoS2      = fs.Bool("shared-qos2", false, "grant QoS 2 on shared subscriptions (default grants QoS 1; the guarantee is incomplete, see ROADMAP.md)")
 		keepAlive       = fs.Int("server-keep-alive", 0, "override the client's Keep Alive, in seconds; 0 leaves it to the client")
 		wsListen        = fs.String("ws-listen", "", "address to accept MQTT over WebSocket on (for example :8083); empty serves none")
 		wsPath          = fs.String("ws-path", "/mqtt", "URL path the WebSocket handler is mounted at")
@@ -226,6 +227,7 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 			DisableOfflineQueue:       *noOffline,
 			OfflineQueueMaxAge:        *offlineMaxAge,
 			MaximumQoS:                natsmqtt5.Ptr(uint8(*maxQoS)),
+			SharedQoS2:                *sharedQoS2,
 			ServerKeepAlive:           uint16(*keepAlive),
 		},
 		level:       level,

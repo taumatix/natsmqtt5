@@ -253,15 +253,16 @@ the order that ships something each time. SUBACK keeps granting QoS 1 on `$share
 (`subscribe.go`, the cap before `granted`) until the last piece is done, so the
 first two change nothing a client sees.
 
-### 1. A shared member's held QoS 2 message survives a broker restart and a takeover
+### 1. Done (2026-10-31): a held QoS 2 message survives a killed broker and a takeover
 
-The session record already carries a QoS 1 or 2 message of a non-shared
-subscription across both (`inflightState`, `restoreEntry`). For a shared member it
-must carry the JetStream ack subject too, and the held-message timer must be
-re-armed on restore, so that the group's AckWait does not lapse and hand the
-message to another member while its owner is down for less than the session
-expiry. Test, real sockets, a killed broker binary and a takeover: [MQTT-4.3.3-6]
-(the PUBLISH is resent on resumption) and that a second member never sees it.
+`Options.SharedQoS2` (`-shared-qos2`, off) lifts the cap; with it a message held
+before its PUBREC is resent with DUP and its original identifier after a SIGKILL
+and after a takeover, and the group's other member is not given it
+(`shared_qos2_test.go`). Found on the way: a broker that lost a session to another
+broker handed its held messages back to the group (`discardMoved` now keeps them).
+Not covered: a message pulled but not yet checkpointed when its broker dies goes
+back to the group after AckWait, which a client that already answered it cannot
+tell from a new message (entry 2 narrows it: after PUBREC the record names the PUBREL).
 
 ### 2. The ownership point: acknowledge to the group at PUBREC, not at PUBCOMP
 
@@ -275,8 +276,8 @@ never delivered to a second member ([MQTT-4.3.3-2], exactly once).
 
 ### 3. Grant QoS 2 on `$share/`
 
-Remove the cap, behind an additive `Options` switch that is off until a release has
-carried 1 and 2, then make it the default. The SUBACK test moves from QoS 1 to the
+Make `Options.SharedQoS2` (added by entry 1, off) the default once a release has
+carried 1 and 2, and document it in the README. The SUBACK test moves from QoS 1 to the
 requested QoS ([MQTT-3.8.4-7]); with the switch off a QoS 2 request is still
 granted QoS 1.
 
