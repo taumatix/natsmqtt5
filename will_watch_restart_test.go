@@ -33,6 +33,7 @@ func startNATSAt(t *testing.T, port int, dir string) *natsserver.Server {
 // restart takes longer than twice WillCheckInterval, so the brokers fence their clients
 // meanwhile, which is the documented behaviour; the test connects new ones afterwards.)
 func TestWillsAreAdoptedAfterTheNATSServerRestarts(t *testing.T) {
+	t.Parallel()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	port := ln.Addr().(*net.TCPAddr).Port

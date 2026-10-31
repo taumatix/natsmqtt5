@@ -124,6 +124,7 @@ func (c *rawClient) closedAt() <-chan time.Time {
 }
 
 func TestMQTT_3_1_2_8_ABrokerCutOffFromNATSClosesItsClientsBeforeTheirWillIsPublished(t *testing.T) {
+	t.Parallel()
 	url := startNATS(t)
 	proxy := newPartitionProxy(t, url)
 	cut, cutAddr, _ := startBrokerHandle(t, proxy.url(), fastWills)

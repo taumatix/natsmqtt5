@@ -26,6 +26,7 @@ func rewindOf(d time.Duration) func(*natsmqtt5.Options) {
 // The copy was stored 3 s before the connection ended and its live copy never
 // came; a rewind of 5 s reaches it, on the broker that held the session.
 func TestACopyWhoseLiveCopyNeverCameIsReplayedWithinTheRewind(t *testing.T) {
+	t.Parallel()
 	natsURL := startNATS(t)
 	_, addr, _ := startBrokerHandle(t, natsURL, persistentWithQueue, rewindOf(5*time.Second))
 	f := newLateCopyFixture(t, natsURL, addr, "np-mem")
@@ -42,6 +43,7 @@ func TestACopyWhoseLiveCopyNeverCameIsReplayedWithinTheRewind(t *testing.T) {
 
 // The same when another broker claims the session from its record.
 func TestACopyWhoseLiveCopyNeverCameIsReplayedByTheBrokerThatClaimsTheSession(t *testing.T) {
+	t.Parallel()
 	natsURL := startNATS(t)
 	_, addrA, _ := startBrokerHandle(t, natsURL, persistentWithQueue, rewindOf(5*time.Second))
 	addrB := startBroker(t, natsURL, persistentWithQueue, rewindOf(5*time.Second))
@@ -62,6 +64,7 @@ func TestACopyWhoseLiveCopyNeverCameIsReplayedByTheBrokerThatClaimsTheSession(t 
 // both, so it is replayed and the seed, which the client holds unacknowledged,
 // is resent once.
 func TestACopyStoredBeforeTheRewindIsReplayedFromTheCursor(t *testing.T) {
+	t.Parallel()
 	natsURL := startNATS(t)
 	_, addr, _ := startBrokerHandle(t, natsURL, persistentWithQueue, rewindOf(time.Second))
 	f := newLateCopyFixture(t, natsURL, addr, "np-short")

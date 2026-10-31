@@ -193,6 +193,7 @@ func containsCode(set []packet.ReasonCode, c packet.ReasonCode) bool {
 // [MQTT-3.2.2-22] "If the Server does not send the Server Keep Alive, the
 // Server MUST use the Keep Alive value set by the Client on CONNECT."
 func TestConnack_MQTT_3_2_2_22(t *testing.T) {
+	t.Parallel()
 	addr := p2Start(t)
 	c := p2Dial(t, addr)
 	cp := rawConnect("ka", 0)

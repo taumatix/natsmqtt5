@@ -75,6 +75,7 @@ func uitoa(n uint64) string {
 // the connection ended, and after a later-stored copy's did, is still sent to the
 // session on resume, ahead of the later one.
 func TestALiveCopyThatArrivesAfterTheConnectionEndedIsStillSentOnResume(t *testing.T) {
+	t.Parallel()
 	natsURL := startNATS(t)
 	addr := startBroker(t, natsURL, persistentWithQueue)
 

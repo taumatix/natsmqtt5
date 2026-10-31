@@ -186,6 +186,7 @@ func TestASharedSubscriptionStillDeliversQoS0(t *testing.T) {
 // A shared member's message is delivered once, including when the member
 // comes back in the middle of a stream of work.
 func TestSharedWorkIsDeliveredOnceAcrossAReconnect(t *testing.T) {
+	t.Parallel()
 	var logs syncBuffer
 	addr := startBroker(t, startNATS(t), loggingBroker(t, &logs))
 

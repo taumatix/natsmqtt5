@@ -130,6 +130,7 @@ func TestReauthorizeDiscardsARevokedWillAndKeepsTheConnection(t *testing.T) {
 // The Will of a client already gone, waiting out its Will Delay Interval, is
 // the same Will and must be discardable the same way.
 func TestReauthorizeDiscardsAWillWaitingOutItsDelay(t *testing.T) {
+	t.Parallel()
 	var revoked atomic.Bool
 	b, addr, _ := startBrokerHandle(t, startNATS(t), revocable(&revoked))
 	watcher, _ := connectClient(t, addr, connectOpts("watcher-reauth-delay"))

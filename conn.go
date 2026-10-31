@@ -462,7 +462,7 @@ func causeString(err error) string {
 // first, and cancels if a new connection claims the session in the meantime
 // [MQTT-3.1.3-9].
 func (c *conn) scheduleWill() {
-	will, delay, lease := c.sess.takeWill(c)
+	will, delay, lease := c.sess.takeWillToPublish(c)
 	if will == nil {
 		return
 	}
@@ -478,6 +478,9 @@ func (c *conn) scheduleWill() {
 		delay = expiry
 	}
 	if delay == 0 {
+		if !sess.takePendingWill(will) {
+			return // discarded by Broker.Reauthorize, or cancelled by a resumption
+		}
 		wills.fire(lease, func() { c.broker.publishWill(sess, will) })
 		return
 	}
@@ -486,12 +489,12 @@ func (c *conn) scheduleWill() {
 	// outlives this one can tell a Will waiting out its delay from a live
 	// connection's.
 	if !wills.ended(lease, time.Now().Add(delay)) {
+		sess.takePendingWill(will)
 		return
 	}
 
-	// Held where Broker.Reauthorize can find it, so a Will whose permission
-	// is revoked during the delay can be discarded before it fires.
-	sess.setPendingWill(will, lease)
+	// Held where Broker.Reauthorize can find it (takeWillToPublish put it there), so a Will whose
+	// permission is revoked during the delay can be discarded before it fires.
 	go func() {
 		timer := time.NewTimer(delay)
 		defer timer.Stop()

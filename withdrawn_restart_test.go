@@ -27,6 +27,7 @@ import (
 // Both statements are quoted by CONFORMANCE.md rows rather than here: the
 // specification's wording is not in this repository.
 func TestAWithdrawnIdentifierSurvivesABrokerRestart_MQTT_4_4_0_1_MQTT_2_2_1_4(t *testing.T) {
+	t.Parallel()
 	const id = "withdrawn-restart"
 
 	// withdrawnAcrossTwoBrokers leaves the session record as broker B released

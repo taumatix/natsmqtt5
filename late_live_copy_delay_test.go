@@ -98,6 +98,7 @@ func resumeAndRead(t *testing.T, addr, clientID string) []string {
 // replay's two-second rewind from the connection's end) is still sent when the
 // session resumes on the same broker.
 func TestALiveCopyDelayedPastTheRewindIsStillSentOnResume(t *testing.T) {
+	t.Parallel()
 	natsURL := startNATS(t)
 	b, addr, _ := startBrokerHandle(t, natsURL, persistentWithQueue, rewindOf(2*time.Second))
 	f := newLateCopyFixture(t, natsURL, addr, "ld-mem")
@@ -122,6 +123,7 @@ func TestALiveCopyDelayedPastTheRewindIsStillSentOnResume(t *testing.T) {
 // broker: the first broker, which still holds the subscription, notes the late
 // copy and rewrites the record before the second broker claims it.
 func TestALiveCopyDelayedPastTheRewindIsStillSentToASessionRestoredElsewhere(t *testing.T) {
+	t.Parallel()
 	natsURL := startNATS(t)
 	bA, addrA, _ := startBrokerHandle(t, natsURL, persistentWithQueue, rewindOf(2*time.Second))
 	addrB := startBroker(t, natsURL, persistentWithQueue, rewindOf(2*time.Second))
@@ -147,6 +149,7 @@ func TestALiveCopyDelayedPastTheRewindIsStillSentToASessionRestoredElsewhere(t *
 // do not reach. The copy is published the instant the client's socket is
 // dropped, round after round, and none may be lost.
 func TestALiveCopyThatRacesTheConnectionsEndIsNeverLost(t *testing.T) {
+	t.Parallel()
 	natsURL := startNATS(t)
 	var logs syncBuffer
 	b, addr, _ := startBrokerHandle(t, natsURL, persistentWithQueue, loggingBroker(t, &logs))

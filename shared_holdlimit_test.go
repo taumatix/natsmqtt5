@@ -80,6 +80,7 @@ func TestAMessageHeldPastTheLimitGoesToAnotherMember(t *testing.T) {
 }
 
 func TestAMessageHeldWithNoLimitStaysWithItsMember(t *testing.T) {
+	t.Parallel()
 	_, m2, _ := holdingMember(t, 0)
 	m2.expectNoPublishFor(holdLimit + 6*handBackAckWait)
 }

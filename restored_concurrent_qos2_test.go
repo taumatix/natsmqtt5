@@ -20,6 +20,7 @@ import (
 // message reach the queue and the live subscription in an order the publishers' concurrency
 // decides, which the sequential tests around the restored rewind cannot produce.
 func TestConcurrentQoS2PublishersAcrossADropAndAMoveToAnotherBrokerLoseAndRepeatNothing(t *testing.T) {
+	t.Parallel()
 	const publishers = 6
 	const perPublisher = 40
 	const total = publishers * perPublisher

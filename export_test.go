@@ -51,6 +51,18 @@ func SetPublishQueuedGate(b *Broker, f func(payload []byte)) {
 	b.publishQueuedGate.Store(&f)
 }
 
+// AwaitNATSDisconnect waits until the broker's NATS client has noticed that its connection is gone.
+func AwaitNATSDisconnect(b *Broker, within time.Duration) bool {
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if !b.nc.IsConnected() {
+			return true
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return false
+}
+
 // AwaitNATSReconnect waits until the broker's NATS connection has reconnected
 // at least once and is connected again.
 func AwaitNATSReconnect(b *Broker, within time.Duration) bool {

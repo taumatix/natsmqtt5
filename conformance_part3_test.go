@@ -321,6 +321,7 @@ func TestConformance_MQTT_3_15_1_1_AuthWithReservedBitsClosesTheConnection(t *te
 // has its subscription, and it resumes with Session Present 1 on an immediate
 // reconnect.
 func TestConformance_MQTT_4_1_0_1_SessionStateSurvivesWhileConnected(t *testing.T) {
+	t.Parallel()
 	addr := p3Broker(t, func(o *natsmqtt5.Options) { o.SessionSweepInterval = 50 * time.Millisecond })
 	sub := dialRaw(t, addr)
 	cp := rawConnect("keeper", 1)
@@ -1086,6 +1087,7 @@ func TestTheTCPListenerDoesNotUpgradeToWebSocket(t *testing.T) {
 // after 2.5 s with Clean Start 0 finds no session (Session Present 0) and no
 // message, queued or new, for the old subscription.
 func TestConformance_MQTT_4_1_0_2_SessionStateIsDiscardedWhenTheExpiryIntervalPasses(t *testing.T) {
+	t.Parallel()
 	addr := p3Broker(t, func(o *natsmqtt5.Options) { o.SessionSweepInterval = 50 * time.Millisecond })
 	first := dialRaw(t, addr)
 	cp := rawConnect("expirer", 1)
@@ -1114,6 +1116,7 @@ func TestConformance_MQTT_4_1_0_2_SessionStateIsDiscardedWhenTheExpiryIntervalPa
 // subscription whose session has expired must stop receiving its share: the
 // remaining member is sent every message.
 func TestConformance_MQTT_4_1_0_2_AnExpiredSharedMemberStopsReceivingItsShare(t *testing.T) {
+	t.Parallel()
 	addr := p3Broker(t, func(o *natsmqtt5.Options) { o.SessionSweepInterval = 50 * time.Millisecond })
 	gone := dialRaw(t, addr)
 	cp := rawConnect("share-gone", 1)

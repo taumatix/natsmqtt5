@@ -2,6 +2,7 @@ package natsmqtt5_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/stretchr/testify/require"
 )
 
@@ -275,4 +277,29 @@ func (c *natsCluster) remove() {
 		_, _ = c.try("kill", name)
 		_, _ = c.try("delete", name)
 	}
+}
+
+// LeadStream makes node i the Raft leader of the named stream (a key-value bucket "B" is the stream "KV_B"), by
+// asking whichever node leads to step down until the election picks node i, which takes a few tries since the
+// choice among the others is the cluster's. A test that isolates a node needs to say whether that node leads.
+func (c *natsCluster) LeadStream(stream string, i int) {
+	c.t.Helper()
+	nc, err := nats.Connect(c.URLs())
+	require.NoError(c.t, err)
+	defer nc.Close()
+	js, err := jetstream.New(nc)
+	require.NoError(c.t, err)
+	want := fmt.Sprintf("n%d", i)
+	for try := 0; try < 30; try++ {
+		s, err := js.Stream(context.Background(), stream)
+		require.NoError(c.t, err)
+		info, err := s.Info(context.Background())
+		require.NoError(c.t, err)
+		if info.Cluster != nil && info.Cluster.Leader == want {
+			return
+		}
+		_, _ = nc.Request("$JS.API.STREAM.LEADER.STEPDOWN."+stream, nil, 5*time.Second)
+		time.Sleep(time.Second) // the election
+	}
+	c.t.Fatalf("node %d never became the leader of %s", i, stream)
 }

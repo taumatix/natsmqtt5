@@ -143,6 +143,7 @@ func TestMQTT_3_1_2_8_WillOfAKilledBrokerIsPublishedByASurvivor(t *testing.T) {
 // is closed. A connection that is open on a live broker keeps its Will, however
 // many times other brokers look.
 func TestMQTT_3_1_2_8_LiveConnectionKeepsItsWill(t *testing.T) {
+	t.Parallel()
 	url := startNATS(t)
 	startBroker(t, url, fastWills)
 	addrB := startBroker(t, url, fastWills)
@@ -188,6 +189,7 @@ func TestMQTT_3_1_2_10_NormalDisconnectLeavesNothingForASurvivor(t *testing.T) {
 // [MQTT-3.1.2-10]: once published the Will is removed, so a second survivor
 // does not publish it again. Three brokers, one dead, two survivors racing.
 func TestMQTT_3_1_2_10_WillIsPublishedOnceAcrossBrokers(t *testing.T) {
+	t.Parallel()
 	url := startNATS(t)
 	a, addrA, _ := startBrokerHandle(t, url, fastWills)
 	startBroker(t, url, fastWills)
@@ -221,6 +223,7 @@ func TestMQTT_3_1_2_10_WillIsPublishedOnceAcrossBrokers(t *testing.T) {
 // [MQTT-3.1.2-8]: the Will Delay Interval is honoured across a broker's death.
 // The Will is not published before the delay, and is after it.
 func TestMQTT_3_1_2_8_WillDelaySurvivesTheBrokerDying(t *testing.T) {
+	t.Parallel()
 	url := startNATS(t)
 	a, addrA, _ := startBrokerHandle(t, url, fastWillsWithSessions)
 	addrB := startBroker(t, url, fastWillsWithSessions)
@@ -242,6 +245,7 @@ func TestMQTT_3_1_2_8_WillDelaySurvivesTheBrokerDying(t *testing.T) {
 // [MQTT-3.1.3-9]: a new Network Connection to the Session, made on another
 // broker before the delay has passed, cancels the Will of the dead one.
 func TestMQTT_3_1_3_9_ReconnectCancelsTheWillOfAKilledBroker(t *testing.T) {
+	t.Parallel()
 	url := startNATS(t)
 	a, addrA, _ := startBrokerHandle(t, url, fastWillsWithSessions)
 	addrB := startBroker(t, url, fastWillsWithSessions)
@@ -305,6 +309,7 @@ func willKeys(t *testing.T, natsURL string) int {
 // of it runs afterwards: no handler, no deferred close, no goodbye to NATS.
 // A broker in this process publishes the Will it left behind.
 func TestMQTT_3_1_2_8_KillNineOfTheBrokerBinaryPublishesItsWill(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("builds and runs the broker binary")
 	}

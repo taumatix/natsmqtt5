@@ -339,6 +339,7 @@ func TestAMessageStoredBeforeItsSubscriptionIsNotOwedAndDoesNotHoldTheCursor_MQT
 // nothing the client completed is sent again. The replay that reads it to the
 // end starts a cursor, so the session's next absence is replayed from it.
 func TestARecordWithoutACursorIsResumedAsBeforeAndStartsOne_MQTT_4_4_0_1_MQTT_4_3_3_2(t *testing.T) {
+	t.Parallel()
 	natsURL := startNATS(t)
 	r := newCursorRig(t, natsURL, "cur-old", packet.QoS2)
 	var logsB syncBuffer

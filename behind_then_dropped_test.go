@@ -50,6 +50,7 @@ func resume(t *testing.T, addr, id string, receiveMax uint16) *rawClient {
 // Dropped like that, the session gets every one of them on resume, in order,
 // the unacknowledged ones resent with DUP set and none sent twice as new.
 func TestAConnectionDroppedWhileBehindLosesNothingOnResume(t *testing.T) {
+	t.Parallel()
 	addr := startBroker(t, startNATS(t))
 	slow := slowSubscriber(t, addr, "behind-1", "b/#")
 
@@ -70,6 +71,7 @@ func TestAConnectionDroppedWhileBehindLosesNothingOnResume(t *testing.T) {
 // The same, dropped during the catch-up from the stream rather than before it:
 // the client has been reading what the stream replays when the network fails.
 func TestAConnectionDroppedMidCatchUpResumesWhereItStood(t *testing.T) {
+	t.Parallel()
 	addr := startBroker(t, startNATS(t))
 	slow := slowSubscriber(t, addr, "behind-2", "b/#")
 
@@ -100,6 +102,7 @@ func TestAConnectionDroppedMidCatchUpResumesWhereItStood(t *testing.T) {
 // expected, and the test could not tell a DUP resend from a broker repeating it
 // as new.)
 func TestAConnectionDroppedDuringTheResumeReplayStillGetsTheRest(t *testing.T) {
+	t.Parallel()
 	addr := startBroker(t, startNATS(t))
 	slow := slowSubscriber(t, addr, "behind-3", "b/#")
 	publishBurst(t, addr, "behind-pub-2", 0, 1500)

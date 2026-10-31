@@ -221,6 +221,7 @@ func TestMQTT4_3_3_10_ResentInboundQoS2IsForwardedOnceAfterARestart(t *testing.T
 // A resend whose message has waited out its interval is dropped, not sent
 // [MQTT-3.3.2-5]; the restored entry is completed like any expired resend.
 func TestMQTT3_3_2_5_ExpiredRestoredQoS1ResendIsDropped(t *testing.T) {
+	t.Parallel()
 	natsURL := startNATS(t)
 	var logs syncBuffer
 	addrA, stopA := startStoppableBroker(t, natsURL, persistent, loggingBroker(t, &logs))

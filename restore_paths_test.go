@@ -27,6 +27,7 @@ import (
 // it; it is dropped, the rest of the session resumes, and a message published
 // after the resume is delivered.
 func TestAnInflightMessageWhoseQueueCopyAgedOutIsDroppedOnResume(t *testing.T) {
+	t.Parallel()
 	natsURL := startNATS(t)
 	shortQueue := func(o *natsmqtt5.Options) { o.OfflineQueueMaxAge = time.Second }
 	addrA, stopA := startStoppableBroker(t, natsURL, persistentWithQueue, shortQueue)
