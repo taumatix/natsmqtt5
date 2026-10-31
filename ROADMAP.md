@@ -250,22 +250,38 @@ on a miss), and clients in the field that mishandle aliases, which only a trial 
 
 ## QoS 2 on shared subscriptions
 
-**Blocked by:** known duplicates (checked 2026-10-31, after v0.13.0 carried entries 1 and 2). The release is out, so
-that blocker is gone. The default stays off because three known windows still let one QoS 2 message reach a group
-twice, which a QoS 2 grant forbids [MQTT-4.3.3-2]. A SUBACK granting QoS 2 by default would promise more than the
-broker keeps:
+**Blocked by:** known duplicates (checked again 2026-10-31, after #202). The default stays off: of the three windows
+#202 recorded, two are closed for a client that comes back within the group's AckWait, and what is left of them, with the
+first, still lets one QoS 2 message reach a group twice, which a QoS 2 grant forbids [MQTT-4.3.3-2], [MQTT-4.8.2-5].
 
-1. the late backlog (*A default queue that failed at startup*, **Left:**): a message the group acknowledged from the
-   backlog before its live copy reached this broker is delivered live as well. No crash is needed, only a slow live
-   copy at the moment the backlog is given, so this one alone keeps the default off;
-2. a message pulled and sent but not yet checkpointed when its broker is killed goes back to the group after AckWait
-   (entry 1, **Not covered**);
-3. a broker killed after reading the PUBREC and before writing the record that names the PUBREL (entry 2, **Not
-   covered**).
+1. **Open.** The late backlog (*A default queue that failed at startup*, **Left:**): a message the group acknowledged
+   from the backlog before its live copy reached this broker is delivered live as well. No crash is needed, only a slow
+   live copy at the moment the backlog is given. Closing it needs group consumers created by start sequence, which that
+   entry's **Blocked by** names as a decision (a mixed-version fleet would fail its shared SUBSCRIBEs). This one alone
+   keeps the default off.
+2. **Closed within AckWait.** A message pulled and sent but not yet checkpointed: for QoS 2 there is no such moment,
+   since `deliver` and `deliverBurst` (`subscribe.go`) write the record before the PUBLISH. Killed the instant the
+   client has the PUBLISH, the survivor resends it with DUP and the original identifier and the other member is never
+   given it (`TestAKilledBrokersSharedQoS2MessageJustSentIsCompletedByTheSameClient_MQTT_4_8_2_4_MQTT_4_8_2_5`, which
+   fails with the write before the PUBLISH removed).
+3. **Closed within AckWait.** A broker killed after reading the PUBREC and before writing the record that names the
+   PUBREL: the record still names the PUBLISH, the survivor holds the message again and resends it with DUP, the client
+   answers PUBREC again ([MQTT-4.3.3-10]) and the exchange completes; the other member is never given it
+   (`TestAKilledBrokersSharedQoS2MessageAnsweredBeforeItsRecordIsCompletedByTheSameClient_MQTT_4_8_2_4_MQTT_4_8_2_5`, with
+   `SetPubrecGate` holding the PUBREC before `awaitPubcomp`; it fails if a restore hands a pre-PUBREC entry back).
+4. **Open, what is left of 2 and 3.** A killed broker's held messages are held again only when the session is restored,
+   which is when its client reconnects. A client that stays away longer than the AckWait (30 s) after its broker was
+   killed finds its message given to another member, and is then resent it as well: a probe with a 0.9 s AckWait saw the
+   other member get `job-away` at QoS 1 after the kill, and the returning client get it with DUP and its original
+   identifier. [MQTT-4.8.2-4] and [MQTT-4.8.2-5] both say the message is that client's. Closing it means a surviving
+   broker holding (`+WPI`) the backlog messages named in a dead broker's attached records, the sweep's job for an
+   orphaned session (`sessionsweep.go`), without restoring the session. Also here: `checkpointNow` drops the record
+   write's error (`checkpoint.go`, `_ = c.broker.checkpointSession(c)`), so a PUBLISH can go out after a failed write,
+   and with `SessionCheckpointInterval` negative no record is written at all.
 
-Flip the default when (1) is closed, with a test that fails before the fix. (2) and (3) need either a fix or a line in
-the README naming them as the guarantee's limit across a killed broker, as `shared_killed_test.go` already does for
-QoS 1 ("seen twice at worst, never lost"). Until then the README keeps "leave it off in production".
+Flip the default when (1) and (4) are closed, each with a test that fails before the fix, or when (4) is written into the
+README as the guarantee's limit across a killed broker, as `shared_killed_test.go` already does for QoS 1 ("seen twice
+at worst, never lost"). Until then the README keeps "leave it off in production".
 
 **Today:** a QoS 2 request on a `$share/` filter is granted QoS 1, reported
 honestly in the SUBACK, which [MQTT-3.8.4-7] permits.
@@ -296,9 +312,9 @@ before its PUBREC is resent with DUP and its original identifier after a SIGKILL
 and after a takeover, and the group's other member is not given it
 (`shared_qos2_test.go`). Found on the way: a broker that lost a session to another
 broker handed its held messages back to the group (`discardMoved` now keeps them).
-Not covered: a message pulled but not yet checkpointed when its broker dies goes
-back to the group after AckWait, which a client that already answered it cannot
-tell from a new message (entry 2 narrows it: after PUBREC the record names the PUBREL).
+Not covered then: a message pulled but not yet checkpointed when its broker dies. For
+QoS 2 the record is written before the PUBLISH, so within the AckWait this is closed
+(**Blocked by**, window 2); a client away past it is window 4.
 
 ### 2. Done (2026-10-31): the ownership point, acknowledged to the group at PUBREC
 
@@ -308,9 +324,9 @@ JetStream message is acknowledged, `handBackHeld` skips an entry that
 past PUBREC with an unsubscribe, a clean start, a session expiry, a returning client
 and a SIGKILLed broker; before PUBREC the end of the session still gives the message
 to another member. An UNSUBSCRIBE does not hand back a message already sent (QoS 1
-either): it stays the session's until the exchange ends. Not covered: a broker
-killed after the PUBREC is read and before its record is written (the client has
-answered, the group gets the message after AckWait).
+either): it stays the session's until the exchange ends. Not covered then: a broker
+killed after the PUBREC is read and before its record is written. Closed for a client
+back within the AckWait (**Blocked by**, window 3); one away past it is window 4.
 
 ### 3. Grant QoS 2 on `$share/`
 

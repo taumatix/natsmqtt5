@@ -313,6 +313,9 @@ func (c *conn) handlePubrec(p *packet.Pubrec) error {
 		c.releaseQuotaFor(done)
 		return nil
 	}
+	if f := c.broker.pubrecGate.Load(); f != nil {
+		(*f)(p.Ack.PacketID)
+	}
 	c.sess.awaitPubcomp(p.Ack.PacketID)
 	c.activity.Add(1)
 	// The record says PUBREL before the PUBREL goes out: the client may answer it

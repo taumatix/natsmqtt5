@@ -42,6 +42,10 @@ type Broker struct {
 	// resendGate, when set, is called by a resend between claiming the in-flight
 	// entry and writing it. It is a seam for tests; see export_test.go.
 	resendGate atomic.Pointer[func(id uint16)]
+	// pubrecGate, when set, is called with the Packet Identifier of a PUBREC
+	// accepted for a QoS 2 delivery, before the record naming its PUBREL is
+	// written. A seam for tests.
+	pubrecGate atomic.Pointer[func(id uint16)]
 	// publishFlushGate, when set, is called by a durable publish between the
 	// live publish and the flush that confirms it. A seam for tests.
 	publishFlushGate atomic.Pointer[func()]
