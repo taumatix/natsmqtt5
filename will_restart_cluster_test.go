@@ -76,3 +76,34 @@ func TestClusterARestartOfTheBrokersOnlyNATSServerWithinTwiceTheCheckIntervalClo
 	}
 	assert.Equal(t, 1, willKeys(t, c.URL(1)))
 }
+
+// SIGKILL of the server that leads the Will bucket leaves every broker unable to write to it until NATS elects
+// another leader (4 to 9 s after the last heartbeat). A broker that cannot write for twice WillCheckInterval closes
+// its clients, so the default (5 s, 10 s to fence) has to ride out the election: neither broker may close a client
+// nor may a Will be published for it. Both brokers use the surviving servers only.
+func TestClusterAKilledWillBucketLeaderClosesNoClientAtTheDefaultCheckInterval(t *testing.T) {
+	c := startNATSCluster(t)
+	defaults := func(o *natsmqtt5.Options) {
+		clusterReplicas(o)
+		o.DurableWills = true // WillCheckInterval stays at its default
+	}
+	_, hostAddr, _ := startBrokerHandle(t, c.URL(1)+","+c.URL(2), defaults)
+	watchAddr := startBroker(t, c.URL(1)+","+c.URL(2), defaults)
+	watcher := newWillWatcher(t, watchAddr)
+	client, _ := connectClient(t, hostAddr, durableWillConnect("leaderkill", "status/leaderkill", "gone", 0, 0))
+	c.LeadStream("KV_MQTT5_wills", 0)
+	require.Equal(t, 1, willKeys(t, c.URL(1)))
+
+	c.StopServer(0, false)
+	t.Cleanup(func() { c.StartServer(0) })
+
+	watcher.expectNoMessageFor(40 * time.Second) // the election, then two checks
+	select {
+	case d := <-client.disconnects:
+		t.Fatalf("a killed Will bucket leader made the broker disconnect the client (reason 0x%02X)", d.ReasonCode)
+	case <-client.Done():
+		t.Fatal("a killed Will bucket leader closed the client's connection")
+	default:
+	}
+	assert.Equal(t, 1, willKeys(t, c.URL(1)), "the Will record must survive the election")
+}
