@@ -59,7 +59,8 @@ NOT-APPLICABLE, and the row names the feature's [ROADMAP.md](ROADMAP.md) entry a
 shows the broker refusing or not advertising it the way the specification requires.
 
 - **QoS 2 on shared subscriptions.** A QoS 2 request on a `$share/` filter is granted QoS 1,
-  reported in the SUBACK, which [MQTT-3.8.4-7] permits.
+  reported in the SUBACK, which [MQTT-3.8.4-7] permits. `Options.SharedQoS2` (off) grants QoS 2 and
+  is tested (`shared_qos2_test.go`) but not complete (ROADMAP.md), so the default stays.
 - **Server-to-client Topic Aliases** are off unless `Options.OutboundTopicAliases` is set; the
   Client's Topic Alias Maximum is what permits them and a Server may use none.
 - **Statements whose wording a request cannot violate** (for example, "the Server MUST NOT send X
@@ -130,6 +131,13 @@ CHANGELOG has the full text.
   [MQTT-2.2.1-4]. A success CONNACK is shortened to fit a small Maximum Packet Size
   (`small_connack_test.go`) [MQTT-3.1.2-24], [MQTT-3.2.2-16], [MQTT-3.3.2-12]. A data race
   between `Broker.Close` and a late live copy is gone.
+- **Since v0.12.1, not re-reviewed against the table.** Enhanced authentication (`Options.Auther`,
+  AUTH exchange and re-authentication, §4.12) and the `scram` package; the command serves WebSocket
+  and TLS (`-ws-listen`, `-tls-cert`); the WebSocket read limit now applies; a resume reads
+  overlapping filters as a covering set; QoS 2 on shared subscriptions behind `SharedQoS2`; QoS 2
+  messages that wait together share a record write; the Will index holds a reference per record;
+  a retained view is verified after a NATS reconnect. The table's rows were updated as these landed
+  (the §4.12 statements are TESTED by `enhanced_auth_test.go`); the review as a whole was not re-run.
 - **After v0.11.3, the replay cursor.** A message whose live copy never reached a session, or
   reached it after release below 8192 later sequences, was lost once older than the replay's
   time rewind; a resume now replays from a per-session cursor (`replay_cursor_test.go`), on any
