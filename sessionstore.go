@@ -1,6 +1,7 @@
 package natsmqtt5
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -861,9 +862,10 @@ func (s *sessionStore) spillRecordReusing(rec *sessionRecord, limit int, known m
 	}
 	all := rec.Inflight
 	sizes := make([]int, len(all))
+	raws := make([][]byte, len(all))
 	for i, e := range all {
-		raw, _ := json.Marshal(e)
-		sizes[i] = len(raw) + 1
+		raws[i], _ = json.Marshal(e)
+		sizes[i] = len(raws[i]) + 1
 	}
 	chunkMax := s.blobLimit()
 	ids := s.spillChunkIDs
@@ -885,14 +887,8 @@ func (s *sessionStore) spillRecordReusing(rec *sessionRecord, limit int, known m
 		}
 		return spans
 	}
-	placeholder := strings.Repeat("x", spillKeyLen)
-	fits := func(keep int, chunks int) bool {
-		rec.Inflight, rec.Spill = all[:keep], make([]string, chunks)
-		for i := range rec.Spill {
-			rec.Spill[i] = placeholder
-		}
-		return len(encodeRecord(rec)) <= limit
-	}
+	size := newRecordSizer(rec, sizes)
+	fits := func(keep int, chunks int) bool { return size.of(keep, chunks) <= limit }
 
 	keep := len(all)
 	var spans [][2]int
@@ -912,7 +908,8 @@ func (s *sessionStore) spillRecordReusing(rec *sessionRecord, limit int, known m
 	rec.Inflight, rec.Spill = all[:keep], nil
 	kept := keep
 	for _, span := range spans {
-		raw, _ := json.Marshal(all[span[0]:span[1]])
+		// The bytes json.Marshal gives the slice: its entries' encodings, comma separated, in brackets.
+		raw := append(append([]byte{'['}, bytes.Join(raws[span[0]:span[1]], []byte{','})...), ']')
 		key := blobKeyFor(blobOwner(rec.ClientID), raw)
 		if _, have := known[key]; !have {
 			ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
@@ -927,6 +924,38 @@ func (s *sessionStore) spillRecordReusing(rec *sessionRecord, limit int, known m
 		kept += span[1] - span[0]
 	}
 	return len(all) - kept, err
+}
+
+// recordSizer computes the encoded size of a record that keeps the first keep of its in-flight entries
+// and names some number of spill chunks, without encoding it: the record without either list is encoded
+// once and the entries' sizes (each with its comma) are summed ahead. The result is exactly what
+// encodeRecord returns (TestRecordSizerMatchesEncodeRecord).
+type recordSizer struct {
+	base   int   // the record with no Inflight and no Spill
+	prefix []int // prefix[i] is the encoded size of the first i entries, each followed by a comma
+}
+
+func newRecordSizer(rec *sessionRecord, sizes []int) recordSizer {
+	all := rec.Inflight
+	rec.Inflight, rec.Spill = nil, nil
+	base := len(encodeRecord(rec))
+	rec.Inflight = all
+	prefix := make([]int, len(sizes)+1)
+	for i, n := range sizes {
+		prefix[i+1] = prefix[i] + n
+	}
+	return recordSizer{base: base, prefix: prefix}
+}
+
+func (z recordSizer) of(keep, chunks int) int {
+	n := z.base
+	if keep > 0 {
+		n += len(`,"Inflight":[]`) + z.prefix[keep] - 1
+	}
+	if chunks > 0 {
+		n += len(`,"Spill":[]`) + chunks*(spillKeyLen+len(`"",`)) - 1
+	}
+	return n
 }
 
 // maxDeliveredChunks bounds the chunk names a record carries for delivered ids:

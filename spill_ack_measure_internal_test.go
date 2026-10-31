@@ -73,6 +73,10 @@ func TestSpillAcknowledgementCost(t *testing.T) {
 	}
 	t.Logf("%d chunks per record; per acknowledgement: %.2f chunks written (max %d), %d chunk bytes, %d record bytes, %v spillInto+commitSpill",
 		len(rec.Spill), float64(chunks)/float64(acks), maxChunks, chunkBytes/acks, recBytes/acks, spill/time.Duration(acks))
+	// Sizing the record by encoding it at each step of the search took 247 ms per acknowledgement here, now about 75.
+	if !raceEnabled {
+		require.Less(t, spill/time.Duration(acks), 160*time.Millisecond, "sizing the record must not encode it at every step")
+	}
 	require.LessOrEqual(t, maxChunks, 2, "an acknowledgement at the front writes at most the chunk the inline part ends in")
 	require.Less(t, chunkBytes, recBytes, "the chunk an acknowledgement rewrites is smaller than the record a checkpoint writes anyway")
 }
