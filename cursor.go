@@ -228,6 +228,9 @@ func (s *session) noteLiveCopy(seq uint64, id string) {
 	defer s.mu.Unlock()
 	if s.cur.next != 0 && seq < s.cur.next {
 		s.addHoleLocked(seq, id)
+		if s.conn != nil {
+			s.conn.activity.Add(1) // for the checkpoint; see applyScan
+		}
 	}
 }
 
@@ -420,6 +423,10 @@ func (c *conn) applyScan(gen, start, last uint64, read []scanned) (moved bool) {
 	moved = next > s.cur.next
 	s.cur.next = next
 	s.cur.above = s.countAboveLocked(next)
+	// The cursor and its holes are in the record: a checkpoint that saw no
+	// other activity since its last write would otherwise skip them, and a
+	// broker killed now would leave a record without the hole [MQTT-4.4.0-1].
+	c.activity.Add(1)
 	return moved
 }
 
@@ -496,6 +503,7 @@ func (c *conn) replayedTo(had cursorView, ok bool, start, last uint64) {
 		}
 		s.setCursorLocked(next)
 		s.cur.above = s.countAboveLocked(next)
+		c.activity.Add(1) // for the checkpoint; see applyScan
 		return
 	}
 	if s.cur.next == 0 {
@@ -510,6 +518,7 @@ func (c *conn) replayedTo(had cursorView, ok bool, start, last uint64) {
 		s.cur.next = next
 		s.cur.above = s.countAboveLocked(next)
 	}
+	c.activity.Add(1) // for the checkpoint; see applyScan
 }
 
 // setSince records, for the subscriptions a SUBSCRIBE made, the stream's last
@@ -529,6 +538,7 @@ func (c *conn) setSince(subs []*subscription, last uint64, exact, hadNonShared b
 	}
 	if exact && s.cur.next == 0 && !hadNonShared && floor == 0 && s.conn == c && s.sinceKnownLocked() {
 		s.setCursorLocked(last + 1)
+		c.activity.Add(1) // for the checkpoint; see applyScan
 	}
 }
 

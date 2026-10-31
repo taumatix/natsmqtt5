@@ -249,6 +249,10 @@ func SetBeforeGroupDelete(t interface {
 	t.Cleanup(func() { beforeGroupDelete.Store(nil) })
 }
 
+// SetEmptyQueueFetches makes the next n fetches of b's offline-queue reads come
+// back empty, as a loaded server's can.
+func SetEmptyQueueFetches(b *Broker, n int) { b.queue.Load().emptyFetches.Store(int64(n)) }
+
 // SetQueueRetryEvery changes how soon the broker retries a default offline queue
 // that failed at start-up, for the rest of the test. Set it before the broker starts.
 func SetQueueRetryEvery(t interface {

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -58,7 +59,10 @@ func (q *offlineQueue) window() time.Duration {
 
 type offlineQueue struct {
 	stream jetstream.Stream
-	prefix string
+	// emptyFetches makes that many of the next replay fetches come back empty,
+	// as a loaded server's can. A seam for tests.
+	emptyFetches atomic.Int64
+	prefix       string
 	// rewind is Options.OfflineQueueRewind, resolved.
 	rewind time.Duration
 	codec  subjectCodec
@@ -339,11 +343,12 @@ func (q *offlineQueue) replayFrom(ctx context.Context, start jetstream.OrderedCo
 		return last, err
 	}
 	queuedPrefix := queuedSubject(q.prefix, "")
+	empty := 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return last, err
 		}
-		batch, err := cons.Fetch(256, jetstream.FetchMaxWait(500*time.Millisecond))
+		batch, err := q.fetch(cons)
 		if err != nil {
 			return last, err
 		}
@@ -375,12 +380,51 @@ func (q *offlineQueue) replayFrom(ctx context.Context, start jetstream.OrderedCo
 		if err := batch.Error(); err != nil && !errors.Is(err, nats.ErrTimeout) && !errors.Is(err, jetstream.ErrNoMessages) {
 			return last, err
 		}
-		if n == 0 {
-			// Nothing at or after the start: the stream's end was before it.
+		if n > 0 {
+			empty = 0
+			continue
+		}
+		// An empty fetch is the end only when the consumer has nothing
+		// pending: nats.go makes an ordered consumer afresh for every fetch,
+		// and on a loaded server one can answer with nothing although messages
+		// it matches are stored. Taking that for the end made a resume skip
+		// what the session was owed and move its cursor past it.
+		info, err := cons.Info(ctx)
+		if err == nil && info.NumPending == 0 {
 			return last, nil
+		}
+		if empty++; empty >= maxEmptyFetches {
+			if err == nil {
+				err = fmt.Errorf("the queue stream still reports %d messages pending after %d empty fetches",
+					info.NumPending, empty)
+			}
+			return last, err
 		}
 	}
 }
+
+// maxEmptyFetches is how many empty fetches in a row, with messages still
+// pending, a read of the queue stream takes before it gives up as failed.
+const maxEmptyFetches = 20
+
+// fetch is one fetch of a replay read.
+func (q *offlineQueue) fetch(cons jetstream.Consumer) (jetstream.MessageBatch, error) {
+	if q.emptyFetches.Load() > 0 && q.emptyFetches.Add(-1) >= 0 {
+		return emptyBatch{}, nil
+	}
+	return cons.Fetch(256, jetstream.FetchMaxWait(500*time.Millisecond))
+}
+
+// emptyBatch is a fetch that came back with nothing.
+type emptyBatch struct{}
+
+func (emptyBatch) Messages() <-chan jetstream.Msg {
+	ch := make(chan jetstream.Msg)
+	close(ch)
+	return ch
+}
+
+func (emptyBatch) Error() error { return nil }
 
 func newMessageID() string {
 	var b [12]byte
