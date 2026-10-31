@@ -11,6 +11,13 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-31
+
+**[urgent]** v0.12.0 and v0.12.1 crash with a nil pointer dereference at the first session sweep of a broker started with `DisableRetained` (`-no-retained`); upgrade if you use that option. Everything else below is additive: new API (`Options.Auther`, package `scram`, `Options.SharedQoS2`, WebSocket and TLS flags) and fixes, no breaking change.
+
+Install: `go get github.com/taumatix/natsmqtt5@v0.13.0`.
+
+- **Fixed:** a connected session whose replay cursor was dropped (more than 1024 holes, a record written before the cursor, a SUBSCRIBE that could not read the queue's position) gets it back without a resume: after 1024 deliveries a restart scan reads the session's subjects from one `OfflineQueueRewind` ago and starts the cursor there, with the messages it was owed and never sent as holes. Before, it fell back to the time rewind until its next resume, so a message whose live copy never came was lost once older than the rewind [MQTT-4.4.0-1]. The restart never promises less than the rewind: it is refused while the connection holds a message below where it read, and a live copy below that drops the cursor again. A restarted cursor is kept in memory, not in the session record. A scan of the cursor now throws its result away when a subscription was made while it read. No API change.
 - **Fixed:** a connected session whose replay cursor was dropped (more than 1024 holes, a record written before the cursor, a SUBSCRIBE that could not read the queue's position) gets it back without a resume: after 1024 deliveries a restart scan reads the session's subjects from one `OfflineQueueRewind` ago and starts the cursor there, with the messages it was owed and never sent as holes. Before, it fell back to the time rewind until its next resume, so a message whose live copy never came was lost once older than the rewind [MQTT-4.4.0-1]. The restart never promises less than the rewind: it is refused while the connection holds a message below where it read, and a live copy below that drops the cursor again. A restarted cursor is kept in memory, not in the session record. A scan of the cursor now throws its result away when a subscription was made while it read, and scans again when deliveries piled up meanwhile. No API change.
 - **Fixed:** a replay of the offline queue that got an empty fetch took it for the end of the stream. nats.go makes an ordered consumer afresh for every fetch, and on a loaded server a fetch can come back empty although matching messages are stored, so a resume could skip the message a session was owed and move its replay cursor past it [MQTT-4.4.0-1]. The read now ends only when the consumer reports nothing pending, and fails after 20 empty fetches in a row with messages still pending.
 - **Fixed:** a move of the replay cursor, or a new hole, did not count as activity for the session checkpoint. If nothing else happened afterwards, the stored record never got the hole, and a broker killed then left a record that did not name a message the session was owed [MQTT-4.4.0-1].
@@ -966,7 +973,8 @@ mapping `nats-server` uses for its own MQTT support.
 [#13]: https://github.com/taumatix/natsmqtt5/pull/13
 [#19]: https://github.com/taumatix/natsmqtt5/pull/19
 [#24]: https://github.com/taumatix/natsmqtt5/pull/24
-[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/taumatix/natsmqtt5/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/taumatix/natsmqtt5/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/taumatix/natsmqtt5/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/taumatix/natsmqtt5/compare/v0.11.3...v0.12.0
 [0.11.3]: https://github.com/taumatix/natsmqtt5/compare/v0.11.2...v0.11.3
