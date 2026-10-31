@@ -1,7 +1,8 @@
 # Contributing
 
 Fixes and features go through a pull request with CI green. `go build ./...`, `go vet ./...`,
-`gofmt -l .` (empty) and `go test -race ./...` must pass locally first. Public API changes are
+`gofmt -l .` (empty) and `go test -race ./...` must pass locally first. CI also runs `staticcheck` and `golangci-lint` (errcheck, gosec; `.golangci.yml`): run them as the workflow does. A
+suppression carries a one-line reason, and a G115 conversion is bounded in code before it is nolint'd. Public API changes are
 additive within a major version ([CHANGELOG.md](CHANGELOG.md)); a user-visible change adds a line
 under `## [Unreleased]`.
 

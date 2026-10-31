@@ -91,7 +91,11 @@ func runContext(ctx context.Context, args []string, getenv func(string) string, 
 	if err != nil {
 		return err
 	}
-	defer broker.Close()
+	defer func() {
+		if err := broker.Close(); err != nil {
+			cfg.broker.Logger.Warn("closing the broker", "error", err)
+		}
+	}()
 
 	cfg.broker.Logger.Info("starting", "version", binaryVersion(), "listen", cfg.broker.Listen, "nats", cfg.broker.NATSURL)
 	if cfg.wsListen != "" {

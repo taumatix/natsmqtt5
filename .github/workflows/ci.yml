@@ -55,6 +55,12 @@ jobs:
         if: matrix.go == '1.26'
         run: go run honnef.co/go/tools/cmd/staticcheck@2026.2.1 ./...
 
+      # errcheck and gosec, configured in .golangci.yml; pinned like staticcheck, and on the pinned
+      # toolchain only for the same reason.
+      - name: golangci-lint
+        if: matrix.go == '1.26'
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run ./...
+
       - name: Build
         run: go build ./...
 

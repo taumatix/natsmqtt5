@@ -45,7 +45,7 @@ func (t *outAliases) hit(topic string) (uint16, bool) {
 // next is the alias a new topic would take, without taking it.
 func (t *outAliases) next() uint16 {
 	if t.order.Len() < int(t.max) {
-		return uint16(t.order.Len()) + 1
+		return uint16(t.order.Len()) + 1 //nolint:gosec // G115: Len() < max, and max is a uint16
 	}
 	return t.order.Back().Value.(*outAlias).alias
 }
@@ -94,7 +94,7 @@ func (c *conn) aliasPublish(p *packet.Publish, raw []byte) []byte {
 		return raw
 	}
 	out, err := packet.Encode(withAlias(p, t.next(), false))
-	if err != nil || (c.clientMaxPacketSize > 0 && uint32(len(out)) > c.clientMaxPacketSize) {
+	if err != nil || (c.clientMaxPacketSize > 0 && overLimit(len(out), c.clientMaxPacketSize)) {
 		return raw
 	}
 	t.assign(p.Topic)

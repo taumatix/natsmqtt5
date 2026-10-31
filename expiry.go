@@ -75,7 +75,7 @@ func remainingExpiry(interval uint32, arrived, now time.Time) (remaining uint32,
 	if waitedSeconds >= int64(interval) {
 		return 0, true
 	}
-	return interval - uint32(waitedSeconds), false
+	return interval - uint32(waitedSeconds), false //nolint:gosec // G115: 0 < waitedSeconds < interval, checked above
 }
 
 // applyExpiry sets the interval a delivery carries to what is left of it, or

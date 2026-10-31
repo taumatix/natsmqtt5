@@ -244,7 +244,7 @@ func (c *conn) serve(ctx context.Context) {
 			// as Broker.Close does, rather than racing it with a bare close.
 			c.sendDisconnect(packet.ServerShuttingDown, "broker shutting down")
 		}
-		c.nc.Close()
+		_ = c.nc.Close() // the connection is over; a close error has nothing to act on
 	}()
 
 	keepAlive, err := c.handshake(ctx)
@@ -565,19 +565,19 @@ func (c *conn) writePacket(p packet.Packet, final bool) (discarded bool, err err
 	if err != nil {
 		return false, fmt.Errorf("encoding %s: %w", p.Type(), err)
 	}
-	if c.clientMaxPacketSize > 0 && uint32(len(raw)) > c.clientMaxPacketSize {
+	if c.clientMaxPacketSize > 0 && overLimit(len(raw), c.clientMaxPacketSize) {
 		// A Reason String or User Property "MUST NOT" be sent if it would take
 		// the packet past the limit [MQTT-3.2.2-19], [MQTT-3.2.2-20],
 		// [MQTT-3.4.2-2], [MQTT-3.5.2-2], [MQTT-3.14.2-3]. The rest of the packet
 		// is still owed: a lost PUBACK or PUBREC leaves the client's exchange
 		// unfinished.
 		if bare, ok := withoutOptionalProperties(p); ok {
-			if bareRaw, err := packet.Encode(bare); err == nil && uint32(len(bareRaw)) <= c.clientMaxPacketSize {
+			if bareRaw, err := packet.Encode(bare); err == nil && !overLimit(len(bareRaw), c.clientMaxPacketSize) {
 				p, raw = bare, bareRaw
 			}
 		}
 	}
-	if c.clientMaxPacketSize > 0 && uint32(len(raw)) > c.clientMaxPacketSize {
+	if c.clientMaxPacketSize > 0 && overLimit(len(raw), c.clientMaxPacketSize) {
 		// [MQTT-3.1.2-24]: the server must not send it.
 		c.logger.Warn("discarding a packet larger than the client's Maximum Packet Size",
 			"type", p.Type().String(), "size", len(raw), "limit", c.clientMaxPacketSize)
@@ -706,7 +706,7 @@ func (c *conn) markEnded() {
 func (c *conn) close() {
 	c.closeOnce.Do(func() {
 		close(c.done)
-		c.nc.Close()
+		_ = c.nc.Close() // the connection is over; a close error has nothing to act on
 	})
 }
 
@@ -727,9 +727,15 @@ func (c *conn) tlsState() *tls.ConnectionState {
 // value in CONNACK so the client knows what it actually got
 // (MQTT-5.0 §3.2.2.3.2).
 func (c *conn) cappedExpiry(requested uint32) uint32 {
-	max := uint32(c.broker.opts.maxSessionExpiry / time.Second)
-	if requested > max {
-		return max
+	// A configured cap past what the property can carry (about 136 years) is no cap at all.
+	if seconds := int64(c.broker.opts.maxSessionExpiry / time.Second); seconds >= 0 && seconds < int64(requested) {
+		return uint32(seconds) //nolint:gosec // G115: 0 <= seconds < requested, a uint32
 	}
 	return requested
+}
+
+// overLimit reports whether an encoded packet of n bytes is larger than the client's Maximum Packet
+// Size. Both sides are widened to int64, so the comparison cannot wrap.
+func overLimit(n int, limit uint32) bool {
+	return int64(n) > int64(limit)
 }

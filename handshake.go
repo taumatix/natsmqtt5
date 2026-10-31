@@ -799,7 +799,7 @@ func (c *conn) connackFits(ack *packet.Connack) bool {
 		return true
 	}
 	raw, err := packet.Encode(ack)
-	return err == nil && uint32(len(raw)) <= c.clientMaxPacketSize
+	return err == nil && !overLimit(len(raw), c.clientMaxPacketSize)
 }
 
 // fitConnack leaves out of a success CONNACK what a client with a small Maximum
