@@ -2,6 +2,7 @@ package natsmqtt5_test
 
 import (
 	"bytes"
+	"context"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -209,6 +211,47 @@ func TestDurablePublishRefusesWhenNATSStaysUnreachableAfterTheQueueCopyIsStored(
 	require.EqualValues(t, 1, proxy.cut.Load(), "the proxy cut the connection once")
 	assert.Equal(t, packet.ImplementationSpecificError, ack.ReasonCode)
 	assert.Equal(t, "unconfirmed", queuedPayload(t, queueStream(t, natsURL), "dp.down"))
+}
+
+// queuedCopies is how many messages the queue stream holds for one topic's subject.
+func queuedCopies(t *testing.T, s jetstream.Stream, subject string) int {
+	t.Helper()
+	full := natsmqtt5.DefaultSubjectPrefix + ".$queue." + subject
+	info, err := s.Info(context.Background(), jetstream.WithSubjectFilter(full))
+	require.NoError(t, err)
+	return int(info.State.Subjects[full])
+}
+
+// The 0x83 above tells the client to send the message again, and the queue stream already holds the first
+// copy, so the retry stores a second one: a session that was away is offered the message twice. QoS 1
+// allows that ("at least once", [MQTT-4.3.2-2]); this test pins the behaviour and ROADMAP.md records why it
+// is left: dropping the second copy needs an id the client controls per message, and the packet id is not
+// one (it is reused after its PUBACK, so a later, different message would be dropped as the duplicate).
+func TestDurablePublishRetryAfterARefusedFlushLeavesASecondQueueCopy(t *testing.T) {
+	natsURL := startNATS(t)
+	proxy := newCutProxy(t, natsURL)
+	proxy.stayDown.Store(true)
+	durable := startBroker(t, proxy.url(), func(o *natsmqtt5.Options) { o.DurablePublish = true })
+
+	pub := dialRaw(t, durable)
+	pub.connect(rawConnect("dp-retry-pub", 0))
+	proxy.armed.Store(true)
+	rawPublishQoS(pub, packet.QoS1, 1, "dp/retry", "twice")
+	ack, ok := pub.readWithin(20 * time.Second).(*packet.Puback)
+	require.True(t, ok)
+	require.Equal(t, packet.ImplementationSpecificError, ack.ReasonCode)
+	stream := queueStream(t, natsURL)
+	require.Equal(t, 1, queuedCopies(t, stream, "dp.retry"))
+
+	// NATS is reachable again; the client sends the same message again, as the refusal asks.
+	proxy.refuse.Store(false)
+	require.Eventually(t, func() bool {
+		pub.send(&packet.Publish{Topic: "dp/retry", QoS: packet.QoS1, PacketID: 1, Dup: true, Payload: []byte("twice")})
+		a, ok := pub.readWithin(20 * time.Second).(*packet.Puback)
+		return ok && a.ReasonCode == packet.Success
+	}, 60*time.Second, time.Second)
+	assert.Equal(t, 2, queuedCopies(t, stream, "dp.retry"),
+		"the retry stored a second copy; if this is 1 the roadmap's duplicate is gone and the entry must go too")
 }
 
 // readWithin is read with a longer deadline, for a reply that waits on a reconnect.

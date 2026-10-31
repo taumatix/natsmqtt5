@@ -104,18 +104,19 @@ subjects, which overlaps the retained stream's subjects (JetStream refuses overl
 either a subject layout change or per-subscription JetStream consumers. A decision with a
 compatibility cost.
 
-## DurablePublish: the retry after a refused flush duplicates the queue copy
+## DurablePublish: a retry after a refused flush leaves a second queue copy
 
-The flush failure is driven over a socket now (`durable_flush_fail_test.go`, 2026-10-10): a NATS connection cut
-after the queue stream stored the message is a success (the client library buffers the live publish across the
-reconnect and the flush completes after it, so the subscriber gets the message once), and NATS staying
-unreachable past the 5 s flush timeout is a 0x83 PUBACK. In the second case the queue already holds the copy, so
-the client's retry stores a second, with a new message id, and a session that was away sees it twice. QoS 1
-allows that; a QoS 2 PUBREC refusal cannot be told apart by the client from "never received", so it also does.
-Not tested: that duplicate, and whether a retry could carry the first attempt's id (a `Nats-Msg-Id` on the
-queue publish would let JetStream drop it within its duplicate window).
-Deriving that id from the MQTT packet id is unsafe: a packet id is reused after its PUBACK, so a later, legitimate
-message could be dropped as a duplicate within the window. It would need an id the client controls per message.
+**Decided (2026-10-30):** left as it is, and tested (`TestDurablePublishRetryAfterARefusedFlushLeavesASecondQueueCopy`,
+`durable_flush_fail_test.go`): after the 0x83 the queue stream holds the first copy, the client's retry stores a second,
+and a session that was away is offered the message twice. QoS 1 allows that ([MQTT-4.3.2-2], at least once). A
+`Nats-Msg-Id` on the queue publish would drop the second copy within JetStream's duplicate window, but the id has to
+come from the client and be unique per message, never from the packet id (reused after its PUBACK, so a later, different
+message would be dropped as the duplicate). MQTT 5 has no such field; the only carrier is a User Property whose name
+and rules the broker would invent, and a client that reuses a value silently loses a message, which is worse than the
+duplicate it prevents. Not implemented.
+**Left, only if a deployment asks:** an opt-in `Options.DedupeUserProperty` naming the User Property to use as the
+`Nats-Msg-Id`, off by default and additive. It would need a documented contract (unique per message, longer than the
+stream's `Duplicates` window) and a test that a reused value is dropped and an absent one is not.
 
 ## A Will's queue copy is not retried when the queue refuses it
 
