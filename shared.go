@@ -166,6 +166,22 @@ type sharedItem struct {
 	held bool
 }
 
+// sharedBacklog is a shared subscription's backlog consumer. above is 0 for the
+// backlog a subscription was made with, which holds every queued message it
+// matches. One given to a subscription made while the queue was off
+// (Broker.giveBacklog) holds only the messages queued after above.
+type sharedBacklog struct {
+	cons  jetstream.Consumer
+	above uint64
+}
+
+// delivers reports whether the backlog holds the queued message seq, so that its
+// live copy is to be skipped.
+func (b *sharedBacklog) delivers(seq uint64) bool { return b.above == 0 || seq > b.above }
+
+// backlog is the subscription's backlog, or nil when it has none.
+func (s *subscription) backlog() *sharedBacklog { return s.backlogAt.Load() }
+
 // startPulling makes this connection a puller for every shared subscription
 // with a backlog that its session holds. It is idempotent per subscription,
 // so the delivery goroutine and a SUBSCRIBE may both call it.
@@ -176,7 +192,7 @@ func (c *conn) startPulling() {
 }
 
 func (c *conn) startPull(sub *subscription) {
-	if sub.backlog == nil {
+	if sub.backlog() == nil {
 		return
 	}
 	c.pullMu.Lock()
@@ -339,7 +355,7 @@ func (c *conn) healBacklog(sub *subscription) {
 // fetchOne pulls at most one message, waiting up to sharedPullWait. It
 // returns a nil message and nil error when there was none to take.
 func (c *conn) fetchOne(sub *subscription) (jetstream.Msg, error) {
-	batch, err := sub.backlog.Fetch(1, jetstream.FetchMaxWait(sharedPullWait))
+	batch, err := sub.backlog().cons.Fetch(1, jetstream.FetchMaxWait(sharedPullWait))
 	if err != nil {
 		c.logger.Debug("pulling from a shared subscription's backlog failed", "filter", sub.filter, "error", err)
 		return nil, err
@@ -367,7 +383,7 @@ var sharedFetchHook func(asked, got int)
 // fetchNoWait takes up to n messages that are waiting now, without waiting for
 // more. It returns none when the backlog is empty.
 func (c *conn) fetchNoWait(sub *subscription, n int) ([]jetstream.Msg, error) {
-	batch, err := sub.backlog.FetchNoWait(n)
+	batch, err := sub.backlog().cons.FetchNoWait(n)
 	if err != nil {
 		c.logger.Debug("pulling from a shared subscription's backlog failed", "filter", sub.filter, "error", err)
 		return nil, err

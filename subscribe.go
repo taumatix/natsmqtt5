@@ -276,7 +276,7 @@ func (c *conn) bindNATS(sub *subscription) error {
 		if err != nil {
 			return fmt.Errorf("creating the shared subscription's backlog: %w", err)
 		}
-		sub.backlog = backlog
+		sub.backlogAt.Store(&sharedBacklog{cons: backlog})
 	}
 	cell := new(atomic.Pointer[subscription])
 	cell.Store(sub)
@@ -292,7 +292,7 @@ func (c *conn) bindNATS(sub *subscription) error {
 			// been cleared to receive through it.
 			return
 		}
-		if cur.backlog != nil && msg.Header.Get(hdrQueued) != "" {
+		if bl := cur.backlog(); bl != nil && msg.Header.Get(hdrQueued) != "" && bl.delivers(queueSeq(msg)) {
 			// The backlog delivers this one, to whichever member pulls it.
 			return
 		}

@@ -390,7 +390,7 @@ messages that today are at worst dropped for an absent client. Doing it safely n
 decision to be made against the bucket with a revision check and a re-subscribe on the
 reconnect before the CONNACK, which is a design of its own.
 
-## A default queue that failed at startup: shared subscriptions made before it came up
+## A default queue that failed at startup: a duplicate across brokers
 
 **Blocked by:** nothing; a pass can take it.
 
@@ -404,11 +404,17 @@ with nothing replayed, and CONNACK is not changed. [MQTT-3.2.2-3] says the Serve
 has stored Session State for the client, and it has: the subscriptions and the in-flight messages. What the gap lost is
 messages that were never kept, the deviation the start-up warning already names; answering 0 would make the client
 resubscribe and would drop the state that is there, to report a loss it could not repair.
-**Left:** a shared subscription made while the queue was off is a plain queue-group subscription with no backlog
-consumer and no membership entry, and the refresh skips it (`sub.backlog == nil`), so it stays that way until its
-session subscribes again: the group's backlog and the last-member rules do not cover it, and nothing says so but this
-entry. **Shape:** when the retry succeeds, give each live shared subscription its backlog consumer and its entry (the
-path SUBSCRIBE takes), with a test that publishes to a member that subscribed before the queue came up and then leaves.
+**Done (2026-10-31):** when the retry succeeds, each live shared subscription made while the queue was off gets its
+membership entry and its group's backlog consumer (`Broker.giveBacklogs`, and the refresh for one a SUBSCRIBE made
+just as the queue came up), and its connection pulls from it. `TestASharedSubscriptionMadeWhileTheQueueWasOffKeepsItsShareWhileAway`
+publishes to the group while that member is away and sees the message wait for it; before, it was lost.
+**Left:** the backlog given late starts at the queue's last sequence once the consumer exists, and the live copy of a
+queued message at or below it is still delivered, as it was before. When the group's consumer already existed (other
+members, subscribed through another broker whose queue was up), such a message is in the backlog too and can reach the
+group twice, once live and once pulled: QoS 1 allows it, a shared QoS 2 grant (`SharedQoS2`) does not [MQTT-4.3.3-2].
+That was so for the whole outage before this change; what is left is the messages stored before the consumer was given.
+Closing it needs the consumer's own start sequence (JetStream does not report it for `DeliverNew`), or group consumers
+created by start sequence. No deployment is known to run a fleet with the queue down on one broker only.
 
 ## Without the queue, a client that falls behind still loses QoS 1 and 2
 
