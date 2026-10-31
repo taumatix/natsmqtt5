@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -276,6 +277,35 @@ func (q *offlineQueue) storedAfter(ctx context.Context, seq uint64, t time.Time)
 	return err == nil && raw.Time.After(t)
 }
 
+// replayHoles hands each of cur's holes to handle, in sequence order, read by
+// its sequence: a replay that read the stream from the lowest hole instead paid
+// for everything stored above it, once per resume, however long the hole was
+// kept. A hole whose copy is gone (the stream's age limit) is skipped, as the
+// read from it skipped it. It returns the highest sequence it read.
+func (c *conn) replayHoles(ctx context.Context, q *offlineQueue, cur cursorView, handle func(*nats.Msg)) (uint64, error) {
+	seqs := make([]uint64, 0, len(cur.holes))
+	for seq := range cur.holes {
+		seqs = append(seqs, seq)
+	}
+	slices.Sort(seqs)
+	var last uint64
+	for _, seq := range seqs {
+		if err := ctx.Err(); err != nil {
+			return last, err
+		}
+		msg, err := q.message(ctx, seq)
+		if errors.Is(err, jetstream.ErrMsgNotFound) {
+			continue
+		}
+		if err != nil {
+			return last, err
+		}
+		handle(msg)
+		last = seq
+	}
+	return last, nil
+}
+
 // replaySeq is replay from a stream sequence rather than a time. It returns
 // the last sequence it read up to, which is the stream's end when it started.
 func (q *offlineQueue) replaySeq(ctx context.Context, from uint64, filters []string, fn func(*nats.Msg)) (uint64, error) {
@@ -298,8 +328,10 @@ func (q *offlineQueue) replayFrom(ctx context.Context, start jetstream.OrderedCo
 	if last == 0 {
 		return 0, nil
 	}
-	if start.FilterSubjects != nil && len(start.FilterSubjects) == 0 {
-		// replayRead's "nothing to read": the stream's end is all the caller wanted.
+	if start.FilterSubjects != nil && len(start.FilterSubjects) == 0 ||
+		start.DeliverPolicy == jetstream.DeliverByStartSequencePolicy && start.OptStartSeq > last {
+		// replayRead's "nothing to read", or a start past the stream's end: the
+		// stream's end is all the caller wanted.
 		return last, nil
 	}
 	cons, err := q.stream.OrderedConsumer(ctx, start)
@@ -537,7 +569,7 @@ func (c *conn) replayOffline() error {
 }
 
 // replayFromCursor is replayOffline for a session with a replay cursor: it
-// reads from the lowest hole, or the cursor, and sends the holes and whatever
+// reads each hole by its sequence and the stream from the cursor, and sends the holes and whatever
 // at or above the cursor the session has no id for [MQTT-4.4.0-1]. Below the
 // cursor everything else was sent or never owed, so a copy that never reached
 // a connection, however long ago it was stored, is found, and one sent long ago
@@ -560,7 +592,12 @@ func (c *conn) replayFromCursor(ctx context.Context, q *offlineQueue, cur cursor
 		}
 	}
 	c.streamNext.Store(start)
-	last, err := q.replaySeq(ctx, start, q.replayRead(c.sess.subscriptions()), handle)
+	last, err := c.replayHoles(ctx, q, cur, handle)
+	if err == nil && deliverErr == nil && !c.isClosed() {
+		var to uint64
+		to, err = q.replaySeq(ctx, cur.next, q.replayRead(c.sess.subscriptions()), handle)
+		last = max(last, to)
+	}
 	complete := err == nil && deliverErr == nil && !c.isClosed()
 	if deliverErr != nil {
 		return deliverErr

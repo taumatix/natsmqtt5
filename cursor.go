@@ -33,7 +33,7 @@ import (
 //     cursor is set (noteDelivered), and a hole is removed the moment its
 //     message is delivered.
 //
-// A replay then reads from the lowest hole, or next, and sends the holes and
+// A replay then reads each hole by its sequence and the stream from next, and sends the holes and
 // whatever at or above next it has no id for [MQTT-4.4.0-1], [MQTT-4.3.3-2].
 //
 // next only moves forward, and only past what the stream has been read through:

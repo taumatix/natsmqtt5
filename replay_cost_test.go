@@ -31,13 +31,21 @@ func TestReplayReadCost(t *testing.T) {
 	if n <= 0 {
 		t.Skip("set NATSMQTT5_REPLAY_COST to a message count to measure")
 	}
-	natsURL := startNATS(t)
-	_, addr, _ := startBrokerHandle(t, natsURL, persistentWithQueue, rewindOf(time.Hour))
-
 	sessions, _ := strconv.Atoi(os.Getenv("NATSMQTT5_REPLAY_SESSIONS"))
 	if sessions <= 0 {
 		sessions = 1
 	}
+	slowest := measureReplayRead(t, startNATS(t), n, sessions)
+	t.Logf("%d sessions resuming over %d unrelated messages: slowest %s to its owed message",
+		sessions, n, slowest.Round(time.Millisecond))
+}
+
+// measureReplayRead stores n messages no session subscribed to in the queue of the NATS server at
+// natsURL, has sessions sessions resume at once, each owed one message, and returns how long the
+// slowest took to receive it.
+func measureReplayRead(t *testing.T, natsURL string, n, sessions int, opts ...func(*natsmqtt5.Options)) time.Duration {
+	t.Helper()
+	_, addr, _ := startBrokerHandle(t, natsURL, append([]func(*natsmqtt5.Options){persistentWithQueue, rewindOf(time.Hour)}, opts...)...)
 	for i := 0; i < sessions; i++ {
 		c := dialRaw(t, addr)
 		c.connect(rawConnect(fmt.Sprintf("cost-sub-%d", i), 3600))
@@ -98,6 +106,5 @@ func TestReplayReadCost(t *testing.T) {
 	for _, d := range took {
 		slowest = max(slowest, d)
 	}
-	t.Logf("%d sessions resuming over %d unrelated messages: slowest %s to its owed message",
-		sessions, n, slowest.Round(time.Millisecond))
+	return slowest
 }
