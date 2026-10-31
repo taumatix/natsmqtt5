@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -157,13 +158,36 @@ func TestWithoutJetStreamPersistentSessionsAreRefused(t *testing.T) {
 
 // ---- Expiry with the offline queue ---------------------------------------
 
+// sessionExpired returns a channel closed when b's session sweep expires clientID's session: what
+// the expiry tests wait on, rather than a sleep past the Session Expiry Interval.
+func sessionExpired(b *natsmqtt5.Broker, clientID string) <-chan struct{} {
+	done := make(chan struct{})
+	var once sync.Once
+	natsmqtt5.SetSessionExpiredHook(b, func(id string, _ int) {
+		if id == clientID {
+			once.Do(func() { close(done) })
+		}
+	})
+	return done
+}
+
+func awaitClosed(t *testing.T, ch <-chan struct{}, within time.Duration, msg string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(within):
+		t.Fatal(msg)
+	}
+}
+
 // A session past its Session Expiry Interval is discarded [MQTT-4.1.0-2]; what
 // was published while it was away must not be replayed into the session that
 // takes its place, and the CONNACK says there is no session [MQTT-3.2.2-3].
 func expiredSessionIsDiscarded(t *testing.T, customise ...func(*natsmqtt5.Options)) {
 	t.Helper()
 	var logs syncBuffer
-	addr := startBroker(t, startNATS(t), append(customise[:len(customise):len(customise)], loggingBroker(t, &logs))...)
+	b, addr, _ := startBrokerHandle(t, startNATS(t), append(customise[:len(customise):len(customise)], sweeping, loggingBroker(t, &logs))...)
+	expired := sessionExpired(b, "expired-1")
 
 	away, present := sessionPresentOnConnect(t, addr, "expired-1", false, 1)
 	require.False(t, present)
@@ -173,7 +197,7 @@ func expiredSessionIsDiscarded(t *testing.T, customise ...func(*natsmqtt5.Option
 
 	pub, _ := connectClient(t, addr, connectOpts("pub-expired"))
 	pub.publish(&paho.Publish{Topic: "e/1", QoS: 1, Payload: []byte("1")})
-	time.Sleep(1500 * time.Millisecond)
+	awaitClosed(t, expired, 10*time.Second, "the sweep never expired the session")
 
 	back, present := sessionPresentOnConnect(t, addr, "expired-1", false, 300)
 	assert.False(t, present, "the expired session is gone [MQTT-4.1.0-2, MQTT-3.2.2-3]")
@@ -195,7 +219,8 @@ func TestAnExpiredPersistentSessionIsDiscardedAndItsQueuedMessagesWithIt(t *test
 // it subscribes again.
 func TestAnExpiredSharedMemberComesBackWithoutASession(t *testing.T) {
 	var logs syncBuffer
-	addr := startBroker(t, startNATS(t), loggingBroker(t, &logs))
+	b, addr, _ := startBrokerHandle(t, startNATS(t), sweeping, loggingBroker(t, &logs))
+	expired := sessionExpired(b, "share-expired")
 	member, present := sessionPresentOnConnect(t, addr, "share-expired", false, 1)
 	require.False(t, present)
 	member.subscribe("$share/g/jobs/#", packet.QoS1)
@@ -204,7 +229,7 @@ func TestAnExpiredSharedMemberComesBackWithoutASession(t *testing.T) {
 
 	pub, _ := connectClient(t, addr, connectOpts("pub-share-expired"))
 	pub.publish(&paho.Publish{Topic: "jobs/1", QoS: 1, Payload: []byte("1")})
-	time.Sleep(1500 * time.Millisecond)
+	awaitClosed(t, expired, 10*time.Second, "the sweep never expired the session")
 
 	back, present := sessionPresentOnConnect(t, addr, "share-expired", false, 300)
 	assert.False(t, present, "the expired member's session is gone [MQTT-4.1.0-2, MQTT-3.2.2-3]")
