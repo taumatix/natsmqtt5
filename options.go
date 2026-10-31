@@ -198,7 +198,8 @@ type Options struct {
 	// It also sets the patience of a broker that loses NATS: one that cannot
 	// have a write to the Will bucket accepted for twice this interval closes
 	// its client connections, and a survivor waits about 4.5 intervals (plus the
-	// liveness ping timeout) before adopting a silent broker's Wills, so a Will
+	// liveness ping timeout, or at least two seconds below a one-second
+	// interval) before adopting a silent broker's Wills, so a Will
 	// is never published while its client's connection is open. A write needs a
 	// majority of the bucket's servers, so a broker whose NATS server is cut off
 	// from the rest of its cluster fences itself even though that server still
