@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/taumatix/natsmqtt5/packet"
 	"github.com/taumatix/natsmqtt5/topic"
@@ -119,6 +120,10 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 	// subscriber that arrives immediately after cannot see the message on the
 	// wire but miss it in the retained set.
 	id := newMessageID()
+	dedupe := c.broker.opts.DurablePublishDedupe && p.QoS > packet.QoS0
+	if dedupe {
+		id = c.sess.publishIDs.idFor(p.PacketID, p.Dup, topicName, p.Payload, id)
+	}
 	if p.Retain {
 		if err := c.broker.retain.store(ctx, subject, c.sess.clientID, id, p); err != nil {
 			c.logger.Warn("storing a retained message failed", "topic", topicName, "error", err)
@@ -128,6 +133,10 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 
 	msg := toNATS(full, c.sess.clientID, p)
 	msg.Header.Set(hdrMsgID, id)
+	if dedupe {
+		// JetStream drops a second publish with the same id inside the stream's duplicate window.
+		msg.Header.Set(jetstream.MsgIDHeader, id)
+	}
 	if q := c.broker.queue.Load(); q != nil && p.QoS > packet.QoS0 {
 		// Queued first, and confirmed; see offlineQueue.keep for why the
 		// order matters. Refusing on failure lets the client try again rather
@@ -180,6 +189,9 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 		}
 	}
 
+	if dedupe {
+		c.sess.publishIDs.done(p.PacketID)
+	}
 	switch p.QoS {
 	case packet.QoS0:
 		return nil

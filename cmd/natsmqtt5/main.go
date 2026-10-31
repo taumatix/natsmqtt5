@@ -147,6 +147,7 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 		offlineQueue    = fs.Bool("offline-queue", false, "require the offline queue, failing to start without it (it is on by default whenever JetStream is used)")
 		noOffline       = fs.Bool("no-offline-queue", false, "do not keep QoS 1 and 2 messages for disconnected sessions; a resumed session misses what was published while it was away")
 		offlineMaxAge   = fs.Duration("offline-queue-max-age", 24*time.Hour, "how long a queued message is kept for a disconnected session")
+		durableDedupe   = fs.Bool("durable-publish-dedupe", false, "with -durable-publish, let the queue stream drop the copy a client's retry of a refused publish would add (inside its duplicate window)")
 		durablePub      = fs.Bool("durable-publish", false, "acknowledge QoS 1 and 2 publishes only once the offline queue has stored them and NATS has confirmed the live copy (implies -offline-queue)")
 		escapeWildcards = fs.Bool("escape-nats-wildcards", false, "accept topics containing *, >, spaces and other whitespace by escaping them in the NATS subject (not readable by nats-server's own MQTT listener; choose before you have data)")
 		restrictDollar  = fs.Bool("restrict-dollar-topics", false, "refuse publishes and subscriptions on topics starting with $ (MQTT 5.0 section 4.7.2), except $share/ subscriptions")
@@ -227,6 +228,7 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 			WillCheckInterval:         *willCheck,
 			SessionCheckpointInterval: *checkpoint,
 			DurablePublish:            *durablePub,
+			DurablePublishDedupe:      *durableDedupe,
 			OfflineQueue:              *offlineQueue,
 			DisableOfflineQueue:       *noOffline,
 			OfflineQueueMaxAge:        *offlineMaxAge,

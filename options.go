@@ -266,6 +266,20 @@ type Options struct {
 	// may have stored its copy, so a Will can be queued twice). Costs a NATS round trip per
 	// such publish on top of the queue's; see the README for measurements.
 	DurablePublish bool
+	// DurablePublishDedupe stops the retry of a refused DurablePublish from leaving a second copy in the
+	// queue. A QoS 1 or 2 PUBLISH refused with 0x83 after its queue copy was stored (the flush failed, or
+	// the queue answered too late) is sent again by the client, and without this the queue then holds the
+	// message twice and a session that was away is offered it twice. With it, the broker gives each such
+	// publish a Nats-Msg-Id and a retransmission of it (same packet identifier, DUP set, same topic and
+	// payload) carries the same one, so JetStream drops the second copy inside the queue stream's
+	// duplicate window (the stream's Duplicates, 2 minutes unless the operator changed it).
+	//
+	// A retry after the window has passed, one on a session that did not survive (Clean Start), or one that
+	// differs in topic or payload is queued as before, and a live copy is still sent again, so a subscriber
+	// that was connected can still see a retried message twice, as QoS 1 allows. A publish that was
+	// acknowledged is forgotten, so a later message that reuses the packet identifier is never mistaken
+	// for a duplicate. Requires DurablePublish; it is an error without it.
+	DurablePublishDedupe bool
 	// OfflineQueueMaxAge is how long a queued message is kept. Defaults to 24
 	// hours. A session away for longer loses what is older.
 	OfflineQueueMaxAge time.Duration
@@ -489,6 +503,9 @@ func (o Options) resolve() (*resolved, error) {
 		return nil, fmt.Errorf("%w: OfflineQueue and DisableOfflineQueue are both set", ErrInvalidOptions)
 	}
 	r.defaultQueue = !o.OfflineQueue && !o.DisableOfflineQueue && (!o.DisableRetained || o.PersistentSessions)
+	if o.DurablePublishDedupe && !o.DurablePublish {
+		return nil, fmt.Errorf("%w: DurablePublishDedupe needs DurablePublish", ErrInvalidOptions)
+	}
 	if o.DurablePublish {
 		// The guarantee rests on the queue's stream, so the queue is required,
 		// not merely defaulted: a broker that cannot set it up must not start

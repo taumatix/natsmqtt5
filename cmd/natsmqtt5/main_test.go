@@ -184,6 +184,20 @@ func TestDurablePublishFlag(t *testing.T) {
 	assert.False(t, cfg.broker.DurablePublish, "off unless asked for")
 }
 
+func TestDurablePublishDedupeFlag(t *testing.T) {
+	cfg, err := parseConfig([]string{"-durable-publish", "-durable-publish-dedupe"}, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.DurablePublishDedupe)
+
+	cfg, err = parseConfig(nil, env(map[string]string{"NATSMQTT5_DURABLE_PUBLISH_DEDUPE": "true"}), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.DurablePublishDedupe)
+
+	cfg, err = parseConfig(nil, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.False(t, cfg.broker.DurablePublishDedupe, "off unless asked for")
+}
+
 func TestRestrictDollarTopicsFlag(t *testing.T) {
 	cfg, err := parseConfig([]string{"-restrict-dollar-topics"}, env(nil), io.Discard)
 	require.NoError(t, err)

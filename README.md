@@ -370,7 +370,10 @@ it from the queue; a connected subscriber gets it once, as without the option.
 
 What it is not: live delivery stays core NATS, at most once per hop, so a connected subscriber whose
 own NATS path fails at the wrong moment can still miss it ([ROADMAP.md](ROADMAP.md)). A retry after
-a refusal can leave a second queue copy. QoS 0 is not covered. Nor are Wills: a Will goes through
+a refusal can leave a second queue copy; `Options.DurablePublishDedupe` (`-durable-publish-dedupe`,
+`NATSMQTT5_DURABLE_PUBLISH_DEDUPE=true`, off by default) gives the publish a `Nats-Msg-Id` so the
+stream drops the retransmission (same packet identifier, DUP set, same topic and payload) inside its
+duplicate window, 2 minutes unless you changed the stream's. The live copy is still sent again. QoS 0 is not covered. Nor are Wills: a Will goes through
 the queue's keep like any other message but is not flushed, because there is no client to refuse to
 and nothing a refusal could ask it to retry; the record of a durable Will is already removed by the
 broker that publishes it ([ROADMAP.md](ROADMAP.md)).

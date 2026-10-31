@@ -250,7 +250,7 @@ func queuedCopies(t *testing.T, s jetstream.Stream, subject string) int {
 
 // The 0x83 above tells the client to send the message again, and the queue stream already holds the first
 // copy, so the retry stores a second one: a session that was away is offered the message twice. QoS 1
-// allows that ("at least once", [MQTT-4.3.2-2]); this test pins the behaviour and ROADMAP.md records why it
+// allows that ("at least once", [MQTT-4.3.2-2]); this test pins the behaviour and ROADMAP.md records the opt-in that avoids it
 // is left: dropping the second copy needs an id the client controls per message, and the packet id is not
 // one (it is reused after its PUBACK, so a later, different message would be dropped as the duplicate).
 func TestDurablePublishRetryAfterARefusedFlushLeavesASecondQueueCopy(t *testing.T) {
