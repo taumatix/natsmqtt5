@@ -101,6 +101,17 @@ func newOfflineQueue(ctx context.Context, js jetstream.JetStream, opts *resolved
 	return q, nil
 }
 
+// replayRead is what a replay for subs hands to replay and replaySeq: replayFilters, or an empty
+// non-nil set, which reads nothing, when no subscription is a non-shared one. A shared
+// subscription's messages come from its backlog, never from the replay, so such a session has
+// nothing to read and would otherwise pay for the whole span.
+func (q *offlineQueue) replayRead(subs []*subscription) []string {
+	if !hasNonShared(subs) {
+		return []string{}
+	}
+	return q.replayFilters(subs)
+}
+
 // replayFilters is the set of queue subjects a replay for subs has to read:
 // the ones its non-shared subscriptions can match. A replay reads the whole
 // rewind window otherwise, at a cost per message that every other session's
@@ -287,6 +298,10 @@ func (q *offlineQueue) replayFrom(ctx context.Context, start jetstream.OrderedCo
 	if last == 0 {
 		return 0, nil
 	}
+	if start.FilterSubjects != nil && len(start.FilterSubjects) == 0 {
+		// replayRead's "nothing to read": the stream's end is all the caller wanted.
+		return last, nil
+	}
 	cons, err := q.stream.OrderedConsumer(ctx, start)
 	if err != nil {
 		return last, err
@@ -463,7 +478,7 @@ func (c *conn) replayOffline() error {
 		!(fromSeq == 0 && q.storedAfter(ctx, a.lateSeq, since)) {
 		fromSeq = a.lateSeq
 	}
-	filters := q.replayFilters(c.sess.subscriptions())
+	filters := q.replayRead(c.sess.subscriptions())
 	var err error
 	var last uint64
 	byTime := fromSeq == 0 || (rewindable && q.storedAfter(ctx, fromSeq, since))
@@ -545,7 +560,7 @@ func (c *conn) replayFromCursor(ctx context.Context, q *offlineQueue, cur cursor
 		}
 	}
 	c.streamNext.Store(start)
-	last, err := q.replaySeq(ctx, start, q.replayFilters(c.sess.subscriptions()), handle)
+	last, err := q.replaySeq(ctx, start, q.replayRead(c.sess.subscriptions()), handle)
 	complete := err == nil && deliverErr == nil && !c.isClosed()
 	if deliverErr != nil {
 		return deliverErr
