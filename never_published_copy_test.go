@@ -56,10 +56,12 @@ func TestACopyWhoseLiveCopyNeverCameIsReplayedByTheBrokerThatClaimsTheSession(t 
 		"[MQTT-4.4.0-1] the record says how far back its delivered ids reach, so the claim rewinds")
 }
 
-// A copy stored longer ago than the rewind is outside what it promises, and a
-// replay that went that far back would send what the connection delivered
-// again.
-func TestARewindDoesNotReachBeyondItsWindow(t *testing.T) {
+// A copy stored longer ago than the rewind reaches: the time rewind alone
+// would miss it, and a replay that went that far back without the ids would
+// send what the connection delivered again. The replay cursor (cursor.go) has
+// both, so it is replayed and the seed, which the client holds unacknowledged,
+// is resent once.
+func TestACopyStoredBeforeTheRewindIsReplayedFromTheCursor(t *testing.T) {
 	natsURL := startNATS(t)
 	_, addr, _ := startBrokerHandle(t, natsURL, persistentWithQueue, rewindOf(time.Second))
 	f := newLateCopyFixture(t, natsURL, addr, "np-short")
@@ -69,5 +71,6 @@ func TestARewindDoesNotReachBeyondItsWindow(t *testing.T) {
 	f.c.drop()
 	time.Sleep(500 * time.Millisecond)
 
-	assert.Equal(t, []string{"seed", "later"}, resumeAndRead(t, addr, "np-short"))
+	assert.Equal(t, []string{"seed", "earlier", "later"}, resumeAndRead(t, addr, "np-short"),
+		"[MQTT-4.4.0-1] a copy stored before the rewind is replayed")
 }

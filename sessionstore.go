@@ -66,6 +66,10 @@ type storedSubscription struct {
 	Opts       packet.Subscription
 	GrantedQoS packet.QoS
 	ID         int
+	// SinceSeq is subscription.since: the offline queue's last sequence when
+	// the subscription was made. Additive: a record without it restores 0,
+	// which owes the subscription everything, as before.
+	SinceSeq uint64 `json:",omitempty"`
 }
 
 // sessionRecord is the durable half of a session: what a broker that has never
@@ -145,6 +149,17 @@ type sessionRecord struct {
 	// AwayFromSeq.
 	AwayLateSeq uint64 `json:",omitempty"`
 
+	// ReplayCursor is the session's replay cursor (cursor.go): every message
+	// below it the session was owed has been delivered, except ReplayHoles, and
+	// Delivered holds every id at or above it. A claim whose record has it
+	// replays from it, the lowest hole first, and ignores AwayAt, AwayFromSeq and
+	// AwayLateSeq, which are still written for a broker that predates it. A
+	// record whose Delivered could not hold every id at or above the cursor is
+	// written without one. Kept by the claim, like AwayAt, and additive: a
+	// record without it is replayed from the time rewind as before.
+	ReplayCursor uint64            `json:",omitempty"`
+	ReplayHoles  []storedDelivered `json:",omitempty"`
+
 	// Inflight is the QoS 1 and QoS 2 messages sent to the client and not yet
 	// acknowledged when the session was released, in the order they were sent,
 	// and ReceivedQoS2 the Packet Identifiers of the client's QoS 2 PUBLISH
@@ -183,6 +198,8 @@ type sessionRecord struct {
 	awayLateSeqWas    uint64
 	deliveredSinceWas time.Time
 	deliveredWas      []storedDelivered
+	replayCursorWas   uint64
+	replayHolesWas    []storedDelivered
 	inflightWas       []storedInflight
 	receivedQoS2Was   []uint16
 	withdrawnWas      []storedWithdrawn
@@ -457,6 +474,7 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 		ownerDead := attachedElsewhere && !s.ownerAlive(ctx, previousOwner)
 		if attachedElsewhere && !ownerDead {
 			rec.AwayAt, rec.AwayFromSeq, rec.AwayLateSeq, rec.Delivered, rec.DeliveredSince = time.Time{}, 0, 0, nil, time.Time{}
+			rec.ReplayCursor, rec.ReplayHoles = 0, nil
 		}
 		legacy := ownerDead && rec.AwayAt.IsZero() && s.queueMaxAge > 0
 		rec.Owner = s.owner
@@ -472,6 +490,7 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 		rec.awayLateSeqWas = rec.AwayLateSeq
 		rec.deliveredSinceWas = rec.DeliveredSince
 		rec.deliveredWas = rec.Delivered
+		rec.replayCursorWas, rec.replayHolesWas = rec.ReplayCursor, rec.ReplayHoles
 		if legacy {
 			// Attached with no position at all: written by a broker that predates
 			// the checkpoint, or killed before its first write. Anything in the
@@ -805,6 +824,8 @@ func (s *sessionStore) spillRecord(rec *sessionRecord, limit int) (lost int, err
 func (s *sessionStore) spillRecordReusing(rec *sessionRecord, limit int, known map[string]struct{}) (lost int, err error) {
 	rec.Spill = nil
 	if n := trimDelivered(rec, limit/2); n > 0 {
+		// The ids left out may be above the cursor, which promises them all.
+		rec.ReplayCursor, rec.ReplayHoles = 0, nil
 		s.logger.Warn("delivered ids dropped to keep the session record within a value; a replay may repeat a QoS 2 message",
 			"client", rec.ClientID, "dropped", n)
 	}

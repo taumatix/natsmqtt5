@@ -14,9 +14,9 @@ func TestALateCopyOnAReleasedSessionLowersTheReplayStartOnly(t *testing.T) {
 	s := newSession("c")
 	s.markAwayLocked(away{at: time.Now(), fromSeq: 50})
 
-	_, persist := s.lateCopy(nil, 30)
+	_, persist := s.lateCopy(nil, 30, "")
 	assert.False(t, persist, "no stored record, nothing to rewrite")
-	_, persist = s.lateCopy(nil, 40)
+	_, persist = s.lateCopy(nil, 40, "")
 	assert.False(t, persist)
 
 	a, ok := s.takeAway()
@@ -29,7 +29,7 @@ func TestALateCopyOnAReleasedSessionLowersTheReplayStartOnly(t *testing.T) {
 // its connection is not owed a replay.
 func TestALateCopyOnASessionWithNoAbsenceIsNotNoted(t *testing.T) {
 	s := newSession("c")
-	_, persist := s.lateCopy(nil, 30)
+	_, persist := s.lateCopy(nil, 30, "")
 	assert.False(t, persist)
 	_, ok := s.takeAway()
 	assert.False(t, ok)
@@ -42,7 +42,7 @@ func TestALateCopyBelowTheDeliveredWindowIsNotNoted(t *testing.T) {
 	s.noteDelivered("high", deliveredSeqWindow+100)
 	s.markAwayLocked(away{at: time.Now(), fromSeq: deliveredSeqWindow + 50})
 
-	s.lateCopy(nil, 10)
+	s.lateCopy(nil, 10, "")
 
 	a, _ := s.takeAway()
 	assert.Zero(t, a.lateSeq)
@@ -54,7 +54,7 @@ func TestALateCopyReachingAnEndedConnectionGoesToTheSuccessor(t *testing.T) {
 	old, next := &conn{}, &conn{}
 	s.conn = next
 
-	got, persist := s.lateCopy(old, 30)
+	got, persist := s.lateCopy(old, 30, "")
 
 	assert.Same(t, next, got)
 	assert.False(t, persist)

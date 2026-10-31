@@ -14,59 +14,54 @@ names it. Entries are checked against the code each time the review is re-run (l
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
-## The replay's time rewind is a bound, not a guarantee
+No entry is open. The last two, "The replay's time rewind is a bound, not a guarantee" and "A live copy for a
+session that has since delivered 8192 more sequences is not noted", were closed by the replay cursor (2026-10-31,
+`cursor.go`, `replay_cursor_test.go`): a resume replays from a per-session cursor, so a message whose live copy never
+came, or came after the release below any number of later sequences, is sent however long ago it was stored, on any
+broker and after a kill, and nothing completed is sent again [MQTT-4.4.0-1], [MQTT-4.3.3-2], [MQTT-4.3.3-6]. What it
+left is below.
 
-**Today:** a replay reaches back `OfflineQueueRewind` (10 s by default) before the moment a session was released,
-on this broker or the one that claims it, and the record carries the delivered ids for that span
-(`DeliveredSince`), so a live copy that reached the old broker late, or never, is replayed instead of lost, and
-nothing already delivered is sent twice (`never_published_copy_test.go`). Still open: a copy delayed past the
-rewind, which is the entry below; and two costs of the bound. Each resume
-reads that span of the queue stream (now only the subjects its subscriptions match, below). And the
-record holds at most half a value's worth of ids (`trimDelivered`), so a session that delivered more than that
-in the span can see a QoS 2 message again (logged as a warning). [MQTT-4.4.0-1], [MQTT-4.3.3-2].
+# Tier 2: MUST statements on rare or optional paths
+
+## The replay cursor: what falls back to the time rewind, and what waits for a resume
+
+**Today:** a session whose record or memory has a replay cursor (`cursor.go`) is replayed from it; one without is
+replayed from `OfflineQueueRewind` before its release, as before, and keeps the rewind's limits: a message whose live
+copy never came and that is older than the rewind is lost, and a late copy more than `deliveredSeqWindow` (8192)
+sequences below what the session has delivered is not noted [MQTT-4.4.0-1]. A session is without a cursor when:
+
+1. it was restored from a record written before the cursor existed, until its first replay reads the queue to its
+   end (one absence, once, after the upgrade);
+2. it left more than 1024 holes (`maxReplayHoles`), or more than 16384 ids above the cursor (`cursorIDBound`): scans
+   that keep failing, or a connection whose lowest unsent message never moves, pin the cursor while ids pile up;
+3. its record could not carry every id above the cursor (more than `maxStoredDelivered`, 4096, or trimmed to fit a
+   value): the record is written without one, so a broker that restores it falls back, though the broker that held
+   it does not;
+4. a SUBSCRIBE could not read the queue's last sequence, or its filter cannot be narrowed to queue subjects (a scan
+   then never runs).
+
+A cursor that was dropped comes back only at the next replay that reads to the end, or at a SUBSCRIBE by a session with
+no other non-shared subscription. **Shape (not worked out):** start a cursor at the next scan instead (the ids above the lowest unsent
+message are complete once a replay or catch-up has run), so (2) and (4) recover while connected; let the record carry
+ids past 4096 outside the value (as the in-flight spill does), which closes (3) and the cap below.
+
+**Also:** a hole is sent only at the next resume. A message whose live copy never comes stays owed while the client is
+connected, which [MQTT-4.4.0-1] allows (it requires the resend on reconnect) but a client cannot tell from a lost one.
+A scan that finds a hole older than a few seconds could hand it to the catch-up path. And each SUBSCRIBE now costs a
+stream info request and each 1024 deliveries a filtered read; neither is measured over a clustered, replicated stream.
+
+## The replay's read: shared-only sessions and a clustered stream
 
 **Measured** (2026-10-10, `TestReplayReadCost`, one embedded NATS server, file storage): an unfiltered resume read
 the whole window at about 2.4 us a message (a million messages: 2.4 s), and 50 sessions resuming at once over 100,000
-messages took 7.6 s to the slowest, 200 sessions 31.6 s, since each pays the whole read. The replay now reads only the
+messages took 7.6 s to the slowest, 200 sessions 31.6 s, since each pays the whole read. The replay reads only the
 queue subjects the session's non-shared subscriptions match (`replayFilters`): 50 sessions over 100,000 messages
-15 ms to the slowest, one session over a million 3 ms. Still not measured over a clustered, replicated stream.
-
-**Shape:** a session that subscribes during its own replay no longer gets the window's older messages for the new
-filter (they were queued before it subscribed; MQTT owes it only what arrives after). Left: a session whose
-subscriptions are all shared still reads the whole window, though it delivers nothing from it (a shared message comes from
-its backlog): skip the read when no non-shared subscription remains. Filters that overlap are reduced to a set
-JetStream accepts (`joinSubjects`, 2026-10-30: crossing filters join into one covering subject, and a broad filter
-arriving after narrower ones no longer leaves them overlapping, which made the replay fail); the per-session cursor
-below replaces the span.
-
-## A live copy for a session that has since delivered 8192 more sequences is not noted
-
-**Today:** `lateSeqSafeLocked` refuses to note a copy more than `deliveredSeqWindow` (8192) sequences below
-the highest delivered, because the delivered ids that far back are forgotten and a replay from there could
-send a QoS 2 message twice [MQTT-4.3.3-2]. The copy is then lost. It needs a copy delayed past 8192 other
-deliveries to the same session, so it is rare, but it is the exact case the spec's "MUST resend" covers.
-
-**Shape:** a per-session cursor in the record: the highest sequence below which every matching queued message
-has been delivered or acknowledged, advanced only by a stream read, so an unheard copy cannot be skipped over.
-A replay starts at the cursor; the delivered ids are only needed above it. That makes the window above moot
-too, and it is the redesign this entry and the one before it share. Size L; the entry above is the bounded
-version that shipped first. Worked out 2026-10-30, to ship in this order, each slice usable alone:
-
-1. **A read-only advance scan.** The cursor can only move past a sequence the stream has been read through, and a
-   live connection reads nothing, so a scan runs (from the checkpoint loop, once the delivered ids above the cursor
-   pass a threshold, and at release): read the session's `replayFilters` from the cursor to the stream's last
-   sequence without delivering, and move the cursor to just below the lowest matching message whose id is not in
-   `delivered`, in the connection's queue, or in hand (the copy stored before its live copy was published is in the
-   stream already, so a scan that reaches sequence E has seen every copy at or below E). Ids at or below the cursor
-   are then dropped. No change to what a client is sent.
-2. **`ReplayCursor` in the record** (`omitempty`, so an older record restores without one and an older broker ignores
-   it), written with the checkpoint and at release. A record with a cursor replays from `min(cursor, AwayFromSeq,
-   AwayLateSeq)`; one without keeps the time rewind. `lateSeqSafeLocked` then accepts any sequence at or above the
-   cursor, and `deliveredSeqWindow` and the time rewind's ids go. The cursor never moves backward, and a restored
-   cursor above the queue's first sequence after a purge is clamped.
-3. **Drop `OfflineQueueRewind` as a correctness bound** (keep it as the start for records with no cursor).
-
-# Tier 2: MUST statements on rare or optional paths
+15 ms to the slowest, one session over a million 3 ms. Filters that overlap are reduced to a set JetStream accepts
+(`joinSubjects`). Left: a session whose subscriptions are all shared still reads the whole span, though it delivers
+nothing from it (a shared message comes from its backlog): skip the read when no non-shared subscription remains. A
+replay from a hole reads from that hole to the stream's end, so a hole kept for hours costs that span once per resume;
+reading the holes by sequence (`GetMsg`) and the rest from the cursor would not. Not measured over a clustered,
+replicated stream.
 
 ## Self-fencing on a cluster: what is left
 
@@ -445,6 +440,12 @@ most of them; these remain, each with why:
   drops: the highest-sequence ones, which are the newest and the likeliest to be redelivered. Keeping
   the newest instead would trade one repeat for another; the real fix is a record that is not
   bounded by a count, which needs the ids held outside the session value.
+- **The replay cursor's bounds and its race with a live copy.** That a cursor is dropped past 1024 holes or 16384
+  ids above it, that a record which left ids out carries none, and that a live copy arriving below the cursor while a
+  scan moves it becomes a hole (`noteLiveCopy` under `cursorMu`) are unit tests (`cursor_internal_test.go`); the
+  wire tests (`replay_cursor_test.go`) reach the cursor's normal paths, not those. Driving the bounds over a socket
+  needs thousands of deliveries or a hook to lower them, and the race a publisher stopped at the instant a scan
+  applies.
 - **The offline queue on a broker without JetStream** is not there: a QoS 1 message published while a
   session is away is lost although the CONNACK said Session Present 1 [MQTT-3.1.2-23],
   [MQTT-4.5.0-1]. `TestABrokerWithoutJetStreamStillStartsWithNoQueue` pins it as the known

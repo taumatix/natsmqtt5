@@ -130,6 +130,11 @@ CHANGELOG has the full text.
   [MQTT-2.2.1-4]. A success CONNACK is shortened to fit a small Maximum Packet Size
   (`small_connack_test.go`) [MQTT-3.1.2-24], [MQTT-3.2.2-16], [MQTT-3.3.2-12]. A data race
   between `Broker.Close` and a late live copy is gone.
+- **After v0.11.3, the replay cursor.** A message whose live copy never reached a session, or
+  reached it after release below 8192 later sequences, was lost once older than the replay's
+  time rewind; a resume now replays from a per-session cursor (`replay_cursor_test.go`), on any
+  broker and after a kill, without repeating a completed QoS 2 message. [MQTT-4.4.0-1],
+  [MQTT-4.3.3-2], [MQTT-4.3.3-6].
 - **v0.11.3.** A client with more QoS 2 PUBLISH packets unacknowledged than the Receive
   Maximum the CONNACK stated was served; it is now sent DISCONNECT 0x93 and the connection is
   closed. The specification's sentence for this (§3.3.4) has no statement id of its own, but §4.13.1

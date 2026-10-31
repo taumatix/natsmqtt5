@@ -2,7 +2,10 @@ package natsmqtt5
 
 import (
 	"context"
+	"sort"
 	"time"
+
+	"github.com/nats-io/nats.go"
 )
 
 // Seams for the external tests. They exist only in the test binary.
@@ -301,3 +304,46 @@ func RetainedPayload(b *Broker, topic string) (string, bool) {
 // RetainedSweep runs the retained store's sweep as the broker would with the NATS
 // client having reconnected that many times.
 func RetainedSweep(b *Broker, reconnects uint64) { b.retain.sweep(reconnects) }
+
+// SetLiveCopyGate makes a publish call f between storing its queue copy and
+// publishing its live copy, and leave the live copy out when f returns false:
+// the publisher was killed, or stalled, in between. f gets the live copy, which
+// carries its queue sequence, so a test can publish it itself later. nil
+// removes the gate.
+func SetLiveCopyGate(b *Broker, f func(live *nats.Msg) bool) {
+	if f == nil {
+		b.liveCopyGate.Store(nil)
+		return
+	}
+	b.liveCopyGate.Store(&f)
+}
+
+// SetCursorScanAfter changes how many delivered ids pile up above a session's
+// replay cursor before a scan moves it, for the rest of the test.
+func SetCursorScanAfter(t interface{ Cleanup(func()) }, n int) {
+	was := cursorScanAfter.Swap(int64(n))
+	t.Cleanup(func() { cursorScanAfter.Store(was) })
+}
+
+// SetMaxReplayHoles changes how many holes a replay cursor keeps before it is
+// dropped, for the rest of the test.
+func SetMaxReplayHoles(t interface{ Cleanup(func()) }, n int) {
+	was := maxReplayHoles.Swap(int64(n))
+	t.Cleanup(func() { maxReplayHoles.Store(was) })
+}
+
+// ReplayCursor is the replay cursor of a session this broker holds and its
+// holes' sequences; 0 when it has none.
+func ReplayCursor(b *Broker, clientID string) (next uint64, holes []uint64) {
+	s := b.peekSession(clientID)
+	if s == nil {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for seq := range s.cur.holes {
+		holes = append(holes, seq)
+	}
+	sort.Slice(holes, func(i, j int) bool { return holes[i] < holes[j] })
+	return s.cur.next, holes
+}

@@ -263,10 +263,14 @@ type Options struct {
 	// OfflineQueueRewind is how far before a session's connection ended its
 	// replay reaches for a queued message whose live copy never arrived (the
 	// publisher stopped between storing the queue copy and publishing the live
-	// one), and for one still on its way. The session keeps the ids of what it
-	// delivered in that span so that nothing is sent twice, so a longer rewind
-	// costs memory per session and a read of that much of the queue stream on
-	// every resume. Defaults to 10 seconds.
+	// one), and for one still on its way, when the session has no replay
+	// cursor: one restored from a record written before the cursor existed, or
+	// one whose cursor was dropped for its bounds (see the README). A session
+	// with a cursor replays from it and finds such a message however long ago it
+	// was stored. The session keeps the ids of what it delivered in that span so
+	// that nothing is sent twice, so a longer rewind costs memory per session
+	// and a read of that much of the queue stream on every resume. Defaults to
+	// 10 seconds.
 	OfflineQueueRewind time.Duration
 	// OfflineQueueStorage selects file or memory storage for the queue
 	// stream. Defaults to file storage.

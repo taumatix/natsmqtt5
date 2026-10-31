@@ -48,6 +48,10 @@ type Broker struct {
 	// publishQueuedGate, when set, is called with a QoS 1 or 2 message's payload after
 	// its queue copy is stored and before its live publish. A seam for tests.
 	publishQueuedGate atomic.Pointer[func(payload []byte)]
+	// liveCopyGate, when set, is called by a publish between storing the queue
+	// copy and publishing the live one, and the live publish is left out when it
+	// returns false: a publisher killed or stalled in between. A seam for tests.
+	liveCopyGate atomic.Pointer[func(*nats.Msg) bool]
 	// resumeGate, when set, is called with each stored filter after it has been
 	// authorised and before it is rebuilt: the window a takeover can land in.
 	resumeGate atomic.Pointer[func(filter string)]
@@ -517,8 +521,7 @@ func (b *Broker) releaseStoredSession(c *conn) {
 
 	// Where the next broker's replay starts, so that it does not begin at the
 	// release time and lose what the client was still owed.
-	var dropped int
-	rec.AwayFromSeq, rec.AwayLateSeq, rec.Delivered, dropped = s.awayState()
+	dropped := s.awayStateInto(rec)
 	rec.DeliveredSince = s.deliveredFloor()
 	if dropped > 0 {
 		b.logger.Warn("the session record keeps only some of the delivered message ids; "+

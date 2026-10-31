@@ -40,6 +40,13 @@ import (
 // enqueueQueued is enqueue for a message whose copy is in the queue stream. It
 // runs on a NATS dispatcher goroutine and does not block.
 func (c *conn) enqueueQueued(d *delivery) {
+	c.placeQueued(d)
+	// After the copy is where owedFloor finds it, so the replay cursor either
+	// stopped below it or sees it here (cursor.go).
+	c.sess.noteLiveCopy(d.seq, d.id)
+}
+
+func (c *conn) placeQueued(d *delivery) {
 	c.catchMu.Lock()
 	if c.isClosed() {
 		// The connection has ended but the session has not yet let go of it, so
@@ -88,7 +95,7 @@ func (c *conn) lateOnEndedConn(d *delivery) {
 	if c.sess == nil {
 		return
 	}
-	successor, persist := c.sess.lateCopy(c, d.seq)
+	successor, persist := c.sess.lateCopy(c, d.seq, d.id)
 	if persist {
 		go c.broker.persistLateCopy(c.sess)
 	}

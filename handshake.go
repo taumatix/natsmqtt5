@@ -243,7 +243,8 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 			c.broker.restoreSessionState(ctx, sess, rec)
 		}
 		if !restoredAway.IsZero() {
-			sess.markAwayRestored(restoredAway, rec.awayFromSeqWas, rec.awayLateSeqWas, rec.deliveredSinceWas, rec.deliveredWas)
+			sess.markAwayRestored(restoredAway, rec.awayFromSeqWas, rec.awayLateSeqWas, rec.deliveredSinceWas, rec.deliveredWas,
+				rec.replayCursorWas, rec.replayHolesWas)
 		}
 		sess.setUnrestored(stored)
 	} else if len(stored) == 0 {
@@ -591,6 +592,7 @@ func (c *conn) rebuild(st storedSubscription) (*subscription, error) {
 		grantedQoS: st.GrantedQoS,
 		id:         st.ID,
 	}
+	sub.since.Store(st.SinceSeq)
 	if err := c.bindNATS(sub); err != nil {
 		return nil, err
 	}

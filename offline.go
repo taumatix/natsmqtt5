@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -64,6 +65,9 @@ type offlineQueue struct {
 	// shared stream handle and so races between two connections replaying at
 	// once (found by -race on CI, once the queue became the default).
 	infoMu sync.Mutex
+	// seen is the highest stream sequence this broker has stored or been
+	// handed a live copy of: at or below the stream's end (cursor.go).
+	seen atomic.Uint64
 	// members says which sessions are subscribed to each shared subscription,
 	// so that its backlog can end with the last of them (sharedmembers.go). Nil
 	// when the bucket could not be made, and then the backlog ends only by the
@@ -225,6 +229,7 @@ func (q *offlineQueue) keep(ctx context.Context, js jetstream.JetStream, subject
 	}
 	// Set after the copy is stored, so only the live copy carries it.
 	msg.Header.Set(hdrQueueSeq, strconv.FormatUint(ack.Sequence, 10))
+	q.saw(ack.Sequence)
 	return nil
 }
 
@@ -244,13 +249,12 @@ const offlineKeepTimeout = 5 * time.Second
 // replay calls fn with every queued message stored since `since`, in order,
 // up to the end of the stream as it is when replay starts. The subject handed
 // to fn is the live one, without the "$queue." part.
-func (q *offlineQueue) replay(ctx context.Context, since time.Time, filters []string, fn func(*nats.Msg)) error {
-	_, err := q.replayFrom(ctx, jetstream.OrderedConsumerConfig{
+func (q *offlineQueue) replay(ctx context.Context, since time.Time, filters []string, fn func(*nats.Msg)) (uint64, error) {
+	return q.replayFrom(ctx, jetstream.OrderedConsumerConfig{
 		DeliverPolicy:  jetstream.DeliverByStartTimePolicy,
 		OptStartTime:   &since,
 		FilterSubjects: filters,
 	}, fn)
-	return err
 }
 
 // storedAfter reports whether the queue copy at seq was stored after t, so that
@@ -279,6 +283,7 @@ func (q *offlineQueue) replayFrom(ctx context.Context, start jetstream.OrderedCo
 		return 0, err
 	}
 	last := info.State.LastSeq
+	q.saw(last)
 	if last == 0 {
 		return 0, nil
 	}
@@ -397,6 +402,24 @@ func (c *conn) replayOffline() error {
 	}
 	c.resume.Store(&a)
 	c.markPositioned()
+
+	// No deadline: the replay goes at the client's pace, as a catch-up does,
+	// and ends with the connection.
+	ctx, cancel := c.streamContext()
+	defer cancel()
+	if cur, ok := c.sess.cursorForReplay(); ok {
+		last, err := q.lastSeq(ctx)
+		if err == nil && cur.next <= last+1 {
+			return c.replayFromCursor(ctx, q, cur)
+		}
+		if err == nil {
+			// The stream ends below the cursor: it was purged or made again, and
+			// the sequences the cursor names are not the ones it counted.
+			c.logger.Warn("the offline queue restarted below the session's replay cursor; "+
+				"replaying from the time rewind", "client_id", c.sess.clientID)
+			c.sess.dropCursor()
+		}
+	}
 	since := a.at.Add(-c.sess.window())
 	rewindable := !a.restored
 	if a.restored && !a.rewoundTo.IsZero() {
@@ -414,14 +437,14 @@ func (c *conn) replayOffline() error {
 	}
 	delivered := c.sess.deliveredIDs()
 
-	// No deadline: the replay goes at the client's pace, as a catch-up does,
-	// and ends with the connection.
-	ctx, cancel := c.streamContext()
-	defer cancel()
 	var deliverErr error
+	var first uint64 // the lowest sequence handled, where a cursor may start
 	handle := func(msg *nats.Msg) {
 		if deliverErr != nil || c.isClosed() {
 			return
+		}
+		if first == 0 {
+			first = queueSeq(msg)
 		}
 		id := messageID(msg)
 		if id != "" && !delivered[id] && !c.wasReplayed(id) {
@@ -442,7 +465,14 @@ func (c *conn) replayOffline() error {
 	}
 	filters := q.replayFilters(c.sess.subscriptions())
 	var err error
-	if fromSeq != 0 && rewindable && q.storedAfter(ctx, fromSeq, since) {
+	var last uint64
+	byTime := fromSeq == 0 || (rewindable && q.storedAfter(ctx, fromSeq, since))
+	if byTime {
+		c.sess.pinForReplay(1)
+	} else {
+		c.sess.pinForReplay(fromSeq)
+	}
+	if fromSeq != 0 && byTime {
 		// The sequence is the lowest message the connection knew it owed. A
 		// message stored before it, whose live copy was still on its way when
 		// the connection ended, is owed too and has no sequence to name: a live
@@ -452,12 +482,16 @@ func (c *conn) replayOffline() error {
 		// long as this rewind reaches) stop it sending those again. Position is
 		// left unset until a message is handled, so a connection that ends
 		// first hands the same absence on (awayFloor).
-		err = q.replay(ctx, since, filters, handle)
+		last, err = q.replay(ctx, since, filters, handle)
 	} else if fromSeq != 0 {
 		c.streamNext.Store(fromSeq)
-		_, err = q.replaySeq(ctx, fromSeq, filters, handle)
+		last, err = q.replaySeq(ctx, fromSeq, filters, handle)
 	} else {
-		err = q.replay(ctx, since, filters, handle)
+		last, err = q.replay(ctx, since, filters, handle)
+	}
+	complete := err == nil && deliverErr == nil && !c.isClosed()
+	if !complete {
+		c.sess.unpin()
 	}
 	if deliverErr != nil {
 		return deliverErr
@@ -469,6 +503,63 @@ func (c *conn) replayOffline() error {
 	if err == nil || !errors.Is(err, context.Canceled) {
 		c.resume.Store(nil)
 		c.streamNext.Store(0)
+	}
+	if complete {
+		// Read to the stream's end: the session can have a cursor from here on.
+		start := first
+		if !byTime {
+			start = fromSeq
+		} else if start == 0 {
+			start = last + 1
+		}
+		c.replayedTo(cursorView{}, false, start, last)
+	}
+	if n := len(c.replayed); n > 0 {
+		c.logger.Info("delivered messages queued while the client was away",
+			"client_id", c.sess.clientID, "count", n)
+	}
+	return nil
+}
+
+// replayFromCursor is replayOffline for a session with a replay cursor: it
+// reads from the lowest hole, or the cursor, and sends the holes and whatever
+// at or above the cursor the session has no id for [MQTT-4.4.0-1]. Below the
+// cursor everything else was sent or never owed, so a copy that never reached
+// a connection, however long ago it was stored, is found, and one sent long ago
+// is not sent again [MQTT-4.3.3-2].
+func (c *conn) replayFromCursor(ctx context.Context, q *offlineQueue, cur cursorView) error {
+	delivered := c.sess.deliveredIDs()
+	start := cur.start()
+	var deliverErr error
+	handle := func(msg *nats.Msg) {
+		if deliverErr != nil || c.isClosed() {
+			return
+		}
+		seq, id := queueSeq(msg), messageID(msg)
+		_, hole := cur.holes[seq]
+		if (hole || seq >= cur.next) && id != "" && !delivered[id] && !c.wasReplayed(id) {
+			deliverErr = c.deliverQueued(id, msg)
+		}
+		if deliverErr == nil && !c.isClosed() {
+			c.streamNext.Store(seq + 1)
+		}
+	}
+	c.streamNext.Store(start)
+	last, err := q.replaySeq(ctx, start, q.replayFilters(c.sess.subscriptions()), handle)
+	complete := err == nil && deliverErr == nil && !c.isClosed()
+	if deliverErr != nil {
+		return deliverErr
+	}
+	if err != nil && !errors.Is(err, context.Canceled) {
+		c.logger.Warn("replaying the offline queue failed; what it held is lost for this session",
+			"client_id", c.sess.clientID, "error", err)
+	}
+	if err == nil || !errors.Is(err, context.Canceled) {
+		c.resume.Store(nil)
+		c.streamNext.Store(0)
+	}
+	if complete {
+		c.replayedTo(cur, true, start, last)
 	}
 	if n := len(c.replayed); n > 0 {
 		c.logger.Info("delivered messages queued while the client was away",
