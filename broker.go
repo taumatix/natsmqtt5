@@ -48,6 +48,10 @@ type Broker struct {
 	// publishQueuedGate, when set, is called with a QoS 1 or 2 message's payload after
 	// its queue copy is stored and before its live publish. A seam for tests.
 	publishQueuedGate atomic.Pointer[func(payload []byte)]
+	// queueRetryGate, when set, is asked before each retry of a default queue that
+	// failed at start-up, and the retry waits for its next turn while it says no.
+	// A seam for tests.
+	queueRetryGate atomic.Pointer[func() bool]
 	// liveCopyGate, when set, is called by a publish between storing the queue
 	// copy and publishing the live one, and the live publish is left out when it
 	// returns false: a publisher killed or stalled in between. A seam for tests.
