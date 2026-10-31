@@ -88,8 +88,11 @@ func lateBacklogOnce(t *testing.T, earlyMember bool) {
 	held.Wait()
 
 	retryOpen.Store(true)
-	require.Eventually(t, func() bool { return memberEntries(t, natsURL) == members }, 10*time.Second, 20*time.Millisecond,
-		"the late broker's member was not given the backlog")
+	// The member entry is written before the backlog is given (joinGroup), so it is the backlog
+	// itself that is waited for: a live copy released in between reaches a subscription with none.
+	require.Eventually(t, func() bool {
+		return memberEntries(t, natsURL) == members && natsmqtt5.HasSharedBacklog(bB, "late-member")
+	}, 10*time.Second, 20*time.Millisecond, "the late broker's member was not given the backlog")
 	close(release)
 	published.Wait()
 
