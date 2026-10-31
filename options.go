@@ -254,7 +254,9 @@ type Options struct {
 	// It does not make delivery to a subscriber exactly-once or guaranteed:
 	// live delivery is core NATS, at most once per hop, and a session whose
 	// client is away gets the queued copy on resume. It covers only QoS 1 and
-	// 2 publishes from clients, not Will Messages. Costs a NATS round trip per
+	// 2 publishes from clients. A Will Message has no client to refuse to, so
+	// its queue copy is tried up to three times instead (a try that timed out
+	// may have stored its copy, so a Will can be queued twice). Costs a NATS round trip per
 	// such publish on top of the queue's; see the README for measurements.
 	DurablePublish bool
 	// OfflineQueueMaxAge is how long a queued message is kept. Defaults to 24
