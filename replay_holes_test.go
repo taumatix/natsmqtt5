@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/eclipse/paho.golang/paho"
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -80,4 +81,23 @@ func TestAResumeReadsAHoleBySequenceAndTheRestFromTheCursor_MQTT_4_4_0_1_MQTT_4_
 	for _, start := range reads.since(before) {
 		assert.Greater(t, start, lost, "the resume read the queue from the hole (seq %d) on: %v", lost, reads.since(before))
 	}
+}
+
+// A fetch that comes back empty is not the end of the stream: on a loaded cluster an ordered
+// consumer, which nats.go makes afresh for every fetch, can answer a fetch with nothing although
+// messages it matches are stored (a session lost the one message it was owed in CI's cluster job).
+// The replay must keep reading until the consumer has nothing pending, and send what it was owed
+// [MQTT-4.4.0-1]. SetEmptyQueueFetches stands in for the loaded server: the next fetches of the
+// broker's queue reads come back empty.
+func TestAResumeWhoseFirstReadsComeBackEmptyStillSendsWhatItWasOwed_MQTT_4_4_0_1(t *testing.T) {
+	natsURL := startNATS(t)
+	r := newCursorRig(t, natsURL, "cur-empty-fetch", packet.QoS1)
+	r.send("before")
+	r.sub.drop()
+	waitDetached(t, r.logs, r.id)
+	r.pub.publish(&paho.Publish{Topic: r.topic, QoS: 1, Payload: []byte("owed")})
+
+	natsmqtt5.SetEmptyQueueFetches(r.b, 2)
+	assert.Equal(t, []string{"owed"}, r.resume(r.addr),
+		"[MQTT-4.4.0-1] the message stored while the session was away is sent on its resume")
 }

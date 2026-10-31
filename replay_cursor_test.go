@@ -242,12 +242,16 @@ func TestASessionMovedToAnotherBrokerGetsTheHoleAndNothingItCompleted_MQTT_4_4_0
 }
 
 // A broker killed outright leaves the record its last checkpoint wrote, with the
-// cursor and the hole; the broker that claims the session replays from it.
+// cursor and the hole; the broker that claims the session replays from it. The
+// checkpoint runs every 2 ms so that one usually falls between the client's last
+// acknowledgement and the scan that makes the hole: a cursor change must count as
+// activity for the next checkpoint, or the record never gets the hole (seen on
+// macOS CI).
 func TestAKilledBrokersCheckpointCarriesTheCursor_MQTT_4_4_0_1_MQTT_4_3_3_6(t *testing.T) {
 	natsmqtt5.SetCursorScanAfter(t, 1)
 	natsURL := startNATS(t)
 	r := newCursorRig(t, natsURL, "cur-killed", packet.QoS2, func(o *natsmqtt5.Options) {
-		o.SessionCheckpointInterval = 50 * time.Millisecond
+		o.SessionCheckpointInterval = 2 * time.Millisecond
 	})
 	addrB := startBroker(t, natsURL, persistentWithQueue, rewindOf(cursorRewind))
 
