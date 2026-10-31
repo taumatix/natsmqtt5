@@ -2,6 +2,7 @@ package natsmqtt5_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/stretchr/testify/assert"
@@ -42,4 +43,31 @@ func TestARetainedViewIsVerifiedAfterANATSReconnectEvenWhenTheCountsAgree(t *tes
 	got, has := natsmqtt5.RetainedPayload(broker, "rv/swap")
 	require.True(t, has)
 	assert.Equal(t, "new", got, "the stream's message replaces the older one the view held")
+}
+
+// The check after a reconnect runs when the NATS client reconnects, not at the next session sweep,
+// which is up to SessionSweepInterval later (an hour here): until it runs, a subscriber is sent the
+// stale entry of a topic the stream cleared. [MQTT-3.3.1-6]: "If the Payload contains zero bytes it
+// is processed normally by the Server but any retained message with the same topic name MUST be
+// removed and any future subscribers for the topic will not receive a retained message." The stale
+// entry is planted by hand, as above; the reconnect is real (the proxy between the broker and NATS
+// closes its connections).
+func TestARetainedViewIsVerifiedAsSoonAsTheNATSClientReconnects_MQTT_3_3_1_6(t *testing.T) {
+	natsURL := startNATS(t)
+	proxy := newCutProxy(t, natsURL)
+	broker, addr, _ := startBrokerHandle(t, proxy.url(), func(o *natsmqtt5.Options) { o.SessionSweepInterval = time.Hour })
+	pub, _ := connectClient(t, addr, connectOpts("rv-now-pub"))
+	pub.publish(&paho.Publish{Topic: "rv/kept", QoS: 1, Retain: true, Payload: []byte("kept")})
+	pub.publish(&paho.Publish{Topic: "rv/fresh", QoS: 1, Retain: true, Payload: []byte("fresh")})
+	natsmqtt5.RetainedPlant(broker, "rv/ghost", "ghost", 9999)
+	natsmqtt5.RetainedForget(broker, "rv/fresh")
+
+	proxy.sever()
+	require.True(t, natsmqtt5.AwaitNATSReconnect(broker, 10*time.Second))
+	assert.Eventually(t, func() bool {
+		_, has := natsmqtt5.RetainedPayload(broker, "rv/ghost")
+		return !has
+	}, 5*time.Second, 20*time.Millisecond, "[MQTT-3.3.1-6] the stream holds no message for this topic")
+	got, has := natsmqtt5.RetainedPayload(broker, "rv/kept")
+	assert.True(t, has && got == "kept", "an entry the stream holds is kept")
 }

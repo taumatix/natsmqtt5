@@ -334,16 +334,20 @@ whose logs the test cannot read. Same flake risk; each needs a condition to wait
 
 ## Retained view: a stale entry that cancels an unseen one
 
-**Blocked by:** nothing for the window up to the next sweep; a partition shorter than the NATS client's ping interval
-is not detectable from the broker (*real deployments*).
+**Blocked by:** *real deployments*: what is left is a partition shorter than the NATS client's ping interval, which the
+broker cannot detect.
 
 **Done:** a broker cut off past `RetainedTombstoneTTL` no longer serves a retained message another broker cleared
 (the sweep compares the view with the stream's count; the purge treats error 10043 as already purged), and after a NATS
-reconnect the sweep checks every entry of the view against the stream whatever the counts say (2026-10-31,
-`TestARetainedViewIsVerifiedAfterANATSReconnectEvenWhenTheCountsAgree`). One lookup per entry per reconnect.
+reconnect every entry of the view is checked against the stream whatever the counts say
+(`TestARetainedViewIsVerifiedAfterANATSReconnectEvenWhenTheCountsAgree`). One lookup per entry per reconnect.
+**Done (2026-10-31):** that check runs when the NATS client reports the reconnect (a status listener, so an
+application's own reconnect handler on `Options.Conn` is untouched), not at the next sweep up to
+`SessionSweepInterval` later (`TestARetainedViewIsVerifiedAsSoonAsTheNATSClientReconnects_MQTT_3_3_1_6`). A check that
+fails because JetStream is not answering yet is left to the next sweep.
 
-**Left:** a stale entry is still served until the next sweep after the reconnect (up to `SessionSweepInterval`), and a
-reconnect the broker's NATS client did not notice (a partition shorter than its ping interval) triggers nothing.
+**Left:** a reconnect the broker's NATS client did not notice (a partition shorter than its ping interval) triggers
+nothing, and a stale entry it leaves is served until a count disagrees.
 
 ## The weekly scans fail where no pass reads them
 
