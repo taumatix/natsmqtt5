@@ -49,6 +49,7 @@ func newWillWatcher(t *testing.T, addr string) *testClient {
 
 // The old connection's end must not publish or cancel the new connection's Will.
 func TestMQTT_3_1_2_8_TheOldConnectionsEndLeavesTheNewConnectionsWill(t *testing.T) {
+	t.Parallel()
 	addr := startBroker(t, startNATS(t))
 	watcher := newWillWatcher(t, addr)
 
@@ -70,6 +71,7 @@ func TestMQTT_3_1_2_8_TheOldConnectionsEndLeavesTheNewConnectionsWill(t *testing
 // A new connection with no Will of its own leaves no Will behind, and the old
 // connection's end publishes none.
 func TestMQTT_3_1_2_8_ANewConnectionWithoutAWillCancelsTheOldOne(t *testing.T) {
+	t.Parallel()
 	addr := startBroker(t, startNATS(t))
 	watcher := newWillWatcher(t, addr)
 
@@ -87,6 +89,7 @@ func TestMQTT_3_1_2_8_ANewConnectionWithoutAWillCancelsTheOldOne(t *testing.T) {
 // [MQTT-3.1.2-10]: replacing a Will removes the stored one, and a broker that
 // dies afterwards leaves exactly one for a survivor to publish.
 func TestMQTT_3_1_2_10_AReplacedWillLeavesNoStoredRecordBehind(t *testing.T) {
+	t.Parallel()
 	url := startNATS(t)
 	a, addrA, _ := startBrokerHandle(t, url, fastWillsWithSessions)
 	addrB := startBroker(t, url, fastWillsWithSessions)

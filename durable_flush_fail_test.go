@@ -28,6 +28,7 @@ type cutProxy struct {
 	refuse   atomic.Bool
 	stayDown atomic.Bool
 	cut      atomic.Int64
+	refused  atomic.Int64 // connections turned away while refuse was set
 	// swallowAfterAck makes the armed cut stop forwarding client-to-NATS bytes instead of closing, so
 	// whatever the broker writes next is lost on a socket that still looks alive. sever closes it later.
 	swallowAfterAck atomic.Bool
@@ -61,6 +62,7 @@ func newCutProxy(t *testing.T, natsURL string) *cutProxy {
 				return
 			}
 			if p.refuse.Load() {
+				p.refused.Add(1)
 				_ = in.Close()
 				continue
 			}
@@ -175,13 +177,30 @@ func TestDurablePublishIsRefusedWhenTheLivePublishWasLostWithTheConnection(t *te
 func TestDurablePublishSurvivesNATSBeingCutAfterTheQueueCopyIsStored(t *testing.T) {
 	natsURL := startNATS(t)
 	proxy := newCutProxy(t, natsURL)
-	durable := startBroker(t, proxy.url(), func(o *natsmqtt5.Options) { o.DurablePublish = true })
+	// The cut turns the broker's reconnect attempts away until the live publish is made, so that the
+	// publish happens while the NATS client is reconnecting. Left to chance, a publish made before the
+	// client noticed the cut is written to a dead socket and is refused, as it must be, and one made
+	// after a reconnect was never buffered: the test then proved either of two other things.
+	proxy.stayDown.Store(true)
+	durable, durableAddr, _ := startBrokerHandle(t, proxy.url(), func(o *natsmqtt5.Options) { o.DurablePublish = true })
+	natsmqtt5.SetPublishQueuedGate(durable, func([]byte) {
+		assert.True(t, natsmqtt5.AwaitNATSDisconnect(durable, 10*time.Second), "the broker's NATS client never saw the cut")
+		deadline := time.Now().Add(10 * time.Second)
+		for proxy.refused.Load() == 0 && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		// One reconnect attempt has been turned away; the next comes a ReconnectWait later, after the
+		// publish below has been buffered.
+		proxy.refuse.Store(false)
+		proxy.stayDown.Store(false)
+	})
+	t.Cleanup(func() { natsmqtt5.SetPublishQueuedGate(durable, nil) })
 	other := startBroker(t, natsURL)
 
 	sub, _ := connectClient(t, other, connectOpts("dp-cut-sub"))
 	sub.subscribe(paho.SubscribeOptions{Topic: "dp/cut", QoS: 1})
 
-	pub := dialRaw(t, durable)
+	pub := dialRaw(t, durableAddr)
 	pub.connect(rawConnect("dp-cut-pub", 0))
 	proxy.armed.Store(true)
 	rawPublishQoS(pub, packet.QoS1, 1, "dp/cut", "survived")
@@ -197,6 +216,7 @@ func TestDurablePublishSurvivesNATSBeingCutAfterTheQueueCopyIsStored(t *testing.
 // When NATS stays unreachable the flush times out, so the PUBACK is refused with 0x83 and the client may send
 // it again. The queue stream already holds the first copy, which is why a retry can leave a duplicate there.
 func TestDurablePublishRefusesWhenNATSStaysUnreachableAfterTheQueueCopyIsStored(t *testing.T) {
+	t.Parallel()
 	natsURL := startNATS(t)
 	proxy := newCutProxy(t, natsURL)
 	proxy.stayDown.Store(true)
@@ -228,6 +248,7 @@ func queuedCopies(t *testing.T, s jetstream.Stream, subject string) int {
 // is left: dropping the second copy needs an id the client controls per message, and the packet id is not
 // one (it is reused after its PUBACK, so a later, different message would be dropped as the duplicate).
 func TestDurablePublishRetryAfterARefusedFlushLeavesASecondQueueCopy(t *testing.T) {
+	t.Parallel()
 	natsURL := startNATS(t)
 	proxy := newCutProxy(t, natsURL)
 	proxy.stayDown.Store(true)

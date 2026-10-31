@@ -30,6 +30,7 @@ import (
 // killed with SIGKILL is resent by the broker that takes the session over, whole,
 // with its Packet Identifier, DUP and RETAIN as first sent.
 func TestAKilledBrokersOversizeRetainedMessageInFlightIsResent(t *testing.T) {
+	t.Parallel()
 	natsURL := startNATS(t)
 	child := startBrokerBinary(t, natsURL, "-persistent-sessions", "-session-checkpoint-interval", killedBrokerCheckpoint)
 	survivor := startBroker(t, natsURL, persistentWithQueue)
@@ -63,6 +64,7 @@ func TestAKilledBrokersOversizeRetainedMessageInFlightIsResent(t *testing.T) {
 
 // [MQTT-4.4.0-1]: the same for QoS 2, a PUBLISH not yet answered.
 func TestAKilledBrokersOversizeQoS2RetainedMessageInFlightIsResent(t *testing.T) {
+	t.Parallel()
 	natsURL := startNATS(t)
 	child := startBrokerBinary(t, natsURL, "-persistent-sessions", "-session-checkpoint-interval", "1h")
 	survivor := startBroker(t, natsURL, persistentWithQueue)
@@ -144,6 +146,7 @@ func TestAnOversizePayloadStaysOutOfTheRecordAndItsLossSpoilsOnlyThatMessage(t *
 // Expiry Interval (4 s here) and the session writes it again before then
 // [MQTT-4.4.0-1].
 func TestAnOversizePayloadOfAMessageLeftUnacknowledgedIsKeptAlive(t *testing.T) {
+	t.Parallel()
 	natsURL := startNATS(t)
 	short := func(o *natsmqtt5.Options) {
 		o.PersistentSessions, o.DisableOfflineQueue = true, true

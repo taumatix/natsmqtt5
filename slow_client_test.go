@@ -70,6 +70,7 @@ func TestAClientThatFallsBehindLosesNothing(t *testing.T) {
 // Publishing goes on while the client catches up, so the catch-up has to hand
 // back to live delivery without a gap or a repeat at the seam.
 func TestCatchingUpHandsBackToLiveDelivery(t *testing.T) {
+	t.Parallel()
 	addr := startBroker(t, startNATS(t))
 	slow := slowSubscriber(t, addr, "slow-2", "s/#")
 

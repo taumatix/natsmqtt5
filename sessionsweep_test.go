@@ -59,6 +59,7 @@ func detach(c *rawClient) {
 // [MQTT-3.2.2-3]. Before the interval ends the subscriptions are still there:
 // the sweep must not take what the statement says to keep.
 func TestAnExpiredDetachedSessionLosesItsNATSSubscriptions_MQTT_3_1_2_23(t *testing.T) {
+	t.Parallel()
 	for name, extra := range map[string]func(*natsmqtt5.Options){
 		"in memory":           func(*natsmqtt5.Options) {},
 		"persistent sessions": persistent,
@@ -136,6 +137,7 @@ func TestAnExpiredSessionIsNotDeliveredToAfterTheSweep_MQTT_3_1_2_23(t *testing.
 // starts again from the next disconnect: the sweep must not act on the first
 // disconnect's clock.
 func TestAResumedSessionSurvivesTheSweepAndItsClockRestarts_MQTT_3_1_2_23(t *testing.T) {
+	t.Parallel()
 	srv := startNATSServer(t, 0)
 	addr := startBroker(t, srv.ClientURL(), sweeping)
 	pub, _ := connectClient(t, addr, connectOpts("sweep-resume-pub"))

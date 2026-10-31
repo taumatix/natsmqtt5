@@ -23,6 +23,7 @@ import (
 // until the next resume. Pinned to one scheduler thread, about one round in
 // twenty failed with the first message missing before the fix.
 func TestAResumeAfterADropNeitherRepeatsNorSkipsWhatTheLastConnectionHandled(t *testing.T) {
+	t.Parallel()
 	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
 	addr := startBroker(t, startNATS(t))
 

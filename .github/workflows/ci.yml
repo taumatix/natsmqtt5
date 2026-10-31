@@ -59,8 +59,9 @@ jobs:
         run: go build ./...
 
       - name: Test
-        # The root package alone takes about nine minutes on a macOS runner, so go test's
-        # default 10 minute limit is a coin toss (it fired on 2026-10-31 in an unrelated test).
+        # The slowest tests run in parallel, which brought the root package from about nine
+        # minutes to about six on a macOS runner; go test's default 10 minute limit was a coin toss
+        # (it fired on 2026-10-31). 20m stays as a safety net for a slow runner, not as the fix.
         run: go test -race -count=1 -timeout=20m ./...
 
   fuzz:

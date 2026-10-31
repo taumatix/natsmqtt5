@@ -69,6 +69,7 @@ func TestARetainedMessageInFlightIsResentByAnotherBroker(t *testing.T) {
 // [MQTT-4.4.0-1]: the same for a broker killed with SIGKILL, whose last
 // checkpoint is what the successor has.
 func TestAKilledBrokersRetainedMessageInFlightIsResent(t *testing.T) {
+	t.Parallel()
 	natsURL := startNATS(t)
 	child := startBrokerBinary(t, natsURL, "-persistent-sessions", "-session-checkpoint-interval", killedBrokerCheckpoint)
 	survivor := startBroker(t, natsURL, persistentWithQueue)

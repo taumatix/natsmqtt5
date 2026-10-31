@@ -15,6 +15,7 @@ import (
 // every tick: a broker listed and fetched every record of the bucket each
 // WillCheckInterval, so the cost grew with the connections of the whole cluster.
 func TestWillCheckDoesNotReadTheBucketEveryTick(t *testing.T) {
+	t.Parallel()
 	url := startNATS(t)
 	_, addrA, _ := startBrokerHandle(t, url, fastWills)
 	_ = startBroker(t, url, fastWills)

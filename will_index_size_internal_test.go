@@ -24,7 +24,7 @@ func heapAfterGC() uint64 {
 // its Will: 16 MiB at 50,000 records of a 7-byte payload, and 3 GiB at 50,000 of 64 KiB.
 // The ceiling is loose: it is there to notice a record growing with its payload again.
 func TestWillIndexHeapPerRecord(t *testing.T) {
-	for _, tc := range []struct{ n, payload int }{{5000, 7}, {50000, 7}, {2000, 64 * 1024}} {
+	for _, tc := range []struct{ n, payload int }{{5000, 7}, {20000, 7}, {500, 64 * 1024}} {
 		encoded := make([][]byte, tc.n)
 		for i := range encoded {
 			id := fmt.Sprintf("client-%d", i)

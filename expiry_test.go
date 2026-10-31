@@ -183,6 +183,7 @@ func TestExpiryReplayOnARestoredSessionHonoursTheQueueTimestamp(t *testing.T) {
 // keep up is read back from the queue stream, and the stream's timestamp is
 // what counts there.
 func TestExpiryCatchUpDecrementsAndDeletes(t *testing.T) {
+	t.Parallel()
 	var logs syncBuffer
 	addr := startBroker(t, startNATS(t), loggingBroker(t, &logs))
 	slow := slowSubscriber(t, addr, "exp-catch", "exp/catch/#")

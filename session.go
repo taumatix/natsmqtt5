@@ -1136,6 +1136,22 @@ func (s *session) takeWill(c *conn) (*packet.Will, time.Duration, *willLease) {
 	return w, d, l
 }
 
+// takeWillToPublish is takeWill for a connection that ended: the Will leaves the connection and becomes the
+// session's pending Will in one step, so Broker.Reauthorize always finds it in one place or the other. Between
+// the two, the Will was in neither while the stored record was rewritten, and a revocation that landed in that
+// gap discarded nothing and the revoked Will was published. The caller owns it until takePendingWill.
+func (s *session) takeWillToPublish(c *conn) (*packet.Will, time.Duration, *willLease) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.willConn != c || s.will == nil {
+		return nil, 0, nil
+	}
+	w, d, l := s.will, s.willDelay, s.willLease
+	s.will, s.willDelay, s.willConn = nil, 0, nil
+	s.pendingWill = w
+	return w, d, l
+}
+
 // cancelWills forgets every Will the session holds, the connection's and one
 // waiting out its delay, and returns their stored records, for a new connection
 // that is about to be attached [MQTT-3.1.2-8], [MQTT-3.1.3-9]. The client is
@@ -1485,12 +1501,6 @@ func (s *session) deliveredIDs() map[string]bool {
 		out[k] = true
 	}
 	return out
-}
-
-func (s *session) setPendingWill(w *packet.Will, lease *willLease) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.pendingWill, s.willLease = w, lease
 }
 
 // takePendingWill reports whether w is still the pending Will, and clears it

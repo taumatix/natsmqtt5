@@ -3,6 +3,7 @@ package natsmqtt5
 import (
 	"fmt"
 	"math/rand"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -84,7 +85,13 @@ func TestTheMeasurementUsesTheBrokersOwnDecisions(t *testing.T) {
 }
 
 func TestMeasureOutboundAliasSavings(t *testing.T) {
-	topics := topicMix(100000, 42)
+	// The table in ROADMAP.md was measured over 100,000 PUBLISHes; that takes ten seconds under -race, so
+	// a run takes a tenth of it, which holds the same skew; NATSMQTT5_SLOW_TESTS=1 runs the whole mix.
+	n := 10000
+	if os.Getenv("NATSMQTT5_SLOW_TESTS") != "" {
+		n = 100000
+	}
+	topics := topicMix(n, 42)
 	payloads := map[string][]byte{"4B": []byte("21.5"), "64B": make([]byte, 64), "512B": make([]byte, 512)}
 
 	for _, name := range []string{"4B", "64B", "512B"} {

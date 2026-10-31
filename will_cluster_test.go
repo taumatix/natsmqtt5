@@ -41,12 +41,26 @@ func clusterReplicas(o *natsmqtt5.Options) {
 // servers. Only the Will bucket, which lives on the majority, tells the broker anything.
 // [MQTT-3.1.2-8]: the Will must not be published while the client's connection is open, and
 // [MQTT-3.1.3-9]-style duplication must not follow once the partition heals.
+//
+// Whether the isolated server leads the Will bucket decides what the survivors go through: if it does they
+// must elect a leader before they can read the bucket at all, if it does not they read it throughout. The
+// cluster picks the leader, so each shape is made, not left to chance.
 func TestClusterWillOfAClientOnAnIsolatedNATSServerIsPublishedOnceAfterItsConnectionCloses(t *testing.T) {
+	for _, shape := range []struct {
+		name   string
+		leader int
+	}{{"the isolated server leads the Will bucket", 0}, {"a survivor leads the Will bucket", 1}} {
+		t.Run(shape.name, func(t *testing.T) { isolatedServerWill(t, shape.leader) })
+	}
+}
+
+func isolatedServerWill(t *testing.T, leader int) {
 	c := startNATSCluster(t)
 
 	cut, cutAddr, _ := startBrokerHandle(t, c.URL(0), clusterWills)
 	survivor := startBroker(t, c.URL(1)+","+c.URL(2), clusterWills)
 	watcher := newWillWatcher(t, survivor)
+	c.LeadStream("KV_MQTT5_wills", leader)
 
 	client := dialRaw(t, cutAddr)
 	client.connect(rawConnectWithWillMessage("isolated", "status/isolated", "gone"))
