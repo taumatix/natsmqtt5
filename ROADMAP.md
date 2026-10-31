@@ -524,3 +524,16 @@ most of them; these remain, each with why:
   [MQTT-4.5.0-1]. `TestABrokerWithoutJetStreamStillStartsWithNoQueue` pins it as the known
   deviation. Closing it needs a queue that does not depend on JetStream, which is undecided; until
   then the README and CONNACK should not promise more than the test shows.
+- **Driven end to end since 2026-10-31 (these were unit-tested only).** `NATSIngest` when the queue copy cannot be
+  stored (stream deleted: error reply, no sequence, nothing live) and when `DurablePublish`'s flush cannot be confirmed
+  (the broker's NATS cut after the queue copy: error reply once NATS is back, copy stored; `ingest_fault_test.go`).
+  The session-record chunks when they cannot be written (payload bucket deleted under the broker: no cursor, no chunk
+  names, a warning) and when one cannot be read (purged: cursor dropped on restore, a warning;
+  `replay_cursor_spill_fault_test.go`). `ReconnectCatchUp` across a second drop during a 300-message catch-up held by a
+  client at Receive Maximum 2: every message once and in order, the client never closed
+  (`reconnect_catchup_cut_test.go`). Still unit-only: `catchUp`'s `retryAfterDrop` branch. A proxy drop does not
+  reach it, because the ordered consumer rides over a dropped connection (the server keeps it) and a read blocked on
+  a dead connection did not return an error in 40 s; it needs the consumer lost, which only a JetStream server restart
+  does (`TestClusterReconnectCatchUp...` kills the server, but its read is not cut mid-way). Also: closing a broker
+  whose NATS is down while a catch-up read waits did not return in the test's cleanup (observed once, test
+  failing); not investigated, worth its own entry.
