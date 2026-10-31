@@ -637,5 +637,5 @@ func (b *Broker) sessionLost(clientID string, revision uint64) {
 
 	b.logger.Info("another broker claimed this session", "client_id", clientID)
 	s.takeOver()
-	s.discard()
+	s.discardMoved()
 }

@@ -136,11 +136,11 @@ func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID
 		// The server may grant a lower QoS than requested [MQTT-3.8.4-7].
 		granted = c.broker.opts.maxQoS
 	}
-	// A QoS 2 shared subscription needs per-member delivery affinity, which
-	// JetStream cannot express: its unit of ownership is a consumer, not a
-	// queue-group member. Downgrading to QoS 1 is explicitly the server's
-	// choice to make [MQTT-3.8.4-7], and is recorded in the SUBACK.
-	if share != "" && granted == packet.QoS2 {
+	// A message a shared member has been sent is its own in-flight state, held
+	// in JetStream until it is settled (held.go), so QoS 2 can be granted; until
+	// that guarantee is complete (Options.SharedQoS2) the server grants QoS 1,
+	// which is its choice to make [MQTT-3.8.4-7], recorded in the SUBACK.
+	if share != "" && granted == packet.QoS2 && !c.broker.opts.SharedQoS2 {
 		granted = packet.QoS1
 	}
 
