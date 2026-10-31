@@ -54,21 +54,6 @@ connected, which [MQTT-4.4.0-1] allows (it requires the resend on reconnect) but
 A scan that finds a hole older than a few seconds could hand it to the catch-up path. And each SUBSCRIBE now costs a
 stream info request and each 1024 deliveries a filtered read; neither is measured over a clustered, replicated stream.
 
-## The replay's read: holes by sequence and a clustered stream
-
-**Blocked by:** nothing for reading holes by sequence; the clustered measurement needs the three-server harness (`NATSMQTT5_CLUSTER_TESTS`).
-
-**Measured** (2026-10-10, `TestReplayReadCost`, one embedded NATS server, file storage): an unfiltered resume read
-the whole window at about 2.4 us a message (a million messages: 2.4 s), and 50 sessions resuming at once over 100,000
-messages took 7.6 s to the slowest, 200 sessions 31.6 s, since each pays the whole read. The replay reads only the
-queue subjects the session's non-shared subscriptions match (`replayFilters`): 50 sessions over 100,000 messages
-15 ms to the slowest, one session over a million 3 ms. Filters that overlap are reduced to a set JetStream accepts
-(`joinSubjects`). **Done (2026-10-31):** a session whose subscriptions are all shared reads nothing
-(`replayRead`; `TestResumeOfASessionWithOnlySharedSubscriptionsDoesNotReadTheQueue` counts the consumers the
-resume creates). **Left:** a replay from a hole reads from that hole to the stream's end, so a hole kept for hours costs that span once per resume;
-reading the holes by sequence (`GetMsg`) and the rest from the cursor would not. Not measured over a clustered,
-replicated stream.
-
 ## Self-fencing on a cluster: what is left
 
 **Blocked by:** nothing, and little is worth building. `TestClusterWillOfAClientOnAnIsolatedNATSServerIsPublishedOnceAfterItsConnectionCloses`
