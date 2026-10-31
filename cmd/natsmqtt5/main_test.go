@@ -236,6 +236,20 @@ func TestNATSIngestFlag(t *testing.T) {
 	assert.False(t, cfg.broker.NATSIngest, "off unless asked for")
 }
 
+func TestReconnectCatchUpFlag(t *testing.T) {
+	cfg, err := parseConfig([]string{"-reconnect-catch-up"}, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.ReconnectCatchUp)
+
+	cfg, err = parseConfig(nil, env(map[string]string{"NATSMQTT5_RECONNECT_CATCH_UP": "true"}), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.ReconnectCatchUp)
+
+	cfg, err = parseConfig(nil, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.False(t, cfg.broker.ReconnectCatchUp, "off unless asked for")
+}
+
 func TestRestrictDollarTopicsFlag(t *testing.T) {
 	cfg, err := parseConfig([]string{"-restrict-dollar-topics"}, env(nil), io.Discard)
 	require.NoError(t, err)

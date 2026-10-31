@@ -468,6 +468,13 @@ func messageID(msg *nats.Msg) string {
 // session's non-shared subscriptions it matches, and records it as replayed so
 // its live copy, arriving late, is skipped. It runs on the delivery goroutine.
 func (c *conn) deliverQueued(id string, msg *nats.Msg) error {
+	return c.deliverQueuedOwed(id, msg, false)
+}
+
+// deliverQueuedOwed is deliverQueued; with owedOnly it also skips a
+// subscription made after the message was stored (subscription.since), for a
+// read that starts before the session's subscriptions may have existed.
+func (c *conn) deliverQueuedOwed(id string, msg *nats.Msg, owedOnly bool) error {
 	qos, _, _, _ := fromNATS(msg)
 	if qos == packet.QoS0 {
 		return nil
@@ -482,6 +489,9 @@ func (c *conn) deliverQueued(id string, msg *nats.Msg) error {
 		if sub.share != "" || !topic.Match(sub.filter, name) {
 			// A shared subscription's messages come from its own backlog
 			// (shared.go), to whichever connected member pulls them.
+			continue
+		}
+		if since := sub.since.Load(); owedOnly && since != sinceUnknown && queueSeq(msg) <= since {
 			continue
 		}
 		d := c.deliveryFor(sub, name, msg)
