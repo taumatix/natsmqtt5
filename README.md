@@ -403,6 +403,28 @@ must differ.
 A NATS message with no `Mqtt5-*` headers is delivered as a QoS 0 message with
 no properties, which is what makes plain `nats pub` reach MQTT subscribers.
 
+### Publishing from plain NATS through a broker
+
+A message published straight onto a live subject has no queue copy, whatever its `Mqtt5-Qos`
+header says: a session that was away never gets it, and a shared subscription gets it only through
+its NATS queue group, which can pick a member whose client is away and drop it there. With
+`Options.NATSIngest` (`-nats-ingest`, `NATSMQTT5_NATS_INGEST=true`) the brokers also listen on
+`<prefix>.$ingest.<subject>`, in one NATS queue group, and the broker that takes a message handles
+it as an MQTT PUBLISH on `<subject>`. It checks the topic and the QoS (and refuses a topic starting
+with `$` whatever `RestrictDollarTopics` says, so the subject cannot write `$retained` or `$queue`), stores a retained message,
+stores the queue copy of a QoS 1 or 2 message, and publishes the live copy with its id and
+sequence. That copy reaches away sessions, shared groups and `ReconnectCatchUp` like any other.
+
+    nats request 'mqtt.$ingest.sensors.7.temp' 21.5 -H 'Mqtt5-Qos: 1'
+
+The reply is empty, with `Mqtt5-Msg-Id` and, when queued, `Mqtt5-Queue-Seq`. If the broker refused
+the message, the reply carries `Mqtt5-Ingest-Error` with the reason, and nothing was published.
+A plain `nats pub` without a reply subject works too, but nothing tells it the outcome. Headers
+that do not start with `Mqtt5-` are passed on to the live copy. The `Authorizer` is not asked,
+because a NATS client has no MQTT identity: NATS permissions on `<prefix>.$ingest.>` decide who
+may publish there. Each broker handles ingest messages one at a time, so a publisher that waits for
+each reply keeps its order. Off by default, and then nothing answers on the subject.
+
 ## Persistent sessions
 
 By default a session lives in the broker process: a client reconnecting to the

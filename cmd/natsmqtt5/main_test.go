@@ -222,6 +222,20 @@ func TestRetainedVerifyIntervalFlag(t *testing.T) {
 	assert.Zero(t, cfg.broker.RetainedVerifyInterval, "off unless asked for")
 }
 
+func TestNATSIngestFlag(t *testing.T) {
+	cfg, err := parseConfig([]string{"-nats-ingest"}, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.NATSIngest)
+
+	cfg, err = parseConfig(nil, env(map[string]string{"NATSMQTT5_NATS_INGEST": "true"}), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.NATSIngest)
+
+	cfg, err = parseConfig(nil, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.False(t, cfg.broker.NATSIngest, "off unless asked for")
+}
+
 func TestRestrictDollarTopicsFlag(t *testing.T) {
 	cfg, err := parseConfig([]string{"-restrict-dollar-topics"}, env(nil), io.Discard)
 	require.NoError(t, err)
