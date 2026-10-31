@@ -298,9 +298,9 @@ non-persistent ceiling is 0.09 ms). Killed-broker tests cover the burst (`killed
 about 2 ms on a loaded host. That needs a write that is not waited for, which [MQTT-4.3.3-6] does not
 allow, or a faster store. Not measured with `sync_always` on the NATS server.
 
-## Spilled in-flight entries: an attached owner's unnamed payloads wait for the TTL
+## Spilled in-flight entries: what an acknowledgement still rewrites
 
-**Blocked by:** nothing; a pass can take it.
+**Blocked by:** nothing, though nothing has measured the rewrite as a cost.
 
 **Done (2026-10-30):** a checkpoint names a chunk whose content did not change without writing it
 (`spillRecordReusing`; a message appended writes the last chunk only, 1 of 10 in the test), until
@@ -310,11 +310,15 @@ its payloads near the bucket's TTL, when all are rewritten. The sweep deletes th
 an entry whose identifier is a multiple of it, or when size cuts it), so an acknowledgement at the front or a message
 appended changes the chunk it touches and no other (`TestSpillAnAcknowledgementAtTheFrontWritesFewChunks`). The layout
 is still an ordered list of chunk keys, which an older broker reads as before.
+**Done (2026-10-31):** the sweep judges the payloads of a session attached to the broker running it by what that
+broker holds in memory as well as by the record, so a payload under the owner that neither names is deleted once
+older than the grace period instead of waiting for the bucket's TTL
+(`TestTheSweepDeletesAnAttachedSessionsUnnamedPayloadAndKeepsTheOneItHolds_MQTT_4_4_0_1`). A session attached to
+another broker is left to that broker's sweep.
 **Left:** an acknowledgement still re-cuts the first spilled chunk (where the inline part ends), and a chunk cut by
 size rather than by identifier shifts as before; identifiers that do not cycle in send order (a client that acknowledges
-out of order leaves gaps) make the chunks uneven, not wrong. The sweep still leaves an attached owner's unnamed payloads to the TTL: its
-record can be a step behind what the broker holds (a claimed record names nothing until the first
-checkpoint), so judging them needs the record's age and the broker's own liveness.
+out of order leaves gaps) make the chunks uneven, not wrong. A session attached to a broker that died has its unnamed payloads judged only once
+its record is reclaimed, or they age out.
 
 ## Other tests still sleep for a checkpoint or a publish
 
