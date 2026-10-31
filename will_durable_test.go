@@ -6,6 +6,7 @@ import (
 	"net"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -301,7 +302,13 @@ func willKeys(t *testing.T, natsURL string) int {
 	if err != nil {
 		return 0 // no keys
 	}
-	return len(keys)
+	n := 0
+	for _, k := range keys {
+		if strings.Contains(k, ".") { // a record's key; the brokers' fence probe has no dot
+			n++
+		}
+	}
+	return n
 }
 
 // [MQTT-3.1.2-7], [MQTT-3.1.2-8]: the real thing. cmd/natsmqtt5 runs as a

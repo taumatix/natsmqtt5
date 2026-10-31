@@ -92,9 +92,7 @@ func TestWillBucketSweepDeletesOnlyARecordOverdueByMoreThanTheSweepAge(t *testin
 	assert.True(t, hasKey(kv, "leaked.recent"), "a record overdue by less than the sweep age is kept")
 	assert.True(t, hasKey(kv, "leaked.open"), "a record not marked ended is never swept")
 	// The two real connections' records are untouched.
-	keys, err := kv.Keys(context.Background())
-	require.NoError(t, err)
-	assert.Len(t, keys, 4, "open, waiting, recent and open-looking records remain: %v", keys)
+	assert.Equal(t, 4, willKeys(t, url), "open, waiting, recent and open-looking records remain")
 }
 
 // The README says the DurablePublish flush confirms that the NATS server received the live

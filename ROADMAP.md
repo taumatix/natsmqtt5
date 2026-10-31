@@ -76,9 +76,18 @@ isolates the server a broker uses from the other two (three real servers in cont
 the client's socket close before the survivor publishes, heals, and counts one publication. It found that the fenced
 broker's own disconnect path published the Will again when the removal of the record timed out; `fire` retries the removal
 until the store answers. Since 2026-10-31 it runs both shapes, the isolated server leading the Will bucket and a survivor
-leading it (`natsCluster.LeadStream`). Left: (1) a partition that leaves the broker's server with a majority and cuts the
+leading it (`natsCluster.LeadStream`). **Fixed (2026-10-31):** the fence proved reachability with a read of the Will
+bucket, which every replica answers: the isolated broker never fenced and a survivor published the Will of a client still
+connected [MQTT-3.1.2-8], while a survivor's read, routed now and then to the isolated replica, timed out often enough to
+fence the survivor (the three red `cluster` runs of PR #187). The probe is a write a majority must accept; the test's
+socket-close helper had hidden the first half by reading its own read deadline as the close.
+Left: (1) a partition that leaves the broker's server with a majority and cuts the
 *broker* off is the proxy test, not a cluster one; (2) a partition longer than `retryFor` with the broker still cut off
-waits for the store for as long as it takes, by design, so there is nothing to assert but that it does not publish.
+waits for the store for as long as it takes, by design, so there is nothing to assert but that it does not publish;
+(3) a Will bucket leader election longer than twice `WillCheckInterval` fences every broker (writes stop until it ends;
+NATS starts one 4 to 9 s after the leader goes quiet, against 10 s at the default interval). Not measured on a killed
+leader yet; a cluster test that SIGKILLs the bucket's leader and counts closed clients would say whether the default
+needs to rise.
 
 ## Durable Wills on by default
 

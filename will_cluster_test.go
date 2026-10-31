@@ -18,10 +18,11 @@ func clusterWills(o *natsmqtt5.Options) {
 	fastWills(o)
 	clusterReplicas(o)
 	// Patient enough to ride out a Raft election: isolating a server that leads the Will
-	// bucket leaves the survivors unable to read it for a few seconds, and a broker that
-	// cannot read it for twice this interval closes its clients, as designed. The
-	// 150 ms of fastWills would fence the survivors too.
-	o.WillCheckInterval = 4 * time.Second
+	// bucket leaves the survivors unable to write to it until they elect another leader, which
+	// NATS starts 4 to 9 s after the last heartbeat (measured: writes back within 9 s), and a
+	// broker that cannot write for twice this interval closes its clients, as designed. The
+	// 150 ms of fastWills would fence the survivors too, and 4 s did now and then.
+	o.WillCheckInterval = 6 * time.Second
 }
 
 // clusterReplicas replicates every bucket and stream three ways and, with

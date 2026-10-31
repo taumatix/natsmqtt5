@@ -384,7 +384,9 @@ func fillQueue(t *testing.T, natsURL string, n int) {
 	nc, err := nats.Connect(natsURL)
 	require.NoError(t, err)
 	defer nc.Close()
-	js, err := jetstream.New(nc)
+	// Room for all n in flight: past the default 4000 an async publish waits 200 ms for an
+	// acknowledgement and then fails with "stalled", which a loaded macOS runner reached.
+	js, err := jetstream.New(nc, jetstream.WithPublishAsyncMaxPending(n))
 	require.NoError(t, err)
 	subject := natsmqtt5.DefaultSubjectPrefix + ".$queue.cur-filler.x"
 	for i := 0; i < n; i++ {
