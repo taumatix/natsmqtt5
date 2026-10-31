@@ -179,7 +179,17 @@ type Options struct {
 	// as before; "$retained" and "$queue", where the broker keeps its own data,
 	// are refused either way. It does not apply to a subscription a persistent
 	// session already stored.
+	//
+	// Deprecation notice: this is off by default today, and the default will
+	// become on in the next major version (MIGRATION.md). Set
+	// PinRestrictDollarTopics to choose now; leaving both unset logs one INFO
+	// line per process.
 	RestrictDollarTopics bool
+	// PinRestrictDollarTopics fixes RestrictDollarTopics whatever the default
+	// is, and beats RestrictDollarTopics when both are set: Ptr(false) keeps
+	// "$app/…" usable after the default flips, Ptr(true) refuses it today.
+	// nil leaves the choice to RestrictDollarTopics and the default.
+	PinRestrictDollarTopics *bool
 
 	// DurableWills keeps the Will Message of every open connection in a
 	// JetStream key-value bucket, so that the Will of a broker that is killed
@@ -198,7 +208,16 @@ type Options struct {
 	//
 	// The delay is counted from the moment a surviving broker notices, which is
 	// up to WillCheckInterval after the connection was lost.
+	//
+	// Deprecation notice: this is off by default today, and the default will
+	// become on in the next major version (MIGRATION.md). Set PinDurableWills
+	// to choose now; leaving both unset logs one INFO line per process.
 	DurableWills bool
+	// PinDurableWills fixes DurableWills whatever the default is, and beats
+	// DurableWills when both are set: Ptr(false) keeps Wills in memory after
+	// the default flips, Ptr(true) stores them durably today. nil leaves the
+	// choice to DurableWills and the default.
+	PinDurableWills *bool
 	// WillCheckInterval is how often a broker looks for Wills whose owner has
 	// gone, with DurableWills. It bounds how long after a broker's death its
 	// clients' Wills wait to be noticed. Defaults to 5 seconds.
@@ -409,7 +428,17 @@ type Options struct {
 	// names that repeat. Off by default; a client that offers no maximum is
 	// never sent one either way. A resend after a reconnect carries the full
 	// name again, since the table belongs to the network connection.
+	//
+	// Deprecation notice: this is off by default today, and the default will
+	// become on in the next major version (MIGRATION.md). Set
+	// PinOutboundTopicAliases to choose now; leaving both unset logs one INFO
+	// line per process.
 	OutboundTopicAliases bool
+	// PinOutboundTopicAliases fixes OutboundTopicAliases whatever the default
+	// is, and beats OutboundTopicAliases when both are set: Ptr(false) sends
+	// no alias after the default flips, Ptr(true) sends them today. nil leaves
+	// the choice to OutboundTopicAliases and the default.
+	PinOutboundTopicAliases *bool
 	// EscapeNATSWildcards lets a topic contain '*', '>', spaces and the other
 	// whitespace characters, which MQTT allows but a NATS subject cannot carry,
 	// so the broker refuses them by default. When set, each is stored in the
@@ -555,6 +584,17 @@ func (o Options) resolve() (*resolved, error) {
 	r.logger = o.Logger
 	if r.logger == nil {
 		r.logger = slog.Default()
+	}
+
+	noteComingDefaults(r.logger, &o)
+	if o.PinDurableWills != nil {
+		r.DurableWills = *o.PinDurableWills
+	}
+	if o.PinRestrictDollarTopics != nil {
+		r.RestrictDollarTopics = *o.PinRestrictDollarTopics
+	}
+	if o.PinOutboundTopicAliases != nil {
+		r.OutboundTopicAliases = *o.PinOutboundTopicAliases
 	}
 
 	// A subject prefix has to be a single well-formed NATS token, or every

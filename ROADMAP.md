@@ -92,6 +92,17 @@ stream info request and each 1024 deliveries a filtered read; neither is measure
 
 **Blocked by:** a major version (or a minor one behind an opt-in), and a decision to take it.
 
+**Done (v0.14.0, additive):** `Options.PinDurableWills` pins the choice either way (`-durable-wills[=false]`); relying on the implicit
+default is deprecated in the option's doc, the README, the CHANGELOG and the draft `MIGRATION.md`; one INFO line per
+process names the unpinned options. Defaults are unchanged; `pinned_defaults_test.go` proves both settings and the
+unchanged default. **Remaining, in the next major version only:**
+
+- [ ] flip the default: `DurableWills` on whenever JetStream is in use, with a CHANGELOG entry that says so;
+- [ ] delete the "Deprecation notice" paragraph on `Options.DurableWills`, its entry in `noteComingDefaults`
+  (`flipnotice.go`; delete the file with the last one) and the "default becomes true" text in the flag help;
+- [ ] turn this section of the draft `MIGRATION.md` into the real one, and add the CHANGELOG `Changed` line and fix the README;
+- [ ] change the tests that assert the unset default in `pinned_defaults_test.go` to the new default.
+
 **Today:** `DurableWills` is off. Turning it on by default is a behaviour change for every deployment that does not
 set it: the broker would create a bucket, need JetStream where it ran without, hold Will payloads in clear text on
 NATS, and delay the Will of a broker that really died by the survivors' wait (about 5 times `WillCheckInterval`).
@@ -101,7 +112,7 @@ needs the session bucket's NATS permissions; README, "Durable Will Messages").
 
 **Why it waits:** the flip is a major-version change (or a minor one behind an opt-in the deployment sets), not a pass's
 work. **Shape:** at the next major version make it default whenever JetStream is in use and the offline queue or
-sessions already need it, with a CHANGELOG entry that says so and `DisableDurableWills` to opt out (additive today).
+sessions already need it, with a CHANGELOG entry that says so; `PinDurableWills` is the opt-out (v0.14.0).
 
 ## DurablePublish does not cover live delivery to subscribers on other brokers
 
@@ -194,12 +205,23 @@ A shared subscription ends when its last session does (`sharedmembers.go`). What
 
 **Blocked by:** a major version (and a `MIGRATION.md` written in that release).
 
+**Done (v0.14.0, additive):** `Options.PinRestrictDollarTopics` pins the choice either way (`-restrict-dollar-topics[=false]`); relying on the implicit
+default is deprecated in the option's doc, the README, the CHANGELOG and the draft `MIGRATION.md`; one INFO line per
+process names the unpinned options. Defaults are unchanged; `pinned_defaults_test.go` proves both settings and the
+unchanged default. **Remaining, in the next major version only:**
+
+- [ ] flip the default: `RestrictDollarTopics` on, and delete the once-per-broker `warnDollarUse` log in `dollar.go` with its test;
+- [ ] delete the "Deprecation notice" paragraph on `Options.RestrictDollarTopics`, its entry in `noteComingDefaults`
+  (`flipnotice.go`; delete the file with the last one) and the "default becomes true" text in the flag help;
+- [ ] turn this section of the draft `MIGRATION.md` into the real one, and add the CHANGELOG `Changed` line and fix the README;
+- [ ] change the tests that assert the unset default in `pinned_defaults_test.go` to the new default.
+
 `Options.RestrictDollarTopics` (opt in) refuses every `$` topic but
 `$share/...`, which is the spec's advice (MQTT-5.0 §4.7.2). Defaulting it on breaks anyone using
 `$app/...`, so it waits for the next major version. The release that logs a warning the first time a client uses a
 `$` topic is done (2026-10-30; once per broker, naming the client, the action and the topic), so what remains is
 the flip itself, with a `MIGRATION.md` written in that release: nothing in this roadmap plans a major version, so
-none is drafted now. Also still open:
+none is drafted now (a draft is `MIGRATION.md`, v0.14.0). Also still open:
 
 - A session held in a restricted broker's memory cannot hold a `$` filter, so the resume branch that drops one is
   untested by construction. (The in-flight messages such a filter earned are withdrawn on resume, and a test drives
@@ -227,6 +249,17 @@ interval of 0 still survives a fraction of a second. Neither limits a deployment
 ## Outbound topic aliases: on by default, and measured
 
 **Blocked by:** a major version for the default, and real deployments for how clients in the field handle aliases.
+
+**Done (v0.14.0, additive):** `Options.PinOutboundTopicAliases` pins the choice either way (`-outbound-topic-aliases[=false]`); relying on the implicit
+default is deprecated in the option's doc, the README, the CHANGELOG and the draft `MIGRATION.md`; one INFO line per
+process names the unpinned options. Defaults are unchanged; `pinned_defaults_test.go` proves both settings and the
+unchanged default. **Remaining, in the next major version only:**
+
+- [ ] flip the default: `OutboundTopicAliases` on, deciding first the two measured findings below (a floor on the client's maximum, or admit on the second sighting);
+- [ ] delete the "Deprecation notice" paragraph on `Options.OutboundTopicAliases`, its entry in `noteComingDefaults`
+  (`flipnotice.go`; delete the file with the last one) and the "default becomes true" text in the flag help;
+- [ ] turn this section of the draft `MIGRATION.md` into the real one, and add the CHANGELOG `Changed` line and fix the README;
+- [ ] change the tests that assert the unset default in `pinned_defaults_test.go` to the new default.
 
 **Today:** `Options.OutboundTopicAliases` ships off (2026-10-23): a client that offers a Topic Alias Maximum is sent
 aliases when it is on. **Left:** the decision to default it on (a behaviour change for clients that advertise a

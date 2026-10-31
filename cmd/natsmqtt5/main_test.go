@@ -250,6 +250,46 @@ func TestReconnectCatchUpFlag(t *testing.T) {
 	assert.False(t, cfg.broker.ReconnectCatchUp, "off unless asked for")
 }
 
+// The three defaults that flip in the next major version (MIGRATION.md): a flag or its
+// environment variable, given either way, pins the option; left out, it pins nothing.
+func TestFlippingDefaultsCanBePinnedEitherWay(t *testing.T) {
+	for _, tc := range []struct {
+		flag string
+		pin  func(*config) *bool
+	}{
+		{"durable-wills", func(c *config) *bool { return c.broker.PinDurableWills }},
+		{"restrict-dollar-topics", func(c *config) *bool { return c.broker.PinRestrictDollarTopics }},
+		{"outbound-topic-aliases", func(c *config) *bool { return c.broker.PinOutboundTopicAliases }},
+	} {
+		t.Run(tc.flag, func(t *testing.T) {
+			cfg, err := parseConfig(nil, env(nil), io.Discard)
+			require.NoError(t, err)
+			assert.Nil(t, tc.pin(cfg), "not given: nothing pinned, the default applies")
+
+			cfg, err = parseConfig([]string{"-" + tc.flag}, env(nil), io.Discard)
+			require.NoError(t, err)
+			require.NotNil(t, tc.pin(cfg))
+			assert.True(t, *tc.pin(cfg))
+
+			cfg, err = parseConfig([]string{"-" + tc.flag + "=false"}, env(nil), io.Discard)
+			require.NoError(t, err)
+			require.NotNil(t, tc.pin(cfg))
+			assert.False(t, *tc.pin(cfg))
+
+			cfg, err = parseConfig(nil, env(map[string]string{envName(tc.flag): "false"}), io.Discard)
+			require.NoError(t, err)
+			require.NotNil(t, tc.pin(cfg))
+			assert.False(t, *tc.pin(cfg), "the environment pins too")
+		})
+	}
+}
+
+func TestOutboundTopicAliasesFlagSetsTheOption(t *testing.T) {
+	cfg, err := parseConfig([]string{"-outbound-topic-aliases"}, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.OutboundTopicAliases)
+}
+
 func TestRestrictDollarTopicsFlag(t *testing.T) {
 	cfg, err := parseConfig([]string{"-restrict-dollar-topics"}, env(nil), io.Discard)
 	require.NoError(t, err)

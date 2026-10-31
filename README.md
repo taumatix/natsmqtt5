@@ -588,6 +588,21 @@ outlasted that and the time the owner takes to notice (about 5 times
 only after its client's connection is closed [MQTT-3.1.2-8]. The price is that
 the Will of a broker that really died waits that long longer than it did.
 
+## Deprecated: three defaults that flip in the next major version
+
+Three behaviours are off by default today and will be on by default in the next major version.
+Nothing changes in v0.x; each can be pinned now, either way, with an option that beats the plain
+one. [MIGRATION.md](MIGRATION.md) (a draft) says per flip what changes, who is affected and the
+one setting that keeps the old behaviour.
+
+| Behaviour | Pin it with | Binary |
+|---|---|---|
+| Durable Wills | `Options.PinDurableWills` | `-durable-wills[=false]` |
+| Restricting `$` topics | `Options.PinRestrictDollarTopics` | `-restrict-dollar-topics[=false]` |
+| Outbound topic aliases | `Options.PinOutboundTopicAliases` | `-outbound-topic-aliases[=false]` |
+
+A broker with any of the three neither pinned nor on logs one INFO line per process naming them.
+
 ## What it does not do
 
 Stated plainly, because a broker you cannot trust the limits of is worse than
