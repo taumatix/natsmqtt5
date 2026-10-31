@@ -196,10 +196,16 @@ type Options struct {
 	// clients' Wills wait to be noticed. Defaults to 5 seconds.
 	//
 	// It also sets the patience of a broker that loses NATS: one that cannot
-	// reach it for twice this interval closes its client connections, and a
-	// survivor waits about 4.5 intervals (plus the liveness ping timeout) before
-	// adopting a silent broker's Wills, so a Will is never published while its
-	// client's connection is open.
+	// have a write to the Will bucket accepted for twice this interval closes
+	// its client connections, and a survivor waits about 4.5 intervals (plus the
+	// liveness ping timeout) before adopting a silent broker's Wills, so a Will
+	// is never published while its client's connection is open. A write needs a
+	// majority of the bucket's servers, so a broker whose NATS server is cut off
+	// from the rest of its cluster fences itself even though that server still
+	// answers it. On a cluster, keep twice this interval above the time NATS
+	// takes to elect a new leader for the bucket (it starts an election 4 to 9
+	// seconds after the leader goes quiet): a shorter wait makes every broker
+	// close its clients whenever the bucket's leader is lost.
 	WillCheckInterval time.Duration
 
 	// OfflineQueue requires the offline queue, so a broker that cannot set it

@@ -598,9 +598,19 @@ func (w *willStore) reachable(ctx context.Context) bool {
 	if _, err := w.nc.RequestWithContext(ctx, brokerPingSubject(w.subjectPrefix, w.owner), nil); err != nil {
 		return false
 	}
-	_, err := w.kv.Get(ctx, "fence-probe")
-	return err == nil || errors.Is(err, jetstream.ErrKeyNotFound)
+	// A write, not a read. Every replica of the bucket answers a read, so a broker whose NATS
+	// server was cut off from the rest of its cluster went on reading its own server's copy, never
+	// fenced, and kept a client connected while a survivor published that client's Will
+	// [MQTT-3.1.2-8]. A write is acknowledged only once a majority of the bucket's servers holds it,
+	// which is the same majority a survivor needs to adopt the Will. The key has no dot, so it is
+	// never a record's (willKeyPrefix), and its empty value is skipped by the index and the listing.
+	_, err := w.kv.Put(ctx, fenceProbeKey, nil)
+	return err == nil
 }
+
+// fenceProbeKey is the key reachable writes. Every broker writes the same one, and the bucket
+// keeps one revision of a key, so the probes take one message whatever the number of brokers.
+const fenceProbeKey = "fence-probe"
 
 // adoptOrphans claims every Will whose owner no longer answers a liveness
 // request. The claim is a compare-and-swap that names this broker as owner, so

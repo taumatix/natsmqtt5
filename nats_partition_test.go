@@ -113,9 +113,13 @@ func (p *partitionProxy) close() {
 	p.mu.Unlock()
 }
 
-// closedAt reports, on the returned channel, when the client's socket ends.
+// closedAt reports, on the returned channel, when the client's socket ends. The read deadline
+// connect left is cleared first: io.Copy ends on any read error, so the deadline expiring five
+// seconds after CONNACK read as the broker closing the connection, and every [MQTT-3.1.2-8]
+// assertion made with this channel passed whatever the broker did.
 func (c *rawClient) closedAt() <-chan time.Time {
 	ch := make(chan time.Time, 1)
+	require.NoError(c.t, c.nc.SetReadDeadline(time.Time{}))
 	go func() {
 		_, _ = io.Copy(io.Discard, c.nc)
 		ch <- time.Now()
