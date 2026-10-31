@@ -401,22 +401,6 @@ fails because JetStream is not answering yet is left to the next sweep.
 **Left:** a reconnect the broker's NATS client did not notice (a partition shorter than its ping interval) triggers
 nothing, and a stale entry it leaves is served until a count disagrees.
 
-## The weekly scans fail where no pass reads them
-
-**Blocked by:** nothing in this repository. The remaining work is in the host (`check-repo-health.py` counting the
-`Vulnerability scan` schedule run), outside this repo.
-
-**Done:** CI runs `staticcheck` and `golangci-lint` (errcheck, gosec; both pinned, config in `.golangci.yml`) beside
-`go vet`; every finding was fixed or carries a one-line reason, and `CONTRIBUTING.md` ("Scheduled runs nobody is
-watching") says what the maintenance pass reads: the latest `schedule` run of `Vulnerability scan` through
-`/actions/runs?event=schedule`. A workflow cannot open an issue on failure with the `contents: read` it has, and a token
-with `issues: write` is a permission change, so there is no in-repo alert.
-
-**Today:** the weekly `Vulnerability scan` run is the only thing that fails when a vulnerability is published against
-unchanged code, and nothing routes a failed scheduled run to a pass; the maintenance pass should read it, and
-`check-repo-health.py` counts only the `CI` workflow (the same gap as `claude-agent-sdk-go`'s `Upstream surface`). A push
-that is red because of a standard-library finding is also not this module's to fix: it clears when the runner's Go does.
-
 ## Offline queue for messages published by plain NATS clients
 
 **Blocked by:** a cross-broker design (a decision against the membership bucket with a revision check).
