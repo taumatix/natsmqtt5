@@ -381,7 +381,10 @@ reconnect before the CONNACK, which is a design of its own.
 
 ## A default queue that failed at startup: a duplicate across brokers
 
-**Blocked by:** nothing; a pass can take it.
+**Blocked by:** a decision: closing the last window needs group consumers created by start sequence, and a broker of
+an earlier version updates the consumer with `DeliverNew`, which JetStream refuses to change on an existing consumer, so
+a mixed-version fleet would fail its shared SUBSCRIBEs. No deployment is known to run a fleet with the queue down on one
+broker only.
 
 **Done (2026-10-11):** the broker retries a default queue it could not create, with a doubling wait from 5 s to a
 minute, logs at info when it comes up, and `Broker.OfflineQueueActive` says whether it is on.
@@ -397,13 +400,16 @@ resubscribe and would drop the state that is there, to report a loss it could no
 membership entry and its group's backlog consumer (`Broker.giveBacklogs`, and the refresh for one a SUBSCRIBE made
 just as the queue came up), and its connection pulls from it. `TestASharedSubscriptionMadeWhileTheQueueWasOffKeepsItsShareWhileAway`
 publishes to the group while that member is away and sees the message wait for it; before, it was lost.
-**Left:** the backlog given late starts at the queue's last sequence once the consumer exists, and the live copy of a
-queued message at or below it is still delivered, as it was before. When the group's consumer already existed (other
-members, subscribed through another broker whose queue was up), such a message is in the backlog too and can reach the
-group twice, once live and once pulled: QoS 1 allows it, a shared QoS 2 grant (`SharedQoS2`) does not [MQTT-4.3.3-2].
-That was so for the whole outage before this change; what is left is the messages stored before the consumer was given.
-Closing it needs the consumer's own start sequence (JetStream does not report it for `DeliverNew`), or group consumers
-created by start sequence. No deployment is known to run a fleet with the queue down on one broker only.
+**Done (2026-10-31):** the backlog given late skips the live copy of every message above the group consumer's
+acknowledgement floor as it was given, not above the queue's last sequence. A consumer that members on another broker
+had made holds every message stored since; their live copies, reaching this broker after the backlog was given, were
+delivered too, so the group got them twice, which a shared QoS 2 grant (`SharedQoS2`) forbids [MQTT-4.3.3-2]
+(`TestALateBacklogSkipsTheLiveCopyOfAMessageTheGroupsConsumerAlreadyHeld_MQTT_4_3_3_2`; before, about half of ten held
+messages came twice). JetStream starts a new consumer's floor one below its first sequence, so a message stored before
+the consumer is still delivered live (`TestALateBacklogStillDeliversTheLiveCopyOfAMessageStoredBeforeItsConsumer_MQTT_4_5_0_1_MQTT_4_3_3_2`).
+**Left:** a message the group acknowledged from the backlog before its live copy reached this broker is below the floor
+and still delivered live, so it reaches the group twice. That needs a live copy slower than a member's whole
+PUBLISH-to-acknowledgement exchange, and only in the moment the backlog is given.
 
 ## Without the queue, a client that falls behind still loses QoS 1 and 2
 
