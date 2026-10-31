@@ -238,3 +238,15 @@ func TestTheSweepExpiresAtTheCappedIntervalNotTheRequestedOne_MQTT_3_1_2_23(t *t
 func TestTheSessionSweepIntervalDefaultsToAMinute(t *testing.T) {
 	assert.Equal(t, time.Minute, natsmqtt5.DefaultSessionSweepInterval)
 }
+
+// A broker with DisableRetained has no retained store, and the session sweep used to sweep it
+// anyway: the broker crashed with a nil dereference at its first sweep (a minute after start by
+// default), from v0.12.0 on. No statement of the specification is at stake; the broker must still
+// accept a connection after its sweep has run a few times.
+func TestABrokerWithoutRetainedMessagesSurvivesItsSessionSweep(t *testing.T) {
+	addr := startBroker(t, startNATS(t), sweeping, func(o *natsmqtt5.Options) { o.DisableRetained = true })
+	time.Sleep(3 * sweepEvery)
+	c := dialRaw(t, addr)
+	c.connect(rawConnect("no-retain", 0))
+	c.subscribe("no-retain/x", packet.QoS1)
+}

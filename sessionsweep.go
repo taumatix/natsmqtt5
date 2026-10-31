@@ -3,6 +3,8 @@ package natsmqtt5
 import (
 	"context"
 	"time"
+
+	"github.com/nats-io/nats.go"
 )
 
 // DefaultSessionSweepInterval is how often a broker looks for detached sessions
@@ -17,18 +19,33 @@ const DefaultRetainedTombstoneTTL = 24 * time.Hour
 // client disconnected with a non-zero Session Expiry Interval keeps its NATS
 // subscriptions until the client returns; without this, a workload that churns
 // through Client Identifiers grows the broker's subscription set without bound.
+//
+// It also checks the retained view against the stream as soon as the NATS
+// client reconnects, rather than at the next tick: a clear the view's consumer
+// missed while the broker was cut off is served until that check runs.
 func (b *Broker) sweepSessionsLoop(interval time.Duration) {
 	defer b.wg.Done()
 	t := time.NewTicker(interval)
 	defer t.Stop()
+	var reconnected chan nats.Status
+	if b.retain != nil {
+		// A listener, not a reconnect handler: Options.Conn may carry the
+		// application's own handler, which setting one would replace.
+		reconnected = b.nc.StatusChanged(nats.CONNECTED)
+		defer b.nc.RemoveStatusListener(reconnected)
+	}
 	for {
 		select {
 		case <-b.shutdown:
 			return
+		case <-reconnected:
+			b.retain.verifyAfterReconnect(uint64(b.nc.Stats().Reconnects))
 		case <-t.C:
 			b.sweepSessions()
 			b.sweepMembersBounded(interval)
-			b.retain.sweep(uint64(b.nc.Stats().Reconnects))
+			if b.retain != nil {
+				b.retain.sweep(uint64(b.nc.Stats().Reconnects))
+			}
 		}
 	}
 }
