@@ -111,25 +111,6 @@ jobs:
           NATSMQTT5_SLOW_TESTS: '1'
         run: .github/scripts/smoke.sh TestAKilledBrokersHeldSharedMessageIsHeldAgainByTheRestoredSession TestAKilledBrokersHeldSharedMessageRestoredLateIsSeenTwiceNotThrice TestAKilledBrokersHeldSharedQoS2MessageIsHeldAgainByTheRestoredSession_MQTT_4_4_0_1 TestAKilledBrokersQoS2MessagePastPubrecIsNotGivenToTheGroup_MQTT_4_3_3_8
 
-  flake-hunt:
-    # TEMPORARY: repeats TestClusterReplayReadCost to catch its CI-only failure. Removed before merge.
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version: 'stable'
-      - name: Repeat the replay cost cluster test
-        env:
-          NATSMQTT5_CLUSTER_TESTS: '1'
-          NATSMQTT5_CLUSTER_RUNTIME: docker
-        run: set -o pipefail; go test -run '^TestClusterReplayReadCost' -count=8 -v -timeout 28m . 2>&1 | grep -v '^=== RUN'
-
   cluster:
     # The tests that need a three-server NATS cluster (an isolated server, a restart, a long
     # outage) run the servers in containers; natscluster_test.go drives docker here and Apple's
