@@ -576,7 +576,12 @@ one with fewer features:
   does not slow a publisher down, it moves the loss into the NATS client's
   pending buffer (and the server's slow-consumer handling of the broker's one
   connection, which every client shares). Run with the queue on if QoS 1 and 2
-  must not be lost to a slow client.
+  must not be lost to a slow client. `Options.CloseBehindClients`
+  (`-close-behind-clients`, `NATSMQTT5_CLOSE_BEHIND_CLIENTS=true`, off by default)
+  makes the loss visible instead: with no queue, the connection of a client that
+  lost a QoS 1 or 2 message this way is closed with DISCONNECT 0x97 (Quota
+  exceeded), and its session is kept to resume. The message is still lost, and
+  so is anything published while the client is away; the client now knows.
 - **Retransmission on reconnect reaches as far as the broker's memory.** A
   client that reconnects with Clean Start 0 to a broker still holding its
   session is resent the PUBLISH and PUBREL packets that connection left

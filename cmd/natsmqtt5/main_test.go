@@ -170,6 +170,20 @@ func TestDurableWillsFlags(t *testing.T) {
 	assert.False(t, cfg.broker.DurableWills)
 }
 
+func TestCloseBehindClientsFlag(t *testing.T) {
+	cfg, err := parseConfig([]string{"-close-behind-clients"}, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.CloseBehindClients)
+
+	cfg, err = parseConfig(nil, env(map[string]string{"NATSMQTT5_CLOSE_BEHIND_CLIENTS": "true"}), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.CloseBehindClients)
+
+	cfg, err = parseConfig(nil, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.False(t, cfg.broker.CloseBehindClients, "off unless asked for")
+}
+
 func TestDurablePublishFlag(t *testing.T) {
 	cfg, err := parseConfig([]string{"-durable-publish"}, env(nil), io.Discard)
 	require.NoError(t, err)

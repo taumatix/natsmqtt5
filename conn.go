@@ -194,7 +194,8 @@ type conn struct {
 	// been written: nothing may follow it [MQTT-3.14.4-1].
 	disconnectSent bool
 
-	closeOnce sync.Once
+	closeOnce  sync.Once
+	behindOnce sync.Once
 
 	// authMethod is the Authentication Method the CONNECT was accepted with, or
 	// empty when it used none; authIdentity is what the Auther named. reauth and

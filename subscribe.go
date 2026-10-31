@@ -466,8 +466,31 @@ func (c *conn) enqueue(d *delivery) {
 	default:
 		c.logger.Warn("dropping a message: the client is not keeping up",
 			"topic", d.topic, "queue_depth", deliveryQueueDepth)
+		if d.qos > packet.QoS0 && c.broker.opts.CloseBehindClients && c.broker.queue.Load() == nil {
+			c.closeBehind()
+		}
 	}
 }
+
+// closeBehind ends the connection of a client that has lost a QoS 1 or 2 message because it was not
+// keeping up, with no offline queue to catch up from (Options.CloseBehindClients). It does not run on the
+// caller's goroutine: the DISCONNECT waits for the connection's write lock, which the delivery loop holds
+// while it is blocked writing to this very client, so the write deadline is what lets it through. The
+// session is not touched; the client resumes it as after any lost connection.
+func (c *conn) closeBehind() {
+	c.behindOnce.Do(func() {
+		c.logger.Warn("closing a connection whose client is not keeping up; its session is kept",
+			"queue_depth", deliveryQueueDepth)
+		go func() {
+			_ = c.nc.SetWriteDeadline(time.Now().Add(closeBehindGrace))
+			c.shutdown(packet.QuotaExceeded, "the client is not keeping up with the messages sent to it")
+		}()
+	})
+}
+
+// closeBehindGrace is how long the DISCONNECT of a client that is not reading gets before the socket is
+// closed under it.
+const closeBehindGrace = 2 * time.Second
 
 // deliverLoop turns queued messages into PUBLISH packets. It runs on its own
 // goroutine so that the receive-quota wait cannot block control packets such

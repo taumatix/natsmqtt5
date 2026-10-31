@@ -241,6 +241,16 @@ type Options struct {
 	// accepts that a resumed session misses what was published while it was
 	// away. Setting it together with OfflineQueue is an error.
 	DisableOfflineQueue bool
+	// CloseBehindClients disconnects a client that is 2048 messages behind, with DISCONNECT 0x97 (Quota
+	// exceeded), when the broker has no offline queue to catch it up from (DisableOfflineQueue, or no
+	// JetStream) and a QoS 1 or 2 message was about to be dropped. Without it the broker drops the message
+	// and logs it, and the client is not told: the loss of a message the client was owed is invisible to
+	// it. With it the loss is a lost connection, which the client sees, and its session is kept to resume
+	// (SessionExpiryInterval permitting); messages dropped before the close, and those published while it
+	// is away, are still lost, as without a queue they always are. It does not slow the publishers, and it
+	// closes only the connection that fell behind, not the broker's NATS connection. QoS 0 loss never
+	// closes a connection. It does nothing while the offline queue is on, where such a client catches up.
+	CloseBehindClients bool
 	// DurablePublish makes the PUBACK of a QoS 1 PUBLISH and the PUBREC of a QoS 2
 	// one mean that the message is safe, not only that the broker has it. It
 	// implies OfflineQueue (the broker fails to start without the queue) and is
