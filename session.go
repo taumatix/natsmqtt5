@@ -1792,6 +1792,25 @@ func (s *session) restoreWithdrawn(ws []storedWithdrawn) {
 	}
 }
 
+// heldBlobs is the payload keys the session clientID, if this broker holds it,
+// names in memory: its in-flight entries' payloads and the spilled chunks its
+// last record named. The store sweep reads them (sessionStore.held).
+func (b *Broker) heldBlobs(clientID string) ([]string, bool) {
+	s := b.peekSession(clientID)
+	if s == nil {
+		return nil, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keys := append([]string(nil), s.spillKeys...)
+	for _, o := range s.inflight {
+		if o.blobKey != "" {
+			keys = append(keys, o.blobKey)
+		}
+	}
+	return keys, true
+}
+
 // blobsStale reports whether a payload this session keeps in the payload bucket
 // is due to be written again, which a checkpoint does even when nothing else has
 // moved: an unacknowledged message can stay unacknowledged for longer than the

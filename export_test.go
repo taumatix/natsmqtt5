@@ -259,6 +259,10 @@ func SetQueueRetryEvery(t interface {
 	t.Cleanup(func() { queueRetryEvery, queueRetryMax = wasFirst, wasMax })
 }
 
+// SetQueueRetryGate makes the broker's retry of a default queue that failed at
+// start-up ask f first, and wait for its next turn while f says no.
+func SetQueueRetryGate(b *Broker, f func() bool) { b.queueRetryGate.Store(&f) }
+
 // SetStoredDeliveredBound changes how many delivered ids a session record keeps,
 // for the rest of the test, so a test need not deliver thousands of messages.
 func SetStoredDeliveredBound(t interface {

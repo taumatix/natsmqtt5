@@ -25,16 +25,22 @@ func lateQueueBroker(t *testing.T, natsURL string, customise ...func(*natsmqtt5.
 	b, addr, _ = startBrokerHandle(t, natsURL, append([]func(*natsmqtt5.Options){sweeping}, customise...)...)
 	require.False(t, b.OfflineQueueActive(), "the squatter holds the queue's subjects")
 	release = func() {
-		nc, err := nats.Connect(natsURL)
-		require.NoError(t, err)
-		defer nc.Close()
-		js, err := jetstream.New(nc)
-		require.NoError(t, err)
-		require.NoError(t, js.DeleteStream(context.Background(), "SQUATTER"))
+		deleteSquatter(t, natsURL)
 		require.Eventually(t, b.OfflineQueueActive, 10*time.Second, 20*time.Millisecond,
 			"the broker never retried the queue")
 	}
 	return b, addr, release
+}
+
+// deleteSquatter removes the stream squatQueueSubjects made, so the queue can be created.
+func deleteSquatter(t *testing.T, natsURL string) {
+	t.Helper()
+	nc, err := nats.Connect(natsURL)
+	require.NoError(t, err)
+	defer nc.Close()
+	js, err := jetstream.New(nc)
+	require.NoError(t, err)
+	require.NoError(t, js.DeleteStream(context.Background(), "SQUATTER"))
 }
 
 // A member that is holding a message and does not acknowledge it is made to give it up after

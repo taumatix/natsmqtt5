@@ -298,9 +298,9 @@ non-persistent ceiling is 0.09 ms). Killed-broker tests cover the burst (`killed
 about 2 ms on a loaded host. That needs a write that is not waited for, which [MQTT-4.3.3-6] does not
 allow, or a faster store. Not measured with `sync_always` on the NATS server.
 
-## Spilled in-flight entries: an attached owner's unnamed payloads wait for the TTL
+## Spilled in-flight entries: what an acknowledgement still rewrites
 
-**Blocked by:** nothing; a pass can take it.
+**Blocked by:** nothing, though nothing has measured the rewrite as a cost.
 
 **Done (2026-10-30):** a checkpoint names a chunk whose content did not change without writing it
 (`spillRecordReusing`; a message appended writes the last chunk only, 1 of 10 in the test), until
@@ -310,24 +310,32 @@ its payloads near the bucket's TTL, when all are rewritten. The sweep deletes th
 an entry whose identifier is a multiple of it, or when size cuts it), so an acknowledgement at the front or a message
 appended changes the chunk it touches and no other (`TestSpillAnAcknowledgementAtTheFrontWritesFewChunks`). The layout
 is still an ordered list of chunk keys, which an older broker reads as before.
+**Done (2026-10-31):** the sweep judges the payloads of a session attached to the broker running it by what that
+broker holds in memory as well as by the record, so a payload under the owner that neither names is deleted once
+older than the grace period instead of waiting for the bucket's TTL
+(`TestTheSweepDeletesAnAttachedSessionsUnnamedPayloadAndKeepsTheOneItHolds_MQTT_4_4_0_1`). A session attached to
+another broker is left to that broker's sweep.
 **Left:** an acknowledgement still re-cuts the first spilled chunk (where the inline part ends), and a chunk cut by
 size rather than by identifier shifts as before; identifiers that do not cycle in send order (a client that acknowledges
-out of order leaves gaps) make the chunks uneven, not wrong. The sweep still leaves an attached owner's unnamed payloads to the TTL: its
-record can be a step behind what the broker holds (a claimed record names nothing until the first
-checkpoint), so judging them needs the record's age and the broker's own liveness.
+out of order leaves gaps) make the chunks uneven, not wrong. A session attached to a broker that died has its unnamed payloads judged only once
+its record is reclaimed, or they age out.
 
 ## Retained view: a stale entry that cancels an unseen one
 
-**Blocked by:** nothing for the window up to the next sweep; a partition shorter than the NATS client's ping interval
-is not detectable from the broker (*real deployments*).
+**Blocked by:** *real deployments*: what is left is a partition shorter than the NATS client's ping interval, which the
+broker cannot detect.
 
 **Done:** a broker cut off past `RetainedTombstoneTTL` no longer serves a retained message another broker cleared
 (the sweep compares the view with the stream's count; the purge treats error 10043 as already purged), and after a NATS
-reconnect the sweep checks every entry of the view against the stream whatever the counts say (2026-10-31,
-`TestARetainedViewIsVerifiedAfterANATSReconnectEvenWhenTheCountsAgree`). One lookup per entry per reconnect.
+reconnect every entry of the view is checked against the stream whatever the counts say
+(`TestARetainedViewIsVerifiedAfterANATSReconnectEvenWhenTheCountsAgree`). One lookup per entry per reconnect.
+**Done (2026-10-31):** that check runs when the NATS client reports the reconnect (a status listener, so an
+application's own reconnect handler on `Options.Conn` is untouched), not at the next sweep up to
+`SessionSweepInterval` later (`TestARetainedViewIsVerifiedAsSoonAsTheNATSClientReconnects_MQTT_3_3_1_6`). A check that
+fails because JetStream is not answering yet is left to the next sweep.
 
-**Left:** a stale entry is still served until the next sweep after the reconnect (up to `SessionSweepInterval`), and a
-reconnect the broker's NATS client did not notice (a partition shorter than its ping interval) triggers nothing.
+**Left:** a reconnect the broker's NATS client did not notice (a partition shorter than its ping interval) triggers
+nothing, and a stale entry it leaves is served until a count disagrees.
 
 ## The weekly scans fail where no pass reads them
 
@@ -365,7 +373,10 @@ reconnect before the CONNACK, which is a design of its own.
 
 ## A default queue that failed at startup: a duplicate across brokers
 
-**Blocked by:** nothing; a pass can take it.
+**Blocked by:** a decision: closing the last window needs group consumers created by start sequence, and a broker of
+an earlier version updates the consumer with `DeliverNew`, which JetStream refuses to change on an existing consumer, so
+a mixed-version fleet would fail its shared SUBSCRIBEs. No deployment is known to run a fleet with the queue down on one
+broker only.
 
 **Done (2026-10-11):** the broker retries a default queue it could not create, with a doubling wait from 5 s to a
 minute, logs at info when it comes up, and `Broker.OfflineQueueActive` says whether it is on.
@@ -381,13 +392,16 @@ resubscribe and would drop the state that is there, to report a loss it could no
 membership entry and its group's backlog consumer (`Broker.giveBacklogs`, and the refresh for one a SUBSCRIBE made
 just as the queue came up), and its connection pulls from it. `TestASharedSubscriptionMadeWhileTheQueueWasOffKeepsItsShareWhileAway`
 publishes to the group while that member is away and sees the message wait for it; before, it was lost.
-**Left:** the backlog given late starts at the queue's last sequence once the consumer exists, and the live copy of a
-queued message at or below it is still delivered, as it was before. When the group's consumer already existed (other
-members, subscribed through another broker whose queue was up), such a message is in the backlog too and can reach the
-group twice, once live and once pulled: QoS 1 allows it, a shared QoS 2 grant (`SharedQoS2`) does not [MQTT-4.3.3-2].
-That was so for the whole outage before this change; what is left is the messages stored before the consumer was given.
-Closing it needs the consumer's own start sequence (JetStream does not report it for `DeliverNew`), or group consumers
-created by start sequence. No deployment is known to run a fleet with the queue down on one broker only.
+**Done (2026-10-31):** the backlog given late skips the live copy of every message above the group consumer's
+acknowledgement floor as it was given, not above the queue's last sequence. A consumer that members on another broker
+had made holds every message stored since; their live copies, reaching this broker after the backlog was given, were
+delivered too, so the group got them twice, which a shared QoS 2 grant (`SharedQoS2`) forbids [MQTT-4.3.3-2]
+(`TestALateBacklogSkipsTheLiveCopyOfAMessageTheGroupsConsumerAlreadyHeld_MQTT_4_3_3_2`; before, about half of ten held
+messages came twice). JetStream starts a new consumer's floor one below its first sequence, so a message stored before
+the consumer is still delivered live (`TestALateBacklogStillDeliversTheLiveCopyOfAMessageStoredBeforeItsConsumer_MQTT_4_5_0_1_MQTT_4_3_3_2`).
+**Left:** a message the group acknowledged from the backlog before its live copy reached this broker is below the floor
+and still delivered live, so it reaches the group twice. That needs a live copy slower than a member's whole
+PUBLISH-to-acknowledgement exchange, and only in the moment the backlog is given.
 
 ## Without the queue, a client that falls behind still loses QoS 1 and 2
 

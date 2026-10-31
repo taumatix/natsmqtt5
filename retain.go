@@ -371,6 +371,16 @@ func (s *retainedStore) sweep(reconnects uint64) {
 	}
 }
 
+// verifyAfterReconnect checks every entry of the view against the stream when
+// reconnects, the NATS client's reconnect count, has moved since the last full
+// check. A check that fails (JetStream not answering yet) is left to the next
+// sweep, which sees the same count.
+func (s *retainedStore) verifyAfterReconnect(reconnects uint64) {
+	if reconnects != s.verifiedAt && s.reconcile(true) {
+		s.verifiedAt = reconnects
+	}
+}
+
 // reconcile drops what this broker still holds although the stream no longer does. The
 // consumer resumes after the last message it saw, so a clear whose tombstone was purged
 // while the broker was cut off from NATS never reaches it; the stream holds one message

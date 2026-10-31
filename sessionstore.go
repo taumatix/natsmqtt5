@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -327,6 +328,11 @@ type sessionStore struct {
 
 	// onLost is called when a record this broker owns is claimed elsewhere.
 	onLost func(clientID string, revision uint64)
+	// held, once the broker sets it, returns the payload keys a session this
+	// broker holds in memory names, and whether it holds the session. The sweep
+	// judges the payloads of a session attached here by it as well as by the
+	// record, which can be a step behind.
+	held atomic.Pointer[func(clientID string) ([]string, bool)]
 
 	stop context.CancelFunc
 }
@@ -1065,6 +1071,10 @@ func (s *sessionStore) sweep(ctx context.Context) error {
 	}
 
 	kept := newBlobClaims()
+	var held func(string) ([]string, bool)
+	if f := s.held.Load(); f != nil {
+		held = *f
+	}
 	complete := true
 	for _, key := range keys {
 		if ctx.Err() != nil {
@@ -1093,6 +1103,11 @@ func (s *sessionStore) sweep(ctx context.Context) error {
 		}
 		if !s.reclaimable(ctx, rec, entry) {
 			kept.add(rec)
+			if rec.Attached && rec.Owner == s.owner && held != nil {
+				if keys, ok := held(rec.ClientID); ok {
+					kept.addHeld(rec, keys)
+				}
+			}
 			continue
 		}
 		if err := s.kv.Delete(ctx, key, jetstream.LastRevision(entry.Revision())); err == nil {
@@ -1152,12 +1167,26 @@ func (c *blobClaims) add(rec *sessionRecord) {
 	}
 }
 
+// addHeld makes the claim of rec, a record attached to this broker, exact: the
+// keys the broker's session in memory names join those the record names, and a
+// payload under the owner that neither names is an orphan. A payload written
+// for a record not yet stored is named by neither; the grace period keeps it,
+// as it keeps any payload too young to judge.
+func (c *blobClaims) addHeld(rec *sessionRecord, keys []string) {
+	for _, k := range keys {
+		c.keys[k] = true
+	}
+	c.exact[blobOwner(rec.ClientID)] = true
+}
+
 // sweepBlobs deletes payloads no session record can still need: those under an
 // owner that has no record (a session discarded before the payload was written,
 // or whose cleanup was lost), and keys from before keys named an owner that no
-// record names. Payloads of an owner whose session is attached stay to the
-// bucket's TTL, since its record may be a step behind what the broker holds; for
-// an owner whose record was released, only the keys that record names stay.
+// record names. Payloads of an owner whose session is attached to another broker
+// stay to the bucket's TTL, since its record may be a step behind what that
+// broker holds (its own sweep judges them); for an owner whose record was
+// released, or is attached here, only the keys the record names, and those this
+// broker holds for it, stay.
 func (s *sessionStore) sweepBlobs(ctx context.Context, kept *blobClaims) error {
 	kv, err := s.blobBucket(ctx, false)
 	if err != nil {

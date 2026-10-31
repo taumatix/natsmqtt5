@@ -48,6 +48,9 @@ func (b *Broker) retryQueueLoop(r *resolved) {
 			return
 		case <-time.After(wait):
 		}
+		if f := b.queueRetryGate.Load(); f != nil && !(*f)() {
+			continue
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), natsFlushTimeout)
 		q, err := newOfflineQueue(ctx, b.js, r)
 		cancel()
@@ -90,11 +93,19 @@ func (b *Broker) giveBacklogs(q *offlineQueue) {
 }
 
 // giveBacklog makes s, which holds the shared subscription sub, a member of its
-// group with a backlog. The backlog starts at the queue's last sequence read
-// once the consumer exists: a queued message above it is in the backlog, so its
-// live copy is skipped as it is for any member; one at or below it was stored
-// before and may not be, so its live copy is still delivered, which is what the
-// subscription did until now. A failure is left to the next refresh.
+// group with a backlog. The live copy of a queued message above the consumer's
+// acknowledgement floor, as the consumer was when it was given, is skipped, as
+// it is for any member: the message is in the backlog, or was delivered to the
+// group from it. JetStream starts a new consumer's floor one below its first
+// sequence and only raises it past acknowledged messages, so a message at or
+// below the floor was stored before the consumer (its live copy is delivered,
+// which is what the subscription did until now) or was already acknowledged by
+// the group. The second kind is still sent twice when its live copy reaches
+// this broker after the group acknowledged it, which takes a live copy slower
+// than a member's acknowledgement. The queue's last sequence used to be the
+// bound, and a consumer that other members made earlier holds every message
+// stored since, which were all sent twice when their live copies came after.
+// A failure is left to the next refresh.
 func (b *Broker) giveBacklog(q *offlineQueue, s *session, sub *subscription) {
 	if !sub.live.Load() {
 		return
@@ -108,6 +119,9 @@ func (b *Broker) giveBacklog(q *offlineQueue, s *session, sub *subscription) {
 		return
 	}
 	above, err := q.lastSeq(ctx)
+	if info := cons.CachedInfo(); info != nil {
+		above = min(above, info.AckFloor.Stream)
+	}
 	switch {
 	case err != nil:
 		b.logger.Debug("could not give a shared subscription made while the queue was off its backlog",
