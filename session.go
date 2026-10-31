@@ -1495,9 +1495,14 @@ func (s *session) noteDelivered(id string, seq uint64) (scan bool) {
 			s.dropCursorLocked()
 		}
 	}
-	if !s.cur.scanning && int64(s.cur.above) >= cursorScanAfter.Load() && (s.cur.next != 0 || s.cur.pin == 0) {
-		s.cur.scanning = true
-		return true
+	if int64(s.cur.above) >= cursorScanAfter.Load() && (s.cur.next != 0 || s.cur.pin == 0) {
+		if !s.cur.scanning {
+			s.cur.scanning = true
+			return true
+		}
+		// The scan running may have read past this delivery or not, and may
+		// end without moving the cursor: it runs once more (scanCursor).
+		s.cur.asked = true
 	}
 	return false
 }

@@ -3,6 +3,7 @@ package natsmqtt5_test
 import (
 	"context"
 	"errors"
+	"math"
 	"net"
 	"strconv"
 	"testing"
@@ -478,11 +479,18 @@ func TestACursorDroppedWhileConnectedRestartsAndReplaysTheHole_MQTT_4_4_0_1_MQTT
 // start at, with whatever lies between it and the base, which the restart did
 // not read: the copy is delivered and the cursor goes, so the session falls
 // back to the rewind rather than skip what that would send [MQTT-4.4.0-1].
+//
+// The delivery of the copy counts towards the next restart, which, with a scan
+// after every delivery, can start the cursor again before the test looks: once
+// the copy is sent the rewind no longer starts at it, so that restart is sound.
+// Restarts are held off after the first so the drop stays to be seen (seen on
+// macOS CI as "the cursor goes" never satisfied).
 func TestALiveCopyBelowARestartedCursorsBaseDropsIt_MQTT_4_4_0_1(t *testing.T) {
 	natsmqtt5.SetCursorScanAfter(t, 1)
 	natsURL := startNATS(t)
 	r := newCursorRig(t, natsURL, "cur-restart-below", packet.QoS1)
 	gone := restartAfterADrop(t, r)
+	natsmqtt5.SetCursorScanAfter(t, math.MaxInt32)
 
 	publishLate(t, natsURL, gone)
 	completeOne(t, r.sub, "gone")
