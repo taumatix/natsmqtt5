@@ -390,23 +390,6 @@ messages that today are at worst dropped for an absent client. Doing it safely n
 decision to be made against the bucket with a revision check and a re-subscribe on the
 reconnect before the CONNACK, which is a design of its own.
 
-## A frozen NATS server still costs a connection one deadline per payload it stores
-
-**Blocked by:** nothing; a pass can add the test (a broker without the queue and entries larger than the record allows).
-
-**Done (2026-10-30):** audited every JetStream and NATS call the delivery goroutine and the connection's end make.
-Each has a deadline (`sessionOpTimeout`, `natsFlushTimeout`) except the stream reads (`streamContext`,
-`catchup.go`), which go at the client's pace on purpose and are cancelled by `c.done`, which `finish` closes before it
-waits. What was unbounded was the total: `stashBlobs`, `reapBlobs` and `commitSpill` took `sessionOpTimeout` per
-payload, so a connection holding many in-flight payloads waited that many times 5 s on a NATS server that answered
-nothing. They now share one `sessionOpTimeout`; past it the rest fail at once and are counted as unrecorded, as a failed
-store always was. `TestClusterAConnectionWithManyUnacknowledgedMessagesStillEndsWhenItsNATSServerFreezes` freezes the
-broker's server with eight 200 KiB unacknowledged messages and shows the broker ends within 40 s.
-
-**Left:** that test passes on the old code too (about 9 s either way): with the default queue the in-flight entries
-name queue copies and nothing is stashed, so it covers the end of a connection on a frozen server, not the aggregate
-bound. A test that stashes many payloads needs a broker without the queue and entries larger than the record allows.
-
 ## A default queue that failed at startup: shared subscriptions made before it came up
 
 **Blocked by:** nothing; a pass can take it.
