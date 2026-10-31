@@ -63,7 +63,11 @@ type offlineQueue struct {
 	// emptyFetches makes that many of the next replay fetches come back empty,
 	// as a loaded server's can. A seam for tests.
 	emptyFetches atomic.Int64
-	prefix       string
+	// unansweredFetches makes that many of the next replay fetches fail with
+	// no responders, as a pull to a consumer just made on another server of a
+	// cluster can. A seam for tests.
+	unansweredFetches atomic.Int64
+	prefix            string
 	// rewind is Options.OfflineQueueRewind, resolved.
 	rewind time.Duration
 	codec  subjectCodec
@@ -379,7 +383,13 @@ func (q *offlineQueue) replayFrom(ctx context.Context, start jetstream.OrderedCo
 				return last, nil
 			}
 		}
-		if err := batch.Error(); err != nil && !errors.Is(err, nats.ErrTimeout) && !errors.Is(err, jetstream.ErrNoMessages) {
+		// No responders is a fetch that reached no consumer: nats.go makes a new
+		// one for every fetch, a cluster can place it on another server, and a
+		// pull can get to ours before the new consumer's interest has. It is
+		// read again as an empty fetch is (nats.go's own ordered Consume resets
+		// on it); failing the read sent the resume nothing.
+		if err := batch.Error(); err != nil && !errors.Is(err, nats.ErrTimeout) &&
+			!errors.Is(err, jetstream.ErrNoMessages) && !errors.Is(err, nats.ErrNoResponders) {
 			return last, err
 		}
 		if n > 0 {
@@ -424,11 +434,14 @@ func (q *offlineQueue) fetch(cons jetstream.Consumer) (jetstream.MessageBatch, e
 	if q.emptyFetches.Load() > 0 && q.emptyFetches.Add(-1) >= 0 {
 		return emptyBatch{}, nil
 	}
+	if q.unansweredFetches.Load() > 0 && q.unansweredFetches.Add(-1) >= 0 {
+		return emptyBatch{err: nats.ErrNoResponders}, nil
+	}
 	return cons.Fetch(256, jetstream.FetchMaxWait(500*time.Millisecond))
 }
 
-// emptyBatch is a fetch that came back with nothing.
-type emptyBatch struct{}
+// emptyBatch is a fetch that came back with nothing, and err.
+type emptyBatch struct{ err error }
 
 func (emptyBatch) Messages() <-chan jetstream.Msg {
 	ch := make(chan jetstream.Msg)
@@ -436,7 +449,7 @@ func (emptyBatch) Messages() <-chan jetstream.Msg {
 	return ch
 }
 
-func (emptyBatch) Error() error { return nil }
+func (b emptyBatch) Error() error { return b.err }
 
 func newMessageID() string {
 	var b [12]byte
