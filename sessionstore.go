@@ -307,8 +307,10 @@ type sessionStore struct {
 	blobReplicas int
 	blobName     string
 	blobGrace    time.Duration // zero means blobGrace
-	nc           *nats.Conn
-	logger       *slog.Logger
+	// spillChunkIDs is the identifier count a spilled chunk ends at; zero means defaultSpillChunkIDs.
+	spillChunkIDs int
+	nc            *nats.Conn
+	logger        *slog.Logger
 	// maxSessionExpiry is how long a record owned by an unreachable broker is
 	// kept before the sweep may reclaim it.
 	maxSessionExpiry time.Duration
@@ -803,6 +805,10 @@ func trimDelivered(rec *sessionRecord, budget int) int {
 	return len(all) - max(keep, 0)
 }
 
+// defaultSpillChunkIDs is how many identifiers a spilled chunk spans at most before size cuts it: the
+// chunks of a full Receive Maximum (65535) number 64, and one entry's change writes one of them.
+const defaultSpillChunkIDs = 1024
+
 // spillKeyLen is the length of every payload key: an owner, a dot and a digest.
 const spillKeyLen = 32 + 1 + 64
 
@@ -839,11 +845,17 @@ func (s *sessionStore) spillRecordReusing(rec *sessionRecord, limit int, known m
 		sizes[i] = len(raw) + 1
 	}
 	chunkMax := s.blobLimit()
-	// pack divides all[from:] into spans that each fit one value.
+	ids := s.spillChunkIDs
+	if ids <= 0 {
+		ids = defaultSpillChunkIDs
+	}
+	// pack divides all[from:] into spans that each fit one value. A span also ends after an entry whose
+	// identifier is a multiple of ids, so an entry that goes from the front, or one that is appended, leaves
+	// the boundaries of the other chunks where they were and their content (and key) unchanged.
 	pack := func(from int) (spans [][2]int) {
 		used := 2
 		for i := from; i < len(all); i++ {
-			if len(spans) == 0 || used+sizes[i] > chunkMax {
+			if len(spans) == 0 || used+sizes[i] > chunkMax || int(all[i-1].ID)%ids == 0 {
 				spans = append(spans, [2]int{i, i})
 				used = 2
 			}

@@ -304,18 +304,21 @@ non-persistent ceiling is 0.09 ms). Killed-broker tests cover the burst (`killed
 about 2 ms on a loaded host. That needs a write that is not waited for, which [MQTT-4.3.3-6] does not
 allow, or a faster store. Not measured with `sync_always` on the NATS server.
 
-## Spilled in-flight entries: a message acknowledged at the front rewrites every chunk
+## Spilled in-flight entries: an attached owner's unnamed payloads wait for the TTL
 
-**Blocked by:** nothing; a pass can take it (fixed-boundary chunks), though it changes the stored layout, which an older
-broker in a mixed fleet must still read.
+**Blocked by:** nothing; a pass can take it.
 
 **Done (2026-10-30):** a checkpoint names a chunk whose content did not change without writing it
 (`spillRecordReusing`; a message appended writes the last chunk only, 1 of 10 in the test), until
 its payloads near the bucket's TTL, when all are rewritten. The sweep deletes the unnamed payloads
 (and counts the chunks as named) of an owner whose record was released.
-**Left:** chunks are cut by size from the oldest entry, so an acknowledgement at the front shifts every
-boundary and every chunk changes; cutting at boundaries that do not move (a fixed number of identifiers
-per chunk) would fix that. The sweep still leaves an attached owner's unnamed payloads to the TTL: its
+**Done (2026-10-31):** chunks also end at a fixed identifier count (`defaultSpillChunkIDs`, 1024: a chunk ends after
+an entry whose identifier is a multiple of it, or when size cuts it), so an acknowledgement at the front or a message
+appended changes the chunk it touches and no other (`TestSpillAnAcknowledgementAtTheFrontWritesFewChunks`). The layout
+is still an ordered list of chunk keys, which an older broker reads as before.
+**Left:** an acknowledgement still re-cuts the first spilled chunk (where the inline part ends), and a chunk cut by
+size rather than by identifier shifts as before; identifiers that do not cycle in send order (a client that acknowledges
+out of order leaves gaps) make the chunks uneven, not wrong. The sweep still leaves an attached owner's unnamed payloads to the TTL: its
 record can be a step behind what the broker holds (a claimed record names nothing until the first
 checkpoint), so judging them needs the record's age and the broker's own liveness.
 
