@@ -328,8 +328,8 @@ checkpoint), so judging them needs the record's age and the broker's own livenes
 
 **Today:** tests that slept after a connection ended wait on `waitDetached` / `waitDetachedTimes`, and the
 checkpoint-with-a-message-in-flight sleeps poll the stored record (`awaitCheckpointedInflight`). What remains are sleeps
-that wait for something else: the 1 s in `restore_nocopy_test.go` and `oversize_inflight_test.go` that ages a message
-past the checkpoint skew (a clock condition, not an event), 1500 ms for a session's expiry to pass
+that wait for something else: the ageing of a message past the checkpoint skew now waits only for the remainder of the
+stream's own timestamp (`awaitQueuedOlderThanTheCheckpointSkew`, a clock condition with no event), 1500 ms for a session's expiry to pass
 (`spec_integration_test.go`), and the "a session that is only away keeps its payload" check, which is negative by nature.
 `TestSmokeSessionMovesBetweenBrokers` keeps its 200 ms: the back-off of a retry loop against brokers in containers,
 whose logs the test cannot read. Same flake risk; each needs a condition to wait on rather than a drop log.

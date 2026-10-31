@@ -40,7 +40,7 @@ func TestAKilledBrokersOversizeRetainedMessageInFlightIsResent(t *testing.T) {
 	pub.publish(&paho.Publish{Topic: "kb/a", QoS: 1, Retain: true, Payload: big})
 	// Older than the checkpoint's skew, so the successor's replay of the queue
 	// does not also hold this message as one published while the broker died.
-	time.Sleep(time.Second)
+	awaitQueuedOlderThanTheCheckpointSkew(t, natsURL, "kb/a")
 
 	c := dialRaw(t, child.addr)
 	c.connect(rawConnect("killed-big", 300))
@@ -48,7 +48,7 @@ func TestAKilledBrokersOversizeRetainedMessageInFlightIsResent(t *testing.T) {
 	first := c.expectPublish()
 	require.Equal(t, big, first.Payload)
 	require.True(t, first.Retain)
-	time.Sleep(700 * time.Millisecond)
+	awaitCheckpointedInflight(t, natsURL, "killed-big", first.PacketID, false)
 	child.kill9(t)
 
 	back := dialRaw(t, survivor)
@@ -72,7 +72,7 @@ func TestAKilledBrokersOversizeQoS2RetainedMessageInFlightIsResent(t *testing.T)
 	big := bytes.Repeat([]byte("fedcba9876543210"), 100<<6)
 	pub, _ := connectClient(t, survivor, connectOpts("pub-killed-big2"))
 	pub.publish(&paho.Publish{Topic: "kb2/a", QoS: 2, Retain: true, Payload: big})
-	time.Sleep(time.Second)
+	awaitQueuedOlderThanTheCheckpointSkew(t, natsURL, "kb2/a")
 
 	c := dialRaw(t, child.addr)
 	c.connect(rawConnect("killed-big2", 300))

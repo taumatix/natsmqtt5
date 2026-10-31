@@ -3,7 +3,6 @@ package natsmqtt5_test
 import (
 	"bytes"
 	"testing"
-	"time"
 
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/stretchr/testify/assert"
@@ -78,7 +77,7 @@ func TestAKilledBrokersRetainedMessageInFlightIsResent(t *testing.T) {
 	pub.publish(&paho.Publish{Topic: "kr/a", QoS: 1, Retain: true, Payload: []byte("retained")})
 	// Older than the checkpoint's skew, so the successor's replay of the queue does
 	// not also hold this message as one published while the broker was going down.
-	time.Sleep(time.Second)
+	awaitQueuedOlderThanTheCheckpointSkew(t, natsURL, "kr/a")
 
 	c := dialRaw(t, child.addr)
 	c.connect(rawConnect("killed-ret", 300))
