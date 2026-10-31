@@ -143,6 +143,7 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 		persistSess     = fs.Bool("persistent-sessions", false, "keep session state in JetStream, so it survives a restart and moves between brokers")
 		durableWills    = fs.Bool("durable-wills", false, "keep Will Messages in JetStream so the Will of a killed broker is published by a surviving one")
 		willCheck       = fs.Duration("will-check-interval", 0, "how often to look for Wills whose broker has died, with -durable-wills; 0 means 5s")
+		retainVerify    = fs.Duration("retained-verify-interval", 0, "check every retained message against its stream at least this often, to find a stale entry a short NATS partition left behind; 0 turns it off")
 		checkpoint      = fs.Duration("session-checkpoint-interval", 0, "with -persistent-sessions, how often a connected client's replay position is written to its session record, so a broker that is killed costs a client that long of repeats and not the whole queue; 0 means 1s, negative turns it off")
 		offlineQueue    = fs.Bool("offline-queue", false, "require the offline queue, failing to start without it (it is on by default whenever JetStream is used)")
 		closeBehind     = fs.Bool("close-behind-clients", false, "with no offline queue, disconnect (0x97) a client that is 2048 messages behind instead of silently dropping its QoS 1 and 2 messages; its session is kept")
@@ -229,6 +230,7 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 			EscapeNATSWildcards:       *escapeWildcards,
 			WillCheckInterval:         *willCheck,
 			SessionCheckpointInterval: *checkpoint,
+			RetainedVerifyInterval:    *retainVerify,
 			DurablePublish:            *durablePub,
 			DurablePublishDedupe:      *durableDedupe,
 			OfflineQueue:              *offlineQueue,

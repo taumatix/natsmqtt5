@@ -212,6 +212,16 @@ func TestDurablePublishDedupeFlag(t *testing.T) {
 	assert.False(t, cfg.broker.DurablePublishDedupe, "off unless asked for")
 }
 
+func TestRetainedVerifyIntervalFlag(t *testing.T) {
+	cfg, err := parseConfig([]string{"-retained-verify-interval", "10m"}, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.Equal(t, 10*time.Minute, cfg.broker.RetainedVerifyInterval)
+
+	cfg, err = parseConfig(nil, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.Zero(t, cfg.broker.RetainedVerifyInterval, "off unless asked for")
+}
+
 func TestRestrictDollarTopicsFlag(t *testing.T) {
 	cfg, err := parseConfig([]string{"-restrict-dollar-topics"}, env(nil), io.Discard)
 	require.NoError(t, err)

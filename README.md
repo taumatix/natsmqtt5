@@ -623,6 +623,11 @@ one with fewer features:
   publisher running behind, or a forged `Mqtt5-Published-At` header from anything
   that can publish on the subjects, makes a message expire early (a stamp in the
   future counts as no wait). Off by default.
+- **A broker's retained view can briefly serve a message another broker cleared.**
+  It is checked against the stream when the counts disagree and after every NATS
+  reconnect it notices, but a partition shorter than the client's ping interval is
+  neither. `Options.RetainedVerifyInterval` (`-retained-verify-interval`, off by
+  default) also checks every entry on that timer, at one lookup per entry.
 - **A PUBACK does not mean the message reached NATS.** The broker hands the
   message to its NATS connection and acknowledges; the write is flushed
   microseconds later. A broker killed in that window loses a QoS 1 message it

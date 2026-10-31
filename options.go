@@ -125,6 +125,14 @@ type Options struct {
 	// tombstones forever. A broker cut off from NATS for longer than this can
 	// miss a clear and keep the cleared message until it restarts.
 	RetainedTombstoneTTL time.Duration
+	// RetainedVerifyInterval makes the periodic sweep check every entry of the retained
+	// view against the stream at least this often (one lookup per entry), on top of the
+	// count comparison it always makes and the full check after a NATS reconnect. It finds
+	// a stale entry that a partition too short for the NATS client to notice left behind,
+	// which neither of those can see [MQTT-3.3.1-6]. Zero, the default, turns it off. The
+	// sweep runs every SessionSweepInterval, so the check is made at the first sweep after
+	// the interval has passed.
+	RetainedVerifyInterval time.Duration
 	// SharedHoldLimit bounds how long a shared-subscription member may hold a
 	// QoS 1 message without acknowledging it. Past it the message is handed
 	// back to the group, so a member that is connected but never sends PUBACK
