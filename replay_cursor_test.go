@@ -445,13 +445,20 @@ func restartAfterADrop(t *testing.T, r *cursorRig) *nats.Msg {
 		next, _ := natsmqtt5.ReplayCursor(r.b, r.id)
 		return next == 0
 	}, 5*time.Second, 20*time.Millisecond, "a hole past the bound drops the cursor")
-	natsmqtt5.SetMaxReplayHoles(t, 1024)
+	// The bound stays none until the restart is wanted: the delivery of "drops-it"
+	// has a restart scan in flight (a scan after every delivery), which reads from
+	// the rewind, still reaches the withheld message and finds it a hole. With the
+	// bound raised here that scan can land after it and start a cursor that keeps
+	// the hole for good (seen in CI as "a restart scan starts the cursor again"
+	// never satisfied). With none it is refused, and the restart below, from a
+	// rewind that no longer reaches the message, finds no hole whatever the bound.
 	time.Sleep(3 * cursorRewind)
 	r.send("restarts-it")
 	require.Eventually(t, func() bool {
 		next, holes := natsmqtt5.ReplayCursor(r.b, r.id)
 		return next > seqOf(t, gone) && len(holes) == 0
 	}, 5*time.Second, 20*time.Millisecond, "a restart scan starts the cursor again, past the message older than the rewind")
+	natsmqtt5.SetMaxReplayHoles(t, 1024)
 	return gone
 }
 

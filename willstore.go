@@ -709,8 +709,26 @@ func (w *willStore) adopt(ref willRef) {
 	defer cancel()
 	rev, err := w.kv.Update(ctx, l.key, encodeWillRecord(&next), l.rev)
 	if err != nil {
-		// Another broker adopted it first, or the connection's own broker was
-		// only briefly unreachable and has settled it: either way not ours.
+		if isRevisionConflict(err) {
+			// Another broker adopted it first, or the connection's own broker was
+			// only briefly unreachable and has settled it: either way not ours.
+			return
+		}
+		// Not a lost race: the store did not answer (a Raft election, a timeout). The update
+		// may still have been applied, and then this broker owns a record nobody will publish,
+		// since every broker skips its own records when it looks for orphans and the others see
+		// an owner that answers. Look again, and take the record up if it is ours.
+		w.logger.Warn("could not adopt a Will Message; checking whether the adoption was applied",
+			"client_id", next.ClientID, "error", err)
+		cctx, ccancel := context.WithTimeout(context.Background(), willOpTimeout)
+		defer ccancel()
+		cur, ok := w.read(cctx, l.key)
+		if !ok || cur.rec.Owner != w.owner || !cur.rec.Adopted || cur.rev == l.rev {
+			return
+		}
+		w.logger.Info("adopted the Will Message of a broker that is gone",
+			"client_id", cur.rec.ClientID, "due_in", time.Until(cur.rec.DueAt).Round(time.Millisecond))
+		go w.publishWhenDue(cur)
 		return
 	}
 	l.rec, l.rev = next, rev

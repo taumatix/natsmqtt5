@@ -78,17 +78,32 @@ func (c *conn) handleSubscribe(ctx context.Context, p *packet.Subscribe) error {
 		c.broker.persistSession(c)
 	}
 
+	// The retained messages a subscription is owed are the ones stored by now, with its
+	// interest in NATS: a message published after the SUBACK is the subscription's live
+	// copy and must not come again as a retained one [MQTT-3.3.1-6]. They are read
+	// here and sent after the SUBACK, so the client has been told what QoS it was
+	// granted before anything arrives at that QoS.
+	retained := make([][]*delivery, len(granted))
+	for i, sub := range granted {
+		if sub != nil {
+			retained[i] = c.retainedFor(sub, p.Subscriptions[i].RetainHandling, replaced[i])
+		}
+	}
+
 	if err := c.write(&packet.Suback{PacketID: p.PacketID, ReasonCodes: codes}); err != nil {
 		return err
 	}
 
-	// Retained messages go out after the SUBACK so the client has been told
-	// what QoS it was granted before anything arrives at that QoS.
+	if f := c.broker.subackGate.Load(); f != nil {
+		(*f)()
+	}
 	for i, sub := range granted {
 		if sub == nil {
 			continue
 		}
-		c.sendRetained(sub, p.Subscriptions[i].RetainHandling, replaced[i])
+		for _, d := range retained[i] {
+			c.enqueue(d)
+		}
 		c.startPull(sub)
 	}
 	return nil
@@ -779,31 +794,32 @@ func (c *conn) sendPrepared(p *prepared) error {
 	return nil
 }
 
-// sendRetained delivers the retained messages matching a new subscription, as
-// the Retain Handling option directs (MQTT-5.0 §3.3.1.3).
-func (c *conn) sendRetained(sub *subscription, handling packet.RetainHandling, replacedExisting bool) {
+// retainedFor returns the deliveries of the retained messages matching a new
+// subscription, as the Retain Handling option directs (MQTT-5.0 §3.3.1.3).
+func (c *conn) retainedFor(sub *subscription, handling packet.RetainHandling, replacedExisting bool) []*delivery {
 	if c.broker.retain == nil || handling == packet.RetainSendNever {
-		return
+		return nil
 	}
 	// "No Retained Messages are sent to the Session when it first subscribes"
 	// to a shared subscription (MQTT-5.0 §4.8.2).
 	if sub.share != "" {
-		return
+		return nil
 	}
 	// "If Retain Handling is set to 1 then if the subscription did not already
 	// exist, the Server MUST send all retained messages matching the Topic
 	// Filter of the subscription to the Client, and if the subscription did
 	// exist the Server MUST NOT send the retained messages" [MQTT-3.3.1-10].
 	if handling == packet.RetainSendOnNew && replacedExisting {
-		return
+		return nil
 	}
 
+	var out []*delivery
 	for _, r := range c.broker.retain.match(sub.filter) {
 		props := r.properties()
 		if sub.id != 0 {
 			props.SubscriptionIdentifiers = []int{sub.id}
 		}
-		c.enqueue(&delivery{
+		out = append(out, &delivery{
 			sub:     sub,
 			id:      r.id,
 			topic:   r.topicName,
@@ -817,4 +833,5 @@ func (c *conn) sendRetained(sub *subscription, handling packet.RetainHandling, r
 			arrived: r.stored,
 		})
 	}
+	return out
 }
