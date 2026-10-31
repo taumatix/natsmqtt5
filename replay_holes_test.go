@@ -101,3 +101,22 @@ func TestAResumeWhoseFirstReadsComeBackEmptyStillSendsWhatItWasOwed_MQTT_4_4_0_1
 	assert.Equal(t, []string{"owed"}, r.resume(r.addr),
 		"[MQTT-4.4.0-1] the message stored while the session was away is sent on its resume")
 }
+
+// A fetch the NATS server answers with no responders is not a failed read either. Every fetch of an
+// ordered consumer makes a new consumer, which a cluster can place on another server; a pull that
+// reaches the broker's server before the new consumer's interest does is answered 503. Taken for a
+// failure, it ended the resume's read with nothing sent, and the session waited for a message it was
+// owed [MQTT-4.4.0-1] until its next resume (CI's cluster job, one resume in a few hundred).
+// SetUnansweredQueueFetches stands in for the cluster.
+func TestAResumeWhoseFirstReadsGoUnansweredStillSendsWhatItWasOwed_MQTT_4_4_0_1(t *testing.T) {
+	natsURL := startNATS(t)
+	r := newCursorRig(t, natsURL, "cur-no-responders", packet.QoS1)
+	r.send("before")
+	r.sub.drop()
+	waitDetached(t, r.logs, r.id)
+	r.pub.publish(&paho.Publish{Topic: r.topic, QoS: 1, Payload: []byte("owed")})
+
+	natsmqtt5.SetUnansweredQueueFetches(r.b, 2)
+	assert.Equal(t, []string{"owed"}, r.resume(r.addr),
+		"[MQTT-4.4.0-1] the message stored while the session was away is sent on its resume")
+}

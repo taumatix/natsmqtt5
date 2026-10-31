@@ -2,8 +2,10 @@ package natsmqtt5_test
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -45,7 +47,13 @@ func TestReplayReadCost(t *testing.T) {
 // slowest took to receive it.
 func measureReplayRead(t *testing.T, natsURL string, n, sessions int, opts ...func(*natsmqtt5.Options)) time.Duration {
 	t.Helper()
-	_, addr, _ := startBrokerHandle(t, natsURL, append([]func(*natsmqtt5.Options){persistentWithQueue, rewindOf(time.Hour)}, opts...)...)
+	// The broker's log, at debug, is printed for a session that does not get its message: it names
+	// the read its resume made, which a client-side failure cannot tell.
+	var logs syncBuffer
+	debugLog := func(o *natsmqtt5.Options) {
+		o.Logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	}
+	_, addr, _ := startBrokerHandle(t, natsURL, append([]func(*natsmqtt5.Options){persistentWithQueue, rewindOf(time.Hour), debugLog}, opts...)...)
 	for i := 0; i < sessions; i++ {
 		c := dialRaw(t, addr)
 		c.connect(rawConnect(fmt.Sprintf("cost-sub-%d", i), 3600))
@@ -91,7 +99,8 @@ func measureReplayRead(t *testing.T, natsURL string, n, sessions int, opts ...fu
 			for {
 				p, err := packet.Read(back.r, 0)
 				if err != nil {
-					t.Errorf("session %d: %v", i, err)
+					t.Errorf("session %d: %v %s after the resumes began; the broker logged:\n%s",
+						i, err, time.Since(start).Round(time.Millisecond), linesFor(logs.String(), fmt.Sprintf("cost-sub-%d", i)))
 					return
 				}
 				if pub, ok := p.(*packet.Publish); ok && string(pub.Payload) == "owed" {
@@ -107,4 +116,17 @@ func measureReplayRead(t *testing.T, natsURL string, n, sessions int, opts ...fu
 		slowest = max(slowest, d)
 	}
 	return slowest
+}
+
+// linesFor is the lines of log that name clientID, and every line that names no client.
+func linesFor(log, clientID string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(log, "\n") {
+		if strings.Contains(line, "client_id="+clientID+" ") || strings.HasSuffix(line, "client_id="+clientID) ||
+			!strings.Contains(line, "client_id=") {
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
 }

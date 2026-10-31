@@ -11,6 +11,8 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** on a clustered offline queue, a resume could send nothing it was owed and log "replaying the offline queue failed; what it held is lost for this session" with `nats: no responders available for request`. nats.go makes a new consumer for every fetch of a replay, the cluster can place it on another NATS server, and a pull that reached the broker's server before the consumer's interest had was answered 503. The read now fetches again, as it does after an empty fetch, instead of failing. Before, the session got nothing until its next resume (CI's cluster job: about one resume in a few hundred). The broker also logs each resume's queue read at debug.
+
 ## [0.13.0] - 2026-10-31
 
 **[urgent]** v0.12.0 and v0.12.1 crash with a nil pointer dereference at the first session sweep of a broker started with `DisableRetained` (`-no-retained`); upgrade if you use that option. Everything else below is additive: new API (`Options.Auther`, package `scram`, `Options.SharedQoS2`, WebSocket and TLS flags) and fixes, no breaking change.

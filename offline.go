@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strconv"
 	"strings"
@@ -62,7 +63,11 @@ type offlineQueue struct {
 	// emptyFetches makes that many of the next replay fetches come back empty,
 	// as a loaded server's can. A seam for tests.
 	emptyFetches atomic.Int64
-	prefix       string
+	// unansweredFetches makes that many of the next replay fetches fail with
+	// no responders, as a pull to a consumer just made on another server of a
+	// cluster can. A seam for tests.
+	unansweredFetches atomic.Int64
+	prefix            string
 	// rewind is Options.OfflineQueueRewind, resolved.
 	rewind time.Duration
 	codec  subjectCodec
@@ -78,6 +83,7 @@ type offlineQueue struct {
 	// when the bucket could not be made, and then the backlog ends only by the
 	// consumer's inactivity threshold.
 	members *shareMembers
+	logger  *slog.Logger
 }
 
 func newOfflineQueue(ctx context.Context, js jetstream.JetStream, opts *resolved) (*offlineQueue, error) {
@@ -95,7 +101,7 @@ func newOfflineQueue(ctx context.Context, js jetstream.JetStream, opts *resolved
 		return nil, err
 	}
 	q := &offlineQueue{stream: stream, prefix: opts.SubjectPrefix, rewind: opts.OfflineQueueRewind,
-		codec: subjectCodec{opts.EscapeNATSWildcards}}
+		codec: subjectCodec{opts.EscapeNATSWildcards}, logger: opts.logger}
 	if q.members, err = newShareMembers(ctx, js, opts); err != nil {
 		// The backlog still works; it just outlives its last member by the
 		// consumer's inactivity threshold, as it did before there was a count.
@@ -377,7 +383,13 @@ func (q *offlineQueue) replayFrom(ctx context.Context, start jetstream.OrderedCo
 				return last, nil
 			}
 		}
-		if err := batch.Error(); err != nil && !errors.Is(err, nats.ErrTimeout) && !errors.Is(err, jetstream.ErrNoMessages) {
+		// No responders is a fetch that reached no consumer: nats.go makes a new
+		// one for every fetch, a cluster can place it on another server, and a
+		// pull can get to ours before the new consumer's interest has. It is
+		// read again as an empty fetch is (nats.go's own ordered Consume resets
+		// on it); failing the read sent the resume nothing.
+		if err := batch.Error(); err != nil && !errors.Is(err, nats.ErrTimeout) &&
+			!errors.Is(err, jetstream.ErrNoMessages) && !errors.Is(err, nats.ErrNoResponders) {
 			return last, err
 		}
 		if n > 0 {
@@ -391,6 +403,8 @@ func (q *offlineQueue) replayFrom(ctx context.Context, start jetstream.OrderedCo
 		// what the session was owed and move its cursor past it.
 		info, err := cons.Info(ctx)
 		if err == nil && info.NumPending == 0 {
+			q.logger.Debug("an offline queue read ended on an empty fetch", "filters", start.FilterSubjects,
+				"stream_last", last, "consumer_delivered", info.Delivered.Stream, "consumer_server", consumerServer(info))
 			return last, nil
 		}
 		if empty++; empty >= maxEmptyFetches {
@@ -403,6 +417,14 @@ func (q *offlineQueue) replayFrom(ctx context.Context, start jetstream.OrderedCo
 	}
 }
 
+// consumerServer names the NATS server a consumer runs on, for a log line.
+func consumerServer(info *jetstream.ConsumerInfo) string {
+	if info.Cluster == nil {
+		return ""
+	}
+	return info.Cluster.Leader
+}
+
 // maxEmptyFetches is how many empty fetches in a row, with messages still
 // pending, a read of the queue stream takes before it gives up as failed.
 const maxEmptyFetches = 20
@@ -412,11 +434,14 @@ func (q *offlineQueue) fetch(cons jetstream.Consumer) (jetstream.MessageBatch, e
 	if q.emptyFetches.Load() > 0 && q.emptyFetches.Add(-1) >= 0 {
 		return emptyBatch{}, nil
 	}
+	if q.unansweredFetches.Load() > 0 && q.unansweredFetches.Add(-1) >= 0 {
+		return emptyBatch{err: nats.ErrNoResponders}, nil
+	}
 	return cons.Fetch(256, jetstream.FetchMaxWait(500*time.Millisecond))
 }
 
-// emptyBatch is a fetch that came back with nothing.
-type emptyBatch struct{}
+// emptyBatch is a fetch that came back with nothing, and err.
+type emptyBatch struct{ err error }
 
 func (emptyBatch) Messages() <-chan jetstream.Msg {
 	ch := make(chan jetstream.Msg)
@@ -424,7 +449,7 @@ func (emptyBatch) Messages() <-chan jetstream.Msg {
 	return ch
 }
 
-func (emptyBatch) Error() error { return nil }
+func (b emptyBatch) Error() error { return b.err }
 
 func newMessageID() string {
 	var b [12]byte
@@ -530,10 +555,12 @@ func (c *conn) replayOffline() error {
 
 	var deliverErr error
 	var first uint64 // the lowest sequence handled, where a cursor may start
+	read := 0
 	handle := func(msg *nats.Msg) {
 		if deliverErr != nil || c.isClosed() {
 			return
 		}
+		read++
 		if first == 0 {
 			first = queueSeq(msg)
 		}
@@ -581,6 +608,9 @@ func (c *conn) replayOffline() error {
 		last, err = q.replay(ctx, since, filters, handle)
 	}
 	complete := err == nil && deliverErr == nil && !c.isClosed()
+	c.logger.Debug("read the offline queue for a resume", "client_id", c.sess.clientID,
+		"by_time", byTime, "since", since, "from_seq", fromSeq, "stream_last", last, "read", read,
+		"sent", len(c.replayed), "error", err)
 	if !complete {
 		c.sess.unpin()
 	}
@@ -622,10 +652,12 @@ func (c *conn) replayFromCursor(ctx context.Context, q *offlineQueue, cur cursor
 	delivered := c.sess.deliveredIDs()
 	start := cur.start()
 	var deliverErr error
+	read := 0
 	handle := func(msg *nats.Msg) {
 		if deliverErr != nil || c.isClosed() {
 			return
 		}
+		read++
 		seq, id := queueSeq(msg), messageID(msg)
 		_, hole := cur.holes[seq]
 		if (hole || seq >= cur.next) && id != "" && !delivered[id] && !c.wasReplayed(id) {
@@ -643,6 +675,9 @@ func (c *conn) replayFromCursor(ctx context.Context, q *offlineQueue, cur cursor
 		last = max(last, to)
 	}
 	complete := err == nil && deliverErr == nil && !c.isClosed()
+	c.logger.Debug("read the offline queue for a resume from its cursor", "client_id", c.sess.clientID,
+		"cursor", cur.next, "holes", len(cur.holes), "stream_last", last, "read", read,
+		"sent", len(c.replayed), "error", err)
 	if deliverErr != nil {
 		return deliverErr
 	}
