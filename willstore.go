@@ -222,8 +222,13 @@ func newWillStore(ctx context.Context, js jetstream.JetStream, nc *nats.Conn, op
 		index:         map[string]willRef{},
 	}
 	w.sweepAfter.Store(int64(defaultWillSweepAfter))
-	w.fenceAfter = 2 * every
 	w.selfEvery = every / 2
+	// Silence is counted from the start of the last successful check, which can be a whole
+	// check interval before the NATS server failed. Fencing at twice the interval from that
+	// point left a leader election (4 to 9 s after the leader goes quiet, measured up to 8.7 s)
+	// only 7.5 s at the default, and a broker closed its clients for it now and then. One check
+	// interval more makes the documented twice-the-interval true counted from the failure.
+	w.fenceAfter = 2*every + w.selfEvery
 	// The probe is a replicated write, which a loaded server can take a few hundred
 	// milliseconds to acknowledge. Bounded by the interval alone, a short interval
 	// (the tests' 150 ms) failed slow writes as unanswered and fenced a healthy broker.

@@ -11,6 +11,9 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** an offline-queue read (a resume, or the catch-up of `ReconnectCatchUp`) ended at once when its consumer's NATS server was a replica of the queue stream still catching up after a restart, because that replica reported nothing pending short of the stream's end. The session was sent none of what it was owed, and the cursor moved past it. The read now asks the stream's leader whether anything it matches lies between the consumer's position and the end, and keeps reading if so.
+- **Fixed:** with `DurableWills`, a broker could close its clients while NATS elected a new leader for the Will bucket at the default `WillCheckInterval`. The fence counted its twice-the-interval from the last successful check, up to half an interval before the server failed, which left an election that takes up to 9 s only 7.5 s. It now counts from the failure, so the survivors' wait for a silent owner is about 5 intervals instead of 4.5 and a Will of a broker that really died is published 2.5 s later at the default.
+
 - **Tests:** `Broker.Close` is shown to return with NATS cut and a catch-up read held (a `Close` hang reported by #216 was looked for and not reproduced; see ROADMAP), and `retryAfterDrop` is covered end to end: a catch-up read cut by a reconnect is started again and the client gets every message once. No API change.
 
 - **Fixed:** a SUBSCRIBE read the retained messages it owed after writing its SUBACK, so a publisher that stored a retained message in between had it delivered twice, the second time with RETAIN set [MQTT-3.3.1-6], [MQTT-3.3.1-12]. The set is now read before the SUBACK.

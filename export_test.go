@@ -276,6 +276,11 @@ func SetBeforeGroupDelete(t interface {
 // back empty, as a loaded server's can.
 func SetEmptyQueueFetches(b *Broker, n int) { b.queue.Load().emptyFetches.Store(int64(n)) }
 
+// SetStaleQueueConsumerInfos makes the next n reads of a queue consumer's info say it is at the
+// start with nothing pending, as the info of a consumer on a stream replica still catching up
+// after a restart does.
+func SetStaleQueueConsumerInfos(b *Broker, n int) { b.queue.Load().staleInfos.Store(int64(n)) }
+
 // SetUnansweredQueueFetches makes the next n fetches of b's offline-queue reads fail with no
 // responders, as a pull to a consumer just made on another NATS server does before its interest
 // has reached the broker's server.

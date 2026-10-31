@@ -94,7 +94,7 @@ stream info request and each 1024 deliveries a filtered read; neither is measure
 
 **Today:** `DurableWills` is off. Turning it on by default is a behaviour change for every deployment that does not
 set it: the broker would create a bucket, need JetStream where it ran without, hold Will payloads in clear text on
-NATS, and delay the Will of a broker that really died by the survivors' wait (about 4.5 times `WillCheckInterval`).
+NATS, and delay the Will of a broker that really died by the survivors' wait (about 5 times `WillCheckInterval`).
 The preconditions this entry named are met: the partition work is tested against a real three-server cluster, and the
 payload's visibility has its answer, a documented requirement (the `Authorizer` cannot see the bucket, so the bucket
 needs the session bucket's NATS permissions; README, "Durable Will Messages").

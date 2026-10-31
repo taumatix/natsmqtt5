@@ -67,7 +67,11 @@ type offlineQueue struct {
 	// no responders, as a pull to a consumer just made on another server of a
 	// cluster can. A seam for tests.
 	unansweredFetches atomic.Int64
-	prefix            string
+	// staleInfos makes that many of the next reads of a consumer's info say it
+	// is at the start with nothing pending, as a replica of the stream still
+	// catching up after a restart does. A seam for tests.
+	staleInfos atomic.Int64
+	prefix     string
 	// rewind is Options.OfflineQueueRewind, resolved.
 	rewind time.Duration
 	codec  subjectCodec
@@ -402,19 +406,64 @@ func (q *offlineQueue) replayFrom(ctx context.Context, start jetstream.OrderedCo
 		// it matches are stored. Taking that for the end made a resume skip
 		// what the session was owed and move its cursor past it.
 		info, err := cons.Info(ctx)
+		if err == nil && q.staleInfos.Load() > 0 && q.staleInfos.Add(-1) >= 0 {
+			info = &jetstream.ConsumerInfo{}
+		}
+		// NumPending is the count of the consumer's own server. In a cluster that
+		// can be a replica of the stream still catching up (a restarted member),
+		// which has stored less than the leader and so reports nothing pending
+		// at a position short of last. So the leader is asked whether the read
+		// is owed anything between there and last.
+		behind := false
 		if err == nil && info.NumPending == 0 {
+			behind, _ = q.replicaBehind(ctx, start, info.Delivered.Stream, last)
+		}
+		if err == nil && info.NumPending == 0 && !behind {
 			q.logger.Debug("an offline queue read ended on an empty fetch", "filters", start.FilterSubjects,
 				"stream_last", last, "consumer_delivered", info.Delivered.Stream, "consumer_server", consumerServer(info))
 			return last, nil
 		}
 		if empty++; empty >= maxEmptyFetches {
 			if err == nil {
-				err = fmt.Errorf("the queue stream still reports %d messages pending after %d empty fetches",
-					info.NumPending, empty)
+				err = fmt.Errorf("the queue stream still reports %d messages pending (the consumer is at %d of %d) after %d empty fetches",
+					info.NumPending, info.Delivered.Stream, last, empty)
 			}
 			return last, err
 		}
 	}
+}
+
+// replicaBehind reports whether the stream holds a message the read matches
+// above delivered (the consumer's position) and up to last: the leader's own
+// answer, which a lagging replica's pending count is not. A start time skips
+// what was stored before it. An error counts as not behind, so a read that
+// cannot ask ends as it did before the question.
+func (q *offlineQueue) replicaBehind(ctx context.Context, start jetstream.OrderedConsumerConfig, delivered, last uint64) (bool, error) {
+	filters := start.FilterSubjects
+	if len(filters) == 0 {
+		filters = []string{queuedSubject(q.prefix, ">")}
+	}
+	for _, filter := range filters {
+		from := max(delivered+1, start.OptStartSeq)
+		for from <= last {
+			msg, err := q.stream.GetMsg(ctx, from, jetstream.WithGetMsgSubject(filter))
+			if errors.Is(err, jetstream.ErrMsgNotFound) {
+				break
+			}
+			if err != nil {
+				return false, err
+			}
+			if msg.Sequence > last {
+				break
+			}
+			if start.OptStartTime != nil && msg.Time.Before(*start.OptStartTime) {
+				from = msg.Sequence + 1
+				continue
+			}
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // consumerServer names the NATS server a consumer runs on, for a log line.

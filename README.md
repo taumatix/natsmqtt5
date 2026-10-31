@@ -583,7 +583,7 @@ A broker cut off from NATS but still serving clients looks dead to the others,
 so it fences itself: if it cannot reach NATS (its connection, its own liveness
 subject and the Will bucket) for twice `WillCheckInterval`, it closes its client
 sockets, and a survivor adopts a silent owner's Wills only after the silence has
-outlasted that and the time the owner takes to notice (about 4.5 times
+outlasted that and the time the owner takes to notice (about 5 times
 `WillCheckInterval`, on top of the ping timeout). A Will is therefore published
 only after its client's connection is closed [MQTT-3.1.2-8]. The price is that
 the Will of a broker that really died waits that long longer than it did.

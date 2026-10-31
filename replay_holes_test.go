@@ -102,6 +102,25 @@ func TestAResumeWhoseFirstReadsComeBackEmptyStillSendsWhatItWasOwed_MQTT_4_4_0_1
 		"[MQTT-4.4.0-1] the message stored while the session was away is sent on its resume")
 }
 
+// Nor is a consumer's "nothing pending" the end when its server is a replica of the stream that is
+// still catching up after a restart: it has stored less than the leader, so it reports nothing
+// pending at a position short of the stream's end. The read asks the leader first; taking the
+// replica's word, ReconnectCatchUp sent a session none of what was stored while its NATS server
+// was down (CI's cluster job). SetStaleQueueConsumerInfos stands in for the replica.
+func TestAResumeWhoseConsumerServerIsBehindTheStreamStillSendsWhatItWasOwed_MQTT_4_4_0_1(t *testing.T) {
+	natsURL := startNATS(t)
+	r := newCursorRig(t, natsURL, "cur-stale-info", packet.QoS1)
+	r.send("before")
+	r.sub.drop()
+	waitDetached(t, r.logs, r.id)
+	r.pub.publish(&paho.Publish{Topic: r.topic, QoS: 1, Payload: []byte("owed")})
+
+	natsmqtt5.SetEmptyQueueFetches(r.b, 1)
+	natsmqtt5.SetStaleQueueConsumerInfos(r.b, 1)
+	assert.Equal(t, []string{"owed"}, r.resume(r.addr),
+		"[MQTT-4.4.0-1] the message stored while the session was away is sent on its resume")
+}
+
 // A fetch the NATS server answers with no responders is not a failed read either. Every fetch of an
 // ordered consumer makes a new consumer, which a cluster can place on another server; a pull that
 // reaches the broker's server before the new consumer's interest does is answered 503. Taken for a
