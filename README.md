@@ -611,7 +611,13 @@ one with fewer features:
   The time is the broker's own clock and the JetStream timestamp, so brokers that
   share a NATS server agree to within clock skew between them. A retained message
   found expired is removed from the stream by the first subscription that looks;
-  one nobody subscribes to stays until replaced.
+  one nobody subscribes to stays until replaced. A live message's wait starts when
+  the receiving broker got it, so time spent in NATS between brokers is free.
+  `Options.PublisherClockExpiry` (`-publisher-clock-expiry`) counts it from the
+  publishing broker's receipt instead, at the price of trusting the clocks: a
+  publisher running behind, or a forged `Mqtt5-Published-At` header from anything
+  that can publish on the subjects, makes a message expire early (a stamp in the
+  future counts as no wait). Off by default.
 - **A PUBACK does not mean the message reached NATS.** The broker hands the
   message to its NATS connection and acknowledges; the write is flushed
   microseconds later. A broker killed in that window loses a QoS 1 message it

@@ -170,7 +170,7 @@ func (b *Broker) restoreEntry(ctx context.Context, clientID string, st storedInf
 		qos:     st.QoS,
 		retain:  st.Retain,
 		props:   props,
-		arrived: arrivedAt(msg, time.Now()),
+		arrived: arrivedAt(msg, time.Now(), b.opts.PublisherClockExpiry),
 	}
 	// Sets the interval the resend counts down from, and the properties it
 	// starts from. Whether the message has expired is the resend's to decide,

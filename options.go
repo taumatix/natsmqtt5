@@ -332,6 +332,16 @@ type Options struct {
 	// a shared member holds is complete (ROADMAP.md, "QoS 2 on shared
 	// subscriptions"); turning it on earlier is for trials.
 	SharedQoS2 bool
+	// PublisherClockExpiry counts a live message's Message Expiry Interval from when the
+	// publishing broker received it, not from when this broker did. The publisher stamps the
+	// time (sub-second) on messages that carry an interval, so the wait spent in NATS between
+	// brokers is no longer free and the remainder is not rounded up per hop. Off by default.
+	//
+	// It trusts the stamp, and so the clocks: a stamp in the future counts as no wait, but a
+	// publisher with a clock running behind makes messages expire early, and anything able to
+	// publish on the NATS subject can forge one. Enable it on every broker sharing the subjects,
+	// on hosts with synchronised clocks, and where only brokers publish to them.
+	PublisherClockExpiry bool
 	// TopicAliasMaximum is advertised in CONNACK. Zero disables inbound topic
 	// aliases; leave it unset for DefaultTopicAliasMaximum.
 	TopicAliasMaximum *uint16

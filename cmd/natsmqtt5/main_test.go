@@ -225,3 +225,13 @@ func TestEscapeNATSWildcardsFlag(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, cfg.broker.EscapeNATSWildcards)
 }
+
+func TestPublisherClockExpiryFlag(t *testing.T) {
+	cfg, err := parseConfig([]string{"-publisher-clock-expiry"}, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.PublisherClockExpiry)
+
+	cfg, err = parseConfig(nil, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.False(t, cfg.broker.PublisherClockExpiry, "off unless asked for")
+}

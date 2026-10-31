@@ -206,28 +206,18 @@ none is drafted now. Also still open:
 
 ## A message's wait is counted from this broker's receipt, and in whole seconds
 
-**Blocked by:** real deployments (brokers apart enough for the difference to matter) and a decision on trusting two
-brokers' clocks.
+**Done (opt-in):** `Options.PublisherClockExpiry` (`-publisher-clock-expiry`, off by default) makes the publishing
+broker stamp `Mqtt5-Published-At` (nanoseconds) on a PUBLISH that carries a Message Expiry Interval, and a receiving
+broker counts a live copy's wait from it (`arrivedAt`, `expiry.go`). A stamp later than the receiver's clock counts as
+no wait, so a clock running ahead cannot shorten the interval; a stored copy still counts from the JetStream timestamp.
+The trust caveat is on the option and in the README: a publisher's clock behind the receiver's, or a forged stamp from
+anything that can publish on the subjects, makes a message expire early. Tested over real sockets and real NATS
+(`publisher_clock_expiry_test.go`).
 
-**Today:** the interval is whole seconds on the wire and the time waited is counted in whole seconds,
-rounded down (README, "What it does not do"). A live message's wait starts when this broker's NATS
-subscription receives it, not when the publishing broker did, so time spent in NATS between brokers
-is not subtracted; a message stored in the queue starts at the JetStream timestamp. An interval of 0
-therefore survives a fraction of a second rather than none.
-
-**Shape:** a live copy could carry its publisher's receive time in a header
-(`Mqtt5-Published-At`), at the cost of trusting two brokers' clocks to agree. Worth doing only if
-someone runs brokers apart enough for the difference to matter.
-
-**Looked at 2026-10-30, not built:** it is additive on the wire but not cheap, and the part that makes it unsafe is the
-part that costs. (1) It must be an option, off by default: a publisher's clock behind the receiver's makes a message
-wait longer than it did and expire early, which breaks [MQTT-3.3.2-5] for a deployment that never asked for the
-trade. (2) The receiver has to bound the stamp (ignore one in the future or older than the interval) and `arrivedAt`
-in `expiry.go` has to prefer it only for live copies, since a stored copy already counts from the JetStream
-timestamp. (3) Every PUBLISH grows by about 30 bytes of header, also for the plain NATS clients that read the subject.
-(4) The test that proves it needs a NATS leg that delays a message while both brokers' clocks are right (and one
-where they differ), which the embedded server cannot do and the three-server harness (`natscluster_test.go`) could
-with `Freeze`/`Thaw` on the server between the brokers. Take it when a deployment with a slow inter-broker link asks.
+**Left:** the case the option exists for, a slow inter-broker leg, is tested with the stamp set directly and not with a
+delayed NATS leg: the embedded server cannot delay a message, and the three-server harness (`natscluster_test.go`)
+could with `Freeze`/`Thaw` on the server between the brokers. The interval stays whole seconds on the wire, so an
+interval of 0 still survives a fraction of a second. Neither limits a deployment that has asked.
 
 # Tier 4: features MQTT 5 defines that the broker does not offer
 
