@@ -362,7 +362,13 @@ func (b *Broker) refreshMembers(q *offlineQueue) {
 	b.mu.Unlock()
 	for _, s := range sessions {
 		for _, sub := range s.subscriptions() {
-			if sub.share == "" || sub.backlog == nil {
+			if sub.share == "" {
+				continue
+			}
+			if sub.backlog() == nil {
+				// Made while the queue was off, and missed when it came up
+				// (a SUBSCRIBE that read the queue just before it was set).
+				b.giveBacklog(q, s, sub)
 				continue
 			}
 			group, ok := b.groupName(sub.filter)

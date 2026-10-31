@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
-	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nuid"
 
 	"github.com/taumatix/natsmqtt5/packet"
@@ -37,9 +36,11 @@ type subscription struct {
 	// in '#' needs two: one on "x.>" and one on "x", because MQTT's '#' also
 	// matches the parent level while NATS's '>' does not (MQTT-5.0 §4.7.1.2).
 	natsSubs []*nats.Subscription
-	// backlog is the durable consumer a shared subscription's QoS 1 and 2
+	// backlogAt is the durable consumer a shared subscription's QoS 1 and 2
 	// messages are pulled from, when the offline queue is on; see shared.go.
-	backlog jetstream.Consumer
+	// Set once: by bindNATS, or by the broker when the queue came up after the
+	// subscription was made (giveBacklog), so it is read through backlog().
+	backlogAt atomic.Pointer[sharedBacklog]
 
 	// live gates delivery. The NATS subscriptions are created before the
 	// subscription is installed, and their handler resolves the session's

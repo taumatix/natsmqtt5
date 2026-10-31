@@ -63,13 +63,10 @@ func TestAMemberHoldingASharedMessageGivesItUpOnABrokerWhoseQueueCameUpLate(t *t
 }
 
 // The refresh loop that keeps a shared member's entry alive is started by the queue too. An entry lasts
-// MaxSessionExpiry plus a slack and is rewritten every third of that, so one that is still there after
-// several lifetimes proves the loop runs on a broker whose queue came up late (§4.8.2: the entry is what
-// keeps the group, and its backlog, alive while the member is away).
-//
-// A shared subscription made while the queue was off is a plain queue-group subscription with no
-// backlog, and so no entry, and the refresh does not add one: it is not a member until its session
-// subscribes again. The test pins that (ROADMAP.md records it).
+// MaxSessionExpiry plus a slack and is rewritten every third of that, so entries that are still there after
+// several lifetimes prove the loop runs on a broker whose queue came up late (§4.8.2: the entry is what
+// keeps the group, and its backlog, alive while the member is away). The subscription made while the queue
+// was off is made a member when the queue comes up, and kept like the other.
 func TestASharedMemberOfABrokerWhoseQueueCameUpLateIsKeptAliveByTheRefresh(t *testing.T) {
 	natsmqtt5.SetShareMemberSlack(t, time.Second)
 	natsURL := startNATS(t)
@@ -79,14 +76,44 @@ func TestASharedMemberOfABrokerWhoseQueueCameUpLateIsKeptAliveByTheRefresh(t *te
 	early.connect(rawConnect("early-m1", 1))
 	early.subscribe(group, packet.QoS1)
 	release()
-	require.Zero(t, memberEntries(t, natsURL), "the subscription of before the queue is not a member")
+	require.Eventually(t, func() bool { return memberEntries(t, natsURL) == 1 }, 5*time.Second, 20*time.Millisecond,
+		"the subscription made while the queue was off was not made a member when it came up")
 
 	late := dialRaw(t, addr)
 	late.connect(rawConnect("late-m2", 1))
 	late.subscribe(group, packet.QoS1)
-	require.Equal(t, 1, memberEntries(t, natsURL), "a subscription made once the queue is up is recorded")
+	require.Equal(t, 2, memberEntries(t, natsURL), "a subscription made once the queue is up is recorded")
 
 	time.Sleep(5 * time.Second) // more than two lifetimes of an entry
-	assert.Equal(t, 1, memberEntries(t, natsURL),
-		"the entry lapsed: the refresh loop did not start with the late queue, or the early member was added")
+	assert.Equal(t, 2, memberEntries(t, natsURL), "an entry lapsed: the refresh loop did not start with the late queue")
+}
+
+// A shared subscription made while the queue was off is given the group's backlog when the queue comes
+// up, as one made afterwards is. A member that is away keeps its share: "A Shared Subscription ends, and
+// any undelivered messages associated with it are deleted, when there are no longer any Sessions
+// subscribed to it" (§4.8.2), so while its session lasts a message published to the group waits for it,
+// and the server "MUST add it to the Session State for those Clients that have matching Subscriptions"
+// [MQTT-4.5.0-1]. Without the backlog the message's live copy reached the away session, and a shared
+// subscription is never replayed from the queue, so it was lost.
+func TestASharedSubscriptionMadeWhileTheQueueWasOffKeepsItsShareWhileAway(t *testing.T) {
+	natsURL := startNATS(t)
+	_, addr, release := lateQueueBroker(t, natsURL)
+
+	early := dialRaw(t, addr)
+	early.connect(rawConnect("early-away", 300))
+	early.subscribe(group, packet.QoS1)
+	release()
+	require.Eventually(t, func() bool { return memberEntries(t, natsURL) == 1 }, 5*time.Second, 20*time.Millisecond,
+		"the subscription made while the queue was off was not made a member when it came up")
+
+	early.drop()
+	publishJobs(t, addr, 1)
+
+	back := dialRaw(t, addr)
+	ack := back.connect(rawConnect("early-away", 300))
+	require.True(t, ack.SessionPresent, "the session outlived its connection [MQTT-3.1.2-23]")
+	got := back.expectPublish()
+	assert.Equal(t, "job-0", string(got.Payload), "the message published while the member was away waited for it")
+	back.send(&packet.Puback{Ack: packet.Ack{PacketID: got.PacketID}})
+	back.expectNoPublishFor(500 * time.Millisecond)
 }
