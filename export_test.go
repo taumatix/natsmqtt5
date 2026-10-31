@@ -299,9 +299,19 @@ func HasSharedBacklog(b *Broker, clientID string) bool {
 // start-up ask f first, and wait for its next turn while f says no.
 func SetQueueRetryGate(b *Broker, f func() bool) { b.queueRetryGate.Store(&f) }
 
-// SetStoredDeliveredBound changes how many delivered ids a session record keeps,
-// for the rest of the test, so a test need not deliver thousands of messages.
+// SetStoredDeliveredBound changes how many delivered ids a session record keeps
+// in all, chunks beside it included, for the rest of the test, so a test need
+// not deliver thousands of messages to see what the bound costs.
 func SetStoredDeliveredBound(t interface {
+	Cleanup(func())
+}, n int) {
+	was, wasSpilled := storedDeliveredBound.Swap(int64(n)), spilledDeliveredBound.Swap(0)
+	t.Cleanup(func() { storedDeliveredBound.Store(was); spilledDeliveredBound.Store(wasSpilled) })
+}
+
+// SetInlineDeliveredBound changes how many delivered ids a session record keeps
+// in its value, for the rest of the test; the rest go to chunks beside it.
+func SetInlineDeliveredBound(t interface {
 	Cleanup(func())
 }, n int) {
 	was := storedDeliveredBound.Swap(int64(n))

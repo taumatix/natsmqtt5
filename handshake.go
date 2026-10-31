@@ -243,6 +243,7 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 			c.broker.restoreSessionState(ctx, sess, rec)
 		}
 		if !restoredAway.IsZero() {
+			c.broker.restoreDeliveredSpill(ctx, sess, rec)
 			sess.markAwayRestored(restoredAway, rec.awayFromSeqWas, rec.awayLateSeqWas, rec.deliveredSinceWas, rec.deliveredWas,
 				rec.replayCursorWas, rec.replayHolesWas)
 		}

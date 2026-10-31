@@ -26,8 +26,8 @@ in Tier 2.
 
 ## The replay cursor: what falls back to the time rewind, and what waits for a resume
 
-**Blocked by:** nothing for (3) below (the record carrying ids past 4096 outside its value, as the in-flight spill
-does); a clustered, replicated stream to measure the added requests on is *real deployments*.
+**Blocked by:** a clustered, replicated stream to measure the added requests and the chunk writes on is *real
+deployments*; nothing else here is.
 
 **Today:** a session whose record or memory has a replay cursor (`cursor.go`) is replayed from it; one without is
 replayed from `OfflineQueueRewind` before its release, as before, and keeps the rewind's limits: a message whose live
@@ -37,14 +37,11 @@ sequences below what the session has delivered is not noted [MQTT-4.4.0-1]. A se
 1. it was restored from a record written before the cursor existed, until its first replay reads the queue to its
    end (one absence, once, after the upgrade);
 2. it left more than 1024 holes (`maxReplayHoles`), or more than 16384 ids above the cursor (`cursorIDBound`);
-3. its record could not carry every id above the cursor (more than `maxStoredDelivered`, 4096, or trimmed to fit a
-   value): the record is written without one, so a broker that restores it falls back, though the broker that held
-   it does not;
-4. a SUBSCRIBE could not read the queue's last sequence, or its filter cannot be narrowed to queue subjects.
+3. a SUBSCRIBE could not read the queue's last sequence, or its filter cannot be narrowed to queue subjects.
 
 **Recovered while connected (2026-10-31):** after 1024 deliveries without a cursor (`cursorScanAfter`), a restart scan
 (`restartCursor`) reads the session's subjects from where a rewind started now would (`OfflineQueueRewind` ago,
-the cursor's *base*) and sets the cursor with the holes it found. So (1), (2) and the unreadable-sequence half of (4)
+the cursor's *base*) and sets the cursor with the holes it found. So (1), (2) and the unreadable-sequence half of (3)
 recover without a resume. It promises only what the rewind would, never more, because it cannot know what was owed
 before it. Three interleavings defeat a naive restart (the cursor at the stream's end, or from the scan with no base),
 and each has a guard. The randomized model in `cursor_model_internal_test.go` (400 seeds) fails with either of the
@@ -64,10 +61,24 @@ result away: the new filter may be owed what the scan read past without looking.
 
 **Left:** a restarted cursor stays in memory, not in the record, because a broker of an earlier version would read it
 without its base; a session restored elsewhere falls back to the rewind until its replay starts a cursor. Taking it
-into the record needs a field older brokers refuse, or a major version. (3) and the cap: let the record carry ids
-past 4096 outside the value. The other half of (4), a filter that cannot be narrowed, still never scans. Each restart
+into the record needs a field older brokers refuse, or a major version. The other half of (3), a filter that cannot be narrowed, still never scans. Each restart
 scan reads up to one rewind of the session's subjects per 1024 deliveries while it keeps being refused (a session
 with more than 1024 holes inside one rewind); not measured.
+
+**Recorded with the cursor (2026-10-31):** a record carries the delivered ids past `maxStoredDelivered` (4096) in
+chunks in the payload bucket (`DeliveredSpill`, `spillDelivered`), up to 65536 more, so a session with more ids than
+that above its cursor keeps the cursor in its record (`replay_cursor_spill_test.go`: 4396 ids, a restart, the message
+older than the rewind sent and none repeated). The chunks are cut where an id's hash says (`endsChunk`), so ids trimmed
+off the front or appended leave the others' keys alone and only the changed ones are written; they share one
+deadline (`sessionOpTimeout`); ids not written (the deadline, a failed put, over 1024 chunks) take the cursor out of
+the record as before, and a chunk that cannot be read on restore does the same (the replay uses the time rewind and
+may repeat). They go with the session: Clean Start and the sweep delete the owner's payloads, and a record that stops
+naming a chunk has it deleted. A record with 4096 ids or fewer is written as it was, so an older broker reads it, and
+an older broker reading one with chunks restores the ids in the value and ignores the key. Left from it: the
+checkpoint and late-copy writes are tested for the chunks (`spill_delivered_internal_test.go`) but only the release is
+driven over a socket and a killed broker's checkpoint with chunks is not; a restore reads the chunks one after the
+other (up to 128 gets at the cursor's bound), and a checkpoint sorts every id each time, neither measured; a failed
+chunk write is retried at the next change, not by itself.
 
 **Also:** a hole is sent only at the next resume. A message whose live copy never comes stays owed while the client is
 connected, which [MQTT-4.4.0-1] allows (it requires the resend on reconnect) but a client cannot tell from a lost one.
@@ -495,14 +506,16 @@ most of them; these remain, each with why:
   copy and its live publish while another is delivered, and the detached session's restored rewind sends the held one
   and not the delivered one again. With the delivered-id test removed from `offline.go` and `catchup.go` that test fails
   (it is sent again), so it proves the guard.
-- **The cap on stored delivered ids** (`maxStoredDelivered`, 4096): past it a restored rewind repeats
-  a QoS 2 message [MQTT-4.3.3-6]. Driven end to end with the bound lowered to 20
+- **The cap on stored delivered ids** (4096 in the value, 65536 more in chunks since 2026-10-31, hooks
+  `SetStoredDeliveredBound`, which also removes the chunks, and `SetInlineDeliveredBound`): past it a restored rewind
+  repeats a QoS 2 message [MQTT-4.3.3-6]. Driven end to end with the bound lowered to 20
   (`TestAClientAheadOfMoreThanTheStoredIDBoundIsWarnedAndRepeatedOnlyPastIt`: a warning on release,
   and exactly the ids past the bound repeated), because 4100 deliveries take minutes under `-race`;
-  that the bound is 4096 is `TestTheStoredIDsAreBounded`'s alone. The test shows which ids the cap
+  that the bound is 4096 is `TestTheStoredIDsAreBounded`'s alone; 4396 ids in the value and chunks, with the real
+  bound, are `TestMoreThan4096IDsAboveTheCursorSurviveARestartWithTheCursor_MQTT_4_4_0_1`. The test shows which ids the cap
   drops: the highest-sequence ones, which are the newest and the likeliest to be redelivered. Keeping
-  the newest instead would trade one repeat for another; the real fix is a record that is not
-  bounded by a count, which needs the ids held outside the session value.
+  the newest instead would trade one repeat for another. The chunks moved the cap from 4096 to 69632 ids; a session
+  without a cursor that delivers more within the rewind still repeats.
 - **The replay cursor's bounds and its race with a live copy.** That a cursor is dropped past 16384 ids above it,
   that a record which left ids out carries none, and that a live copy arriving below the cursor while a scan moves it
   becomes a hole (`noteLiveCopy` under `cursorMu`) are unit tests (`cursor_internal_test.go`). The hole bound, the

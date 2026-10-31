@@ -54,6 +54,7 @@ type cursorRig struct {
 	natsURL string
 	b       *natsmqtt5.Broker
 	addr    string
+	stop    func()
 	logs    *syncBuffer
 	id      string
 	topic   string
@@ -66,7 +67,7 @@ func newCursorRig(t *testing.T, natsURL, id string, qos packet.QoS, customise ..
 	t.Helper()
 	r := &cursorRig{t: t, natsURL: natsURL, id: id, topic: id + "/x", qos: qos, logs: &syncBuffer{}}
 	opts := append([]func(*natsmqtt5.Options){persistentWithQueue, rewindOf(cursorRewind), loggingBroker(t, r.logs)}, customise...)
-	r.b, r.addr, _ = startBrokerHandle(t, natsURL, opts...)
+	r.b, r.addr, r.stop = startBrokerHandle(t, natsURL, opts...)
 	r.sub = dialRaw(t, r.addr)
 	r.sub.connect(rawConnect(id, 300))
 	r.sub.subscribe(id+"/#", qos)

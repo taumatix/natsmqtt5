@@ -94,6 +94,26 @@ func (b *Broker) restoreSessionState(ctx context.Context, s *session, rec *sessi
 	}
 }
 
+// restoreDeliveredSpill adds the ids the record kept in chunks beside it to
+// those in its value, for the session's replay to skip. A chunk that cannot be
+// read leaves ids out that may be above the record's replay cursor, which
+// promises them all, so the cursor is dropped and the replay starts at the time
+// rewind, as for a record written without one.
+func (b *Broker) restoreDeliveredSpill(ctx context.Context, s *session, rec *sessionRecord) {
+	if len(rec.deliveredSpillWas) == 0 || b.store == nil {
+		return
+	}
+	ids, unreadable := b.store.loadDeliveredSpill(ctx, rec.deliveredSpillWas)
+	rec.deliveredWas = append(append([]storedDelivered(nil), rec.deliveredWas...), ids...)
+	if unreadable > 0 {
+		rec.replayCursorWas, rec.replayHolesWas = 0, nil
+		b.logger.Warn("some delivered ids of a restored session could not be read; "+
+			"its replay starts at the time rewind and may repeat a QoS 2 message",
+			"client_id", s.clientID, "values", unreadable)
+	}
+	s.adoptDeliveredSpill(rec.deliveredSpillWas)
+}
+
 // restoreEntry turns one stored entry back into an in-flight message, or returns
 // nil when it cannot.
 func (b *Broker) restoreEntry(ctx context.Context, clientID string, st storedInflight) *outbound {

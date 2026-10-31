@@ -560,7 +560,9 @@ func (b *Broker) releaseStoredSession(c *conn) {
 	}
 	spillStart := time.Now()
 	var spillLost int
-	if rec.ExpirySeconds != 0 {
+	if rec.ExpirySeconds == 0 {
+		rec.DeliveredSpill = nil // the record is deleted, and its chunks with the session
+	} else {
 		var serr error
 		spillLost, serr = s.spillInto(b.store, rec)
 		if serr != nil {
@@ -614,6 +616,8 @@ func (b *Broker) persistLateCopy(s *session) {
 	if rec == nil {
 		return
 	}
+	deliveredStart := time.Now()
+	s.spillDeliveredInto(b.store, rec)
 	ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
 	defer cancel()
 	newRev, err := b.store.save(ctx, rec, rev)
@@ -623,6 +627,7 @@ func (b *Broker) persistLateCopy(s *session) {
 		return
 	}
 	s.commitRecord(gen, rec, newRev)
+	s.commitDeliveredSpill(b.store, rec, deliveredStart)
 }
 
 // sessionLost runs when another broker claims a Client Identifier this one is
