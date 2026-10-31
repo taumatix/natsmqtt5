@@ -90,6 +90,10 @@ type retainedStore struct {
 	// verifiedAt is the reconnect count at which sweep last checked the whole view
 	// against the stream. Only the broker's sweep goroutine touches it.
 	verifiedAt uint64
+	// verifyEvery is Options.RetainedVerifyInterval; lastFull is when the whole view was last
+	// checked against the stream. Only the broker's sweep goroutine touches lastFull.
+	verifyEvery time.Duration
+	lastFull    time.Time
 
 	cancel context.CancelFunc
 	// ready closes once the initial replay has caught up, so New does not
@@ -132,6 +136,8 @@ func newRetainedStore(ctx context.Context, js jetstream.JetStream, opts *resolve
 
 		tombstones:   make(map[string]tombstone),
 		tombstoneTTL: opts.RetainedTombstoneTTL,
+		verifyEvery:  opts.RetainedVerifyInterval,
+		lastFull:     time.Now(),
 	}
 
 	runCtx, cancel := context.WithCancel(context.Background())
@@ -366,8 +372,12 @@ func (s *retainedStore) sweep(reconnects uint64) {
 		s.discard(expired)
 	}
 	s.purgeTombstones(now)
-	if s.reconcile(reconnects != s.verifiedAt) {
+	due := s.verifyEvery > 0 && now.Sub(s.lastFull) >= s.verifyEvery
+	if s.reconcile(reconnects != s.verifiedAt || due) {
 		s.verifiedAt = reconnects
+		if due {
+			s.lastFull = now
+		}
 	}
 }
 

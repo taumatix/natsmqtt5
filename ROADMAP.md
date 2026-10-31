@@ -376,9 +376,6 @@ its record is reclaimed, or they age out.
 
 ## Retained view: a stale entry that cancels an unseen one
 
-**Blocked by:** *real deployments*: what is left is a partition shorter than the NATS client's ping interval, which the
-broker cannot detect.
-
 **Done:** a broker cut off past `RetainedTombstoneTTL` no longer serves a retained message another broker cleared
 (the sweep compares the view with the stream's count; the purge treats error 10043 as already purged), and after a NATS
 reconnect every entry of the view is checked against the stream whatever the counts say
@@ -388,8 +385,12 @@ application's own reconnect handler on `Options.Conn` is untouched), not at the 
 `SessionSweepInterval` later (`TestARetainedViewIsVerifiedAsSoonAsTheNATSClientReconnects_MQTT_3_3_1_6`). A check that
 fails because JetStream is not answering yet is left to the next sweep.
 
-**Left:** a reconnect the broker's NATS client did not notice (a partition shorter than its ping interval) triggers
-nothing, and a stale entry it leaves is served until a count disagrees.
+**Done (opt-in):** `Options.RetainedVerifyInterval` (`-retained-verify-interval`, off by default) makes the sweep check
+every entry against the stream at least that often, which finds a stale entry a partition too short for the NATS client to
+notice left behind (`TestARetainedViewIsVerifiedOnATimerWhenAskedTo_MQTT_3_3_1_6`). One lookup per entry per interval.
+
+**Left:** without the option, such an entry is served until a count disagrees; no event reveals the partition, so the
+default cannot do better without paying a lookup per entry on a timer for every deployment.
 
 ## Offline queue for messages published by plain NATS clients
 
