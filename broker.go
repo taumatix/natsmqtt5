@@ -151,6 +151,8 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 			b.closeNATS()
 			return nil, fmt.Errorf("natsmqtt5: setting up the session store: %w", err)
 		}
+		held := b.heldBlobs
+		b.store.held.Store(&held)
 	}
 
 	queueRetryNeeded := false
