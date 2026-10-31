@@ -566,7 +566,9 @@ one with fewer features:
 - **Enhanced authentication is opt-in.** With `Options.Auther` set, a CONNECT naming an
   Authentication Method runs the AUTH-packet exchange of MQTT-5.0 §4.12 (challenge, response,
   CONNACK) and a client may re-authenticate on the open connection (AUTH 0x19); a failed
-  re-authentication ends in a DISCONNECT. `hmacAuther` in `example_test.go` is a complete
+  re-authentication ends in a DISCONNECT. A re-authentication that yields another identity
+  re-checks the session's subscriptions and Will for it (as `Reauthorize` does) and drops
+  what it no longer allows. `hmacAuther` in `example_test.go` is a complete
   reference method. Without an `Auther` a CONNECT carrying a method is refused with
   `0x8C Bad authentication method`, as before. The `Authenticator` is not asked for such a
   CONNECT; the `Authorizer` sees the identity the exchange returns. The `scram` sub-package
