@@ -387,10 +387,10 @@ reconnect before the CONNACK, which is a design of its own.
 
 ## A default queue that failed at startup: a duplicate across brokers
 
-**Blocked by:** a decision: closing the last window needs group consumers created by start sequence, and a broker of
-an earlier version updates the consumer with `DeliverNew`, which JetStream refuses to change on an existing consumer, so
-a mixed-version fleet would fail its shared SUBSCRIBEs. No deployment is known to run a fleet with the queue down on one
-broker only.
+**Blocked by:** closing the last window needs group consumers created by start sequence, and a broker of an earlier
+version updates the consumer with `DeliverNew`, which JetStream refuses to change on an existing consumer, so a
+mixed-version fleet would fail its shared SUBSCRIBEs (see "Looked at 2026-10-31" below). No deployment is known to run a
+fleet with the queue down on one broker only.
 
 **Done (2026-10-11):** the broker retries a default queue it could not create, with a doubling wait from 5 s to a
 minute, logs at info when it comes up, and `Broker.OfflineQueueActive` says whether it is on.
@@ -416,6 +416,18 @@ the consumer is still delivered live (`TestALateBacklogStillDeliversTheLiveCopyO
 **Left:** a message the group acknowledged from the backlog before its live copy reached this broker is below the floor
 and still delivered live, so it reaches the group twice. That needs a live copy slower than a member's whole
 PUBLISH-to-acknowledgement exchange, and only in the moment the backlog is given.
+
+**Looked at 2026-10-31, not built, and why it is not an opt-in either:** the fix is to create the group consumer by
+start sequence, and there is no additive form of it. (1) A consumer's `DeliverPolicy` cannot be changed on an existing
+one, so a broker given the option would fail to update a consumer that a broker without it created `DeliverNew` (and the
+reverse), which breaks the SUBSCRIBE of the second broker to join the group: an opt-in that is safe only when every
+broker has it set is a flag day, not an option, and the break is in the shared SUBSCRIBE and not in a feature that stays
+off. (2) The window is narrower than the cost of closing it: it needs a live copy slower than a member's whole
+PUBLISH-to-acknowledgement exchange, in the moment the backlog is given after a default queue failed at startup. (3) A
+check by message id against the group's acknowledged set, instead of the floor, would be additive but is a lookup on
+every live shared delivery in that window and needs the acknowledged set the consumer does not expose per message.
+**Still blocked by:** a release that ships the consumer-by-start-sequence handling readable by old brokers (an updated
+consumer config older brokers accept), or a fleet that can be upgraded together; neither is something a pass can decide.
 
 ## Without the queue, a client that falls behind still loses QoS 1 and 2
 
