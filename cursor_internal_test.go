@@ -100,6 +100,26 @@ func TestTooManyHolesDropTheCursor(t *testing.T) {
 	assert.Empty(t, holes)
 }
 
+// A delivery noted while a scan runs starts none, and the scan may already have
+// read past it or not, and end without moving the cursor (it stopped at the
+// connection's floor, or found the cursor changed): it scans once more, or a
+// hole that delivery would have found waits for a delivery that may never come.
+// Without one, a scan that did not move ends.
+func TestADeliveryNotedWhileAScanRunsScansOnceMore(t *testing.T) {
+	was := cursorScanAfter.Swap(1)
+	t.Cleanup(func() { cursorScanAfter.Store(was) })
+	s := sessionWithCursor(10)
+	c := &conn{sess: s}
+	s.conn = c
+
+	require.True(t, s.noteDelivered("a", 10), "the first delivery past the cursor starts a scan")
+	assert.False(t, s.noteDelivered("b", 11), "one noted while it runs starts none")
+
+	assert.Same(t, c, s.scanAgain(c, false), "the scan that did not move runs once more for it")
+	assert.Nil(t, s.scanAgain(c, false), "and then ends")
+	assert.True(t, s.noteDelivered("c", 12), "so the next delivery starts one")
+}
+
 // A record carries the cursor only with every id at or above it: one that left
 // ids out for the bound is replayed from the time rewind instead.
 func TestARecordThatCannotCarryEveryIDAboveTheCursorCarriesNoCursor(t *testing.T) {

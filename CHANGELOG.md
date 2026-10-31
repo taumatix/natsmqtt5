@@ -11,6 +11,8 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** a delivery noted while a scan of the replay cursor was running started no scan, and the running one ended without scanning again when it stopped at the connection's lowest unsent message, found the cursor changed, or could not read the queue. If no other delivery followed, the cursor stayed behind until the next one, and a resume read the queue from there; nothing was lost or sent twice, since a replay reads from the cursor. A delivery noted during a scan now makes it run once more. Also in the tests: `TestALiveCopyBelowARestartedCursorsBaseDropsIt` waited for a dropped cursor that the delivery of the same message could restart before the test looked (macOS CI). No API change.
+
 - **Fixed:** on a clustered offline queue, a resume could send nothing it was owed and log "replaying the offline queue failed; what it held is lost for this session" with `nats: no responders available for request`. nats.go makes a new consumer for every fetch of a replay, the cluster can place it on another NATS server, and a pull that reached the broker's server before the consumer's interest had was answered 503. The read now fetches again, as it does after an empty fetch, instead of failing. Before, the session got nothing until its next resume (CI's cluster job: about one resume in a few hundred). The broker also logs each resume's queue read at debug.
 
 ## [0.13.0] - 2026-10-31

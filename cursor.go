@@ -111,8 +111,9 @@ type replayCursor struct {
 	gen uint64
 	// above counts ids noted at or above next since the last scan.
 	above int
-	// scanning is set while a scan runs.
-	scanning bool
+	// scanning is set while a scan runs; asked, when a delivery that would have
+	// started one was noted meanwhile, so the scan runs once more.
+	scanning, asked bool
 	// pin keeps the ids at or above it while a replay that may start a cursor
 	// runs; 0 when there is none.
 	pin uint64
@@ -326,40 +327,42 @@ func (c *conn) owedBy(subs []*subscription, msg *nats.Msg, seq uint64) (matched,
 // scanCursor moves the session's cursor forward: it reads what the session's
 // subscriptions match from next to the stream's end, without delivering, and
 // accounts for each message. It runs on its own goroutine, one at a time per
-// session, and changes nothing a client is sent. Ids noted while a scan runs
-// do not start another, so it scans again while enough have piled up above the
-// cursor and it moved it, or threw its result away for a subscription made
-// while it read: otherwise the deliveries it swallowed start no scan until the
-// next one, which may never come, and a hole it would have found waits.
+// session, and changes nothing a client is sent. Deliveries noted while a scan
+// runs do not start another; scanAgain decides whether it runs again, since
+// otherwise those it swallowed start no scan until the next delivery, which may
+// never come, and a hole it would have found waits.
 func (c *conn) scanCursor() {
-	for c.scanOnce() && c.sess.rescanDue() {
+	for c != nil {
+		c = c.sess.scanAgain(c, c.scanOnce())
 	}
 }
 
-// rescanDue reports whether enough ids are above the cursor for another scan,
-// and otherwise ends this one.
-func (s *session) rescanDue() bool {
+// scanAgain returns the connection to scan again for after a scan on c, or nil
+// having ended the scan. A scan runs again when a delivery that would have
+// started one was noted while it ran, whatever it did: one that stopped at the
+// connection's floor, found the cursor changed, or could not read, did not
+// account for it. It also runs again while enough ids are above the cursor
+// after one that moved it, or threw its result away for a subscription made
+// while it read (again).
+func (s *session) scanAgain(c *conn, again bool) *conn {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.cur.next != 0 && int64(s.cur.above) >= cursorScanAfter.Load() {
-		return true
+	asked := s.cur.asked
+	s.cur.asked = false
+	due := again && s.cur.next != 0 && int64(s.cur.above) >= cursorScanAfter.Load()
+	if (asked || due) && s.conn != nil {
+		// The session's connection now: one that took the session over noted
+		// the deliveries that asked.
+		return s.conn
 	}
 	s.cur.scanning = false
-	return false
+	return nil
 }
 
-// scanOnce is one scan. It reports whether another may be due: it moved the
-// cursor, or a subscription changed while it read. Otherwise it has ended the
-// scan.
+// scanOnce is one scan. It reports whether it moved the cursor, or threw its
+// result away for a subscription made while it read.
 func (c *conn) scanOnce() (again bool) {
 	s := c.sess
-	defer func() {
-		if !again {
-			s.mu.Lock()
-			s.cur.scanning = false
-			s.mu.Unlock()
-		}
-	}()
 	q := c.broker.queue.Load()
 	if q == nil || c.isClosed() || c.resume.Load() != nil {
 		return false
