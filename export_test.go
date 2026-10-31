@@ -52,6 +52,17 @@ func SetPublishFlushGate(b *Broker, f func()) {
 	b.publishFlushGate.Store(&f)
 }
 
+// SetSubackGate makes a SUBSCRIBE call f after its SUBACK is written and before the
+// retained messages go out, the window in which a publisher that waited for the
+// SUBACK can store a message. nil removes it.
+func SetSubackGate(b *Broker, f func()) {
+	if f == nil {
+		b.subackGate.Store(nil)
+		return
+	}
+	b.subackGate.Store(&f)
+}
+
 // SetPublishQueuedGate makes a publish call f with the message's payload after its
 // offline-queue copy is stored and before its live publish: the window in which
 // another publisher's copies can overtake this one. nil removes it.
