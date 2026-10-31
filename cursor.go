@@ -327,8 +327,10 @@ func (c *conn) owedBy(subs []*subscription, msg *nats.Msg, seq uint64) (matched,
 // subscriptions match from next to the stream's end, without delivering, and
 // accounts for each message. It runs on its own goroutine, one at a time per
 // session, and changes nothing a client is sent. Ids noted while a scan runs
-// do not start another, so it scans again while it moved the cursor and enough
-// have piled up above it.
+// do not start another, so it scans again while enough have piled up above the
+// cursor and it moved it, or threw its result away for a subscription made
+// while it read: otherwise the deliveries it swallowed start no scan until the
+// next one, which may never come, and a hole it would have found waits.
 func (c *conn) scanCursor() {
 	for c.scanOnce() && c.sess.rescanDue() {
 	}
@@ -346,12 +348,13 @@ func (s *session) rescanDue() bool {
 	return false
 }
 
-// scanOnce is one scan. It reports whether it moved the cursor; when it did
-// not, it has ended the scan.
-func (c *conn) scanOnce() (moved bool) {
+// scanOnce is one scan. It reports whether another may be due: it moved the
+// cursor, or a subscription changed while it read. Otherwise it has ended the
+// scan.
+func (c *conn) scanOnce() (again bool) {
 	s := c.sess
 	defer func() {
-		if !moved {
+		if !again {
 			s.mu.Lock()
 			s.cur.scanning = false
 			s.mu.Unlock()
@@ -401,7 +404,8 @@ func (c *conn) scanOnce() (moved bool) {
 		c.logger.Debug("could not scan the offline queue for the replay cursor", "error", err)
 		return false
 	}
-	return c.applyScan(gen, start, last, subs, read)
+	moved, stale := c.applyScan(gen, start, last, subs, read)
+	return moved || stale
 }
 
 func hasNonShared(subs []*subscription) bool {
@@ -415,8 +419,9 @@ func hasNonShared(subs []*subscription) bool {
 
 // applyScan moves the cursor past what a scan from start read up to last,
 // unless the cursor, the session's subscriptions (subs when the scan began) or
-// its connection changed meanwhile. It reports whether the cursor moved.
-func (c *conn) applyScan(gen, start, last uint64, subs []*subscription, read []scanned) (moved bool) {
+// its connection changed meanwhile. It reports whether the cursor moved, and
+// whether the result was thrown away for a changed subscription.
+func (c *conn) applyScan(gen, start, last uint64, subs []*subscription, read []scanned) (moved, stale bool) {
 	s := c.sess
 	s.cursorMu.Lock()
 	defer s.cursorMu.Unlock()
@@ -424,24 +429,25 @@ func (c *conn) applyScan(gen, start, last uint64, subs []*subscription, read []s
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.conn != c || c.isClosed() {
-		return false
+		return false, false
 	}
-	moved, applied := s.applyScanLocked(c.logger, gen, start, last, subs, read, floor)
+	moved, applied, stale := s.applyScanLocked(c.logger, gen, start, last, subs, read, floor)
 	if applied {
 		// The cursor and its holes are in the record: a checkpoint that saw no
 		// other activity since its last write would otherwise skip them, and a
 		// broker killed now would leave a record without the hole [MQTT-4.4.0-1].
 		c.activity.Add(1)
 	}
-	return moved
+	return moved, stale
 }
 
 // applyScanLocked is applyScan with s.cursorMu and s.mu held and floor the
-// connection's owedFloor. applied reports whether the cursor changed.
+// connection's owedFloor. applied reports whether the cursor changed, stale
+// whether a subscription changed since the scan began.
 func (s *session) applyScanLocked(logger *slog.Logger, gen, start, last uint64, subs []*subscription,
-	read []scanned, floor uint64) (moved, applied bool) {
+	read []scanned, floor uint64) (moved, applied, stale bool) {
 	if s.cur.gen != gen || s.cur.next != start {
-		return false, false
+		return false, false, false
 	}
 	if last+1 < start {
 		// The stream ends below the cursor: it was purged or made again, and
@@ -449,12 +455,15 @@ func (s *session) applyScanLocked(logger *slog.Logger, gen, start, last uint64, 
 		logger.Warn("the offline queue restarted below the session's replay cursor; "+
 			"the session falls back to the time rewind", "client_id", s.clientID)
 		s.dropCursorLocked()
-		return false, false
+		return false, false, false
 	}
-	if !s.sinceKnownLocked() || !s.sameSubsLocked(subs) {
+	if !s.sameSubsLocked(subs) {
 		// A subscription made since the scan began may be owed what it read
 		// past without looking.
-		return false, false
+		return false, false, true
+	}
+	if !s.sinceKnownLocked() {
+		return false, false, false
 	}
 	next := last + 1
 	if floor != 0 && floor < next {
@@ -470,13 +479,13 @@ func (s *session) applyScanLocked(logger *slog.Logger, gen, start, last uint64, 
 		if !s.addHoleLocked(m.seq, m.id) {
 			logger.Warn("the session is owed more messages than its replay cursor keeps; "+
 				"it falls back to the time rewind", "client_id", s.clientID)
-			return false, false
+			return false, false, false
 		}
 	}
 	moved = next > s.cur.next
 	s.cur.next = next
 	s.cur.above = s.countAboveLocked(next)
-	return moved, true
+	return moved, true, false
 }
 
 // sameSubsLocked reports whether the session's subscriptions are subs. s.mu is

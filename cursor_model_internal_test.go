@@ -208,7 +208,7 @@ func (m *cursorModel) applyScan() {
 		}
 		return
 	}
-	s.applyScanLocked(m.logger, sc.r.gen, sc.start, sc.r.last, sc.r.subs, sc.r.read, m.floor())
+	_, _, _ = s.applyScanLocked(m.logger, sc.r.gen, sc.start, sc.r.last, sc.r.subs, sc.r.read, m.floor())
 }
 
 // checkInvariant: every message in [base, next) not delivered is a hole, and
