@@ -30,6 +30,10 @@ const (
 	// willOpTimeout bounds one key-value operation on the Will bucket.
 	willOpTimeout = 5 * time.Second
 
+	// minProbeTimeout is the least a broker waits for its fence probe (reachable)
+	// to be acknowledged, whatever WillCheckInterval is.
+	minProbeTimeout = time.Second
+
 	// willDeadRetryGap is the pause between the two liveness checks that must
 	// both fail before a broker is taken for dead.
 	willDeadRetryGap = 250 * time.Millisecond
@@ -220,7 +224,11 @@ func newWillStore(ctx context.Context, js jetstream.JetStream, nc *nats.Conn, op
 	w.sweepAfter.Store(int64(defaultWillSweepAfter))
 	w.fenceAfter = 2 * every
 	w.selfEvery = every / 2
-	w.selfTimeout = min(ownerPingTimeout, every)
+	// The probe is a replicated write, which a loaded server can take a few hundred
+	// milliseconds to acknowledge. Bounded by the interval alone, a short interval
+	// (the tests' 150 ms) failed slow writes as unanswered and fenced a healthy broker.
+	// waitOut grows with it, so a survivor still waits out the owner's slowest check.
+	w.selfTimeout = min(ownerPingTimeout, max(every, minProbeTimeout))
 	w.waitOut = w.fenceAfter + w.selfEvery + 2*w.selfTimeout
 	w.retryFor = 2*w.waitOut + willOpTimeout
 	if w.ping, err = nc.Subscribe(brokerPingSubject(opts.SubjectPrefix, owner), replyEmpty); err != nil {
