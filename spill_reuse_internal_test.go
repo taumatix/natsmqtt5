@@ -129,6 +129,42 @@ func TestSessionSpillWritesOnlyTheChunksThatChanged(t *testing.T) {
 	}
 }
 
+// A message acknowledged at the front of the in-flight list moves every size-cut boundary after it, so
+// every chunk changed and a checkpoint wrote them all again. Chunks cut at identifiers (a chunk ends
+// after an entry whose identifier is a multiple of the chunk's identifier count) keep their boundaries
+// when an entry before them goes, so only the chunk the entry was in is written again.
+func TestSpillAnAcknowledgementAtTheFrontWritesFewChunks(t *testing.T) {
+	s := smallPayloadStore(t)
+	s.spillChunkIDs = 32
+	sess := &session{clientID: "front-ack"}
+	rec := &sessionRecord{ClientID: "front-ack", Inflight: spillEntries(400)}
+	_, err := sess.spillInto(s, rec)
+	require.NoError(t, err)
+	sess.commitSpill(s, rec, time.Now())
+	require.Greater(t, len(rec.Spill), 5)
+
+	acked := &sessionRecord{ClientID: "front-ack", Inflight: spillEntries(400)[1:]}
+	lost, err := sess.spillInto(s, acked)
+	require.NoError(t, err)
+	assert.Zero(t, lost)
+	sess.commitSpill(s, acked, time.Now())
+	before := map[string]bool{}
+	for _, k := range rec.Spill {
+		before[k] = true
+	}
+	changed := 0
+	for _, k := range acked.Spill {
+		if !before[k] {
+			changed++
+		}
+	}
+	assert.LessOrEqual(t, changed, 2, "chunks written again after the front entry was acknowledged: %d of %d", changed, len(acked.Spill))
+
+	loaded, unreadable := s.loadSpill(context.Background(), acked.Spill)
+	assert.Zero(t, unreadable)
+	assert.Equal(t, spillEntries(400)[1+len(acked.Inflight):], loaded, "the chunks read back in order")
+}
+
 // The sweep deletes a payload of an owner whose record was released and does not
 // name it, keeps the ones the record names (in-flight entries and chunks), and
 // leaves an attached owner's payloads to the TTL.
