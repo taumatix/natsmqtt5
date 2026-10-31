@@ -259,6 +259,11 @@ type session struct {
 	spillAt   time.Time
 	// spillReused is whether the last spillInto named chunks it did not write.
 	spillReused bool
+	// deliveredKeys, deliveredKeysAt and deliveredReused are the same for the
+	// chunks of delivered ids (sessionRecord.DeliveredSpill).
+	deliveredKeys   []string
+	deliveredKeysAt time.Time
+	deliveredReused bool
 	// sendSeq numbers sends so that unacknowledged returns the in-flight set in
 	// the order it left.
 	sendSeq uint64
@@ -1234,12 +1239,44 @@ func (s *session) markAwayRestored(at time.Time, fromSeq, lateSeq uint64, rewoun
 // be larger. Dropping one can repeat that message on a restored replay.
 const maxStoredDelivered = 4096
 
-// storedDeliveredBound is the bound in force; only a test changes it.
+// storedDeliveredBound is the bound in force on the ids a record carries in its
+// value; only a test changes it. Those past it go to payload-bucket chunks
+// (sessionRecord.DeliveredSpill), up to spilledDeliveredBound more.
 var storedDeliveredBound = func() *atomic.Int64 {
 	var n atomic.Int64
 	n.Store(maxStoredDelivered)
 	return &n
 }()
+
+// maxSpilledDelivered bounds the ids a record carries in chunks beside it. The
+// replay cursor drops itself past cursorIDBound (16384) ids above it, so this
+// holds every id a cursor can need, and the ids of a session without one for as
+// long as the rewind keeps them; past it ids are dropped, as they were past
+// maxStoredDelivered before the chunks existed.
+const maxSpilledDelivered = 1 << 16
+
+// spilledDeliveredBound is the bound in force; only a test changes it.
+var spilledDeliveredBound = func() *atomic.Int64 {
+	var n atomic.Int64
+	n.Store(maxSpilledDelivered)
+	return &n
+}()
+
+// splitDelivered divides the delivered ids, lowest sequence first, into those
+// the record's value carries, those that go to chunks, and how many are left out
+// for neither bound (the highest sequences, which a replay would repeat).
+func splitDelivered(all []storedDelivered) (inline, over []storedDelivered, dropped int) {
+	bound := int(storedDeliveredBound.Load())
+	if len(all) <= bound {
+		return all, nil, 0
+	}
+	inline, over = all[:bound], all[bound:]
+	if room := int(spilledDeliveredBound.Load()); len(over) > room {
+		dropped = len(over) - room
+		over = over[:room]
+	}
+	return inline, over, dropped
+}
 
 // awayStateInto writes what the session record keeps of the last connection's
 // absence beyond its time into rec: the replay's starting sequence, the replay
@@ -1253,7 +1290,8 @@ func (s *session) awayStateInto(rec *sessionRecord) (dropped int) {
 	if from == 0 {
 		from = math.MaxUint64 // no sequence: only the ids of the rewind's span
 	}
-	rec.Delivered, dropped = s.deliveredFromLocked(from, nil)
+	rec.Delivered, rec.deliveredOver, dropped = s.deliveredFromLocked(from, nil)
+	rec.DeliveredSpill = nil // spillDelivered names the chunks again
 	rec.AwayFromSeq, rec.AwayLateSeq = s.awayFromSeq, late
 	s.cursorIntoLocked(rec, dropped)
 	return dropped
@@ -1287,28 +1325,31 @@ func (s *session) lateRecord() (rec *sessionRecord, rev, gen uint64) {
 	// Ids past the record's bound are left out here as at release, which
 	// already logged them.
 	var dropped int
-	cp.Delivered, dropped = s.deliveredFromLocked(lowestSeq(s.awayFromSeq, s.awayLateSeq, s.cur.next), nil)
+	cp.Delivered, cp.deliveredOver, dropped = s.deliveredFromLocked(lowestSeq(s.awayFromSeq, s.awayLateSeq, s.cur.next), nil)
+	cp.DeliveredSpill = nil // spillDelivered names the chunks again
 	cp.DeliveredSince = s.deliveredFloor()
 	s.cursorIntoLocked(&cp, dropped)
 	return &cp, s.rev, s.claimGen
 }
 
 // deliveredFromLocked lists the delivered ids whose queue copy is at or above
-// fromSeq, lowest first and bounded by maxStoredDelivered, leaving out those
-// whose sequence is in exclude. s.mu is held.
-func (s *session) deliveredFromLocked(fromSeq uint64, exclude map[uint64]bool) (delivered []storedDelivered, dropped int) {
+// fromSeq, lowest first, leaving out those whose sequence is in exclude. The
+// first maxStoredDelivered are for the record's value and the rest for chunks
+// (splitDelivered). s.mu is held.
+func (s *session) deliveredFromLocked(fromSeq uint64, exclude map[uint64]bool) (delivered, over []storedDelivered, dropped int) {
 	floor := s.deliveredFloor()
 	for id, m := range s.delivered {
 		if (m.seq >= fromSeq || !m.at.Before(floor)) && !exclude[m.seq] {
 			delivered = append(delivered, storedDelivered{ID: id, Seq: m.seq})
 		}
 	}
-	sort.Slice(delivered, func(i, j int) bool { return delivered[i].Seq < delivered[j].Seq })
-	if bound := int(storedDeliveredBound.Load()); len(delivered) > bound {
-		dropped = len(delivered) - bound
-		delivered = delivered[:bound]
-	}
-	return delivered, dropped
+	sort.Slice(delivered, func(i, j int) bool {
+		if delivered[i].Seq != delivered[j].Seq {
+			return delivered[i].Seq < delivered[j].Seq
+		}
+		return delivered[i].ID < delivered[j].ID
+	})
+	return splitDelivered(delivered)
 }
 
 // deliveredSinceInto writes into a checkpoint's record the delivered ids it
@@ -1320,12 +1361,13 @@ func (s *session) deliveredFromLocked(fromSeq uint64, exclude map[uint64]bool) (
 func (s *session) deliveredSinceInto(rec *sessionRecord, fromSeq uint64, since time.Time) (dropped int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rec.Delivered, dropped = s.deliveredSinceLocked(fromSeq, s.cur.next, since)
+	rec.Delivered, rec.deliveredOver, dropped = s.deliveredSinceLocked(fromSeq, s.cur.next, since)
+	rec.DeliveredSpill = nil // spillDelivered names the chunks again
 	s.cursorIntoLocked(rec, dropped)
 	return dropped
 }
 
-func (s *session) deliveredSinceLocked(fromSeq, lateSeq uint64, since time.Time) (delivered []storedDelivered, dropped int) {
+func (s *session) deliveredSinceLocked(fromSeq, lateSeq uint64, since time.Time) (delivered, over []storedDelivered, dropped int) {
 	from := lowestSeq(fromSeq, lateSeq)
 	for id, m := range s.delivered {
 		if (from != 0 && m.seq >= from) || !m.at.Before(since) {
@@ -1338,11 +1380,7 @@ func (s *session) deliveredSinceLocked(fromSeq, lateSeq uint64, since time.Time)
 		}
 		return delivered[i].ID < delivered[j].ID
 	})
-	if bound := int(storedDeliveredBound.Load()); len(delivered) > bound {
-		dropped = len(delivered) - bound
-		delivered = delivered[:bound]
-	}
-	return delivered, dropped
+	return splitDelivered(delivered)
 }
 
 // away is what takeAway hands the replay.
@@ -1816,6 +1854,7 @@ func (b *Broker) heldBlobs(clientID string) ([]string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	keys := append([]string(nil), s.spillKeys...)
+	keys = append(keys, s.deliveredKeys...)
 	for _, o := range s.inflight {
 		if o.blobKey != "" {
 			keys = append(keys, o.blobKey)
@@ -1836,13 +1875,15 @@ func (s *session) blobsStale(store *sessionStore) bool {
 			return true
 		}
 	}
-	return len(s.spillKeys) > 0 && store.blobStale(s.spillAt)
+	return len(s.spillKeys) > 0 && store.blobStale(s.spillAt) ||
+		len(s.deliveredKeys) > 0 && store.blobStale(s.deliveredKeysAt)
 }
 
 // spillInto makes rec fit one value, keeping what it can in spilled values
 // (sessionStore.spillRecord), and returns how many in-flight entries were left
 // out.
 func (s *session) spillInto(store *sessionStore, rec *sessionRecord) (lost int, err error) {
+	s.spillDeliveredInto(store, rec)
 	// The chunks the last record named are written again only when their
 	// payloads are about to expire; until then a chunk that did not change is
 	// named, not written.
@@ -1862,6 +1903,7 @@ func (s *session) spillInto(store *sessionStore, rec *sessionRecord) (lost int, 
 // commitSpill notes that rec, now written, names its spilled values as of
 // wroteAt, and deletes those an earlier record named that this one does not.
 func (s *session) commitSpill(store *sessionStore, rec *sessionRecord, wroteAt time.Time) {
+	s.commitDeliveredSpill(store, rec, wroteAt)
 	s.mu.Lock()
 	old := s.spillKeys
 	// Chunks carried over from the last record were written then, not now, so
@@ -2016,4 +2058,56 @@ func (s *session) restoreInflight(o *outbound) {
 	s.sendSeq++
 	o.seq = s.sendSeq
 	s.inflight[o.packetID] = o
+}
+
+// spillDeliveredInto moves the delivered ids rec cannot carry in its value to
+// chunks in the payload bucket, named in rec.DeliveredSpill, and returns how many
+// ids it could not keep. A record that lost any carries no replay cursor, which
+// promises every id above it (sessionStore.spillDelivered).
+func (s *session) spillDeliveredInto(store *sessionStore, rec *sessionRecord) (lost int) {
+	s.mu.Lock()
+	var known map[string]struct{}
+	if len(s.deliveredKeys) > 0 && !store.blobStale(s.deliveredKeysAt) {
+		known = make(map[string]struct{}, len(s.deliveredKeys))
+		for _, k := range s.deliveredKeys {
+			known[k] = struct{}{}
+		}
+	}
+	s.deliveredReused = known != nil
+	s.mu.Unlock()
+	return store.spillDelivered(rec, store.valueLimit(), known)
+}
+
+// commitDeliveredSpill is commitSpill for the chunks of delivered ids: it notes
+// the chunks rec, now written, names, and deletes those an earlier record named
+// that this one does not.
+func (s *session) commitDeliveredSpill(store *sessionStore, rec *sessionRecord, wroteAt time.Time) {
+	rec.deliveredOver = nil
+	s.mu.Lock()
+	old := s.deliveredKeys
+	if !s.deliveredReused || len(old) == 0 {
+		s.deliveredKeysAt = wroteAt
+	}
+	s.deliveredKeys = rec.DeliveredSpill
+	s.mu.Unlock()
+	named := make(map[string]struct{}, len(rec.DeliveredSpill))
+	for _, k := range rec.DeliveredSpill {
+		named[k] = struct{}{}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout) // for all of them
+	defer cancel()
+	for _, k := range old {
+		if _, still := named[k]; !still {
+			_ = store.deleteBlob(ctx, k) // the bucket's TTL removes what this cannot
+		}
+	}
+}
+
+// adoptDeliveredSpill notes the chunks a restored record named, so that the
+// first record written without them deletes them. They count as stale: the first
+// write names them again with a fresh age.
+func (s *session) adoptDeliveredSpill(keys []string) {
+	s.mu.Lock()
+	s.deliveredKeys, s.deliveredKeysAt = keys, time.Time{}
+	s.mu.Unlock()
 }

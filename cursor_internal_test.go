@@ -136,8 +136,8 @@ func TestARecordThatCannotCarryEveryIDAboveTheCursorCarriesNoCursor(t *testing.T
 	assert.Equal(t, []storedDelivered{{ID: "hole", Seq: 1}}, rec.ReplayHoles)
 	assert.Len(t, rec.Delivered, 10)
 
-	was := storedDeliveredBound.Swap(5)
-	t.Cleanup(func() { storedDeliveredBound.Store(was) })
+	was, wasSpilled := storedDeliveredBound.Swap(5), spilledDeliveredBound.Swap(0)
+	t.Cleanup(func() { storedDeliveredBound.Store(was); spilledDeliveredBound.Store(wasSpilled) })
 	rec = sessionRecord{}
 	assert.NotZero(t, s.awayStateInto(&rec))
 	assert.Zero(t, rec.ReplayCursor)

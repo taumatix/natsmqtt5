@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"strings"
 	"sync"
@@ -191,6 +192,18 @@ type sessionRecord struct {
 	// the entries in Inflight.
 	Spill []string `json:",omitempty"`
 
+	// DeliveredSpill names payload-bucket values that hold the delivered ids
+	// which did not fit in Delivered (more than maxStoredDelivered), in order,
+	// after those in Delivered (sessionStore.spillDelivered). Each value is a JSON
+	// array of ids. Kept by the claim and cleared with Delivered, and additive: a
+	// broker that predates it ignores the key and restores only Delivered, and a
+	// record that carried every id in its value has none, as before.
+	DeliveredSpill []string `json:",omitempty"`
+
+	// deliveredOver is the ids past Delivered's bound that a write still has to
+	// move to chunks; never written.
+	deliveredOver []storedDelivered
+
 	// awayWas, awayFromSeqWas, deliveredWas, inflightWas and receivedQoS2Was are
 	// what this broker's claim found and cleared, for the handshake to restore
 	// from. They are never written.
@@ -205,6 +218,7 @@ type sessionRecord struct {
 	receivedQoS2Was   []uint16
 	withdrawnWas      []storedWithdrawn
 	spillWas          []string
+	deliveredSpillWas []string
 }
 
 // storedWithdrawn is one withdrawn identifier of the client's session: the
@@ -482,6 +496,7 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 		ownerDead := attachedElsewhere && !s.ownerAlive(ctx, previousOwner)
 		if attachedElsewhere && !ownerDead {
 			rec.AwayAt, rec.AwayFromSeq, rec.AwayLateSeq, rec.Delivered, rec.DeliveredSince = time.Time{}, 0, 0, nil, time.Time{}
+			rec.DeliveredSpill = nil
 			rec.ReplayCursor, rec.ReplayHoles = 0, nil
 		}
 		legacy := ownerDead && rec.AwayAt.IsZero() && s.queueMaxAge > 0
@@ -497,7 +512,7 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 		rec.awayFromSeqWas = rec.AwayFromSeq
 		rec.awayLateSeqWas = rec.AwayLateSeq
 		rec.deliveredSinceWas = rec.DeliveredSince
-		rec.deliveredWas = rec.Delivered
+		rec.deliveredWas, rec.deliveredSpillWas = rec.Delivered, rec.DeliveredSpill
 		rec.replayCursorWas, rec.replayHolesWas = rec.ReplayCursor, rec.ReplayHoles
 		if legacy {
 			// Attached with no position at all: written by a broker that predates
@@ -914,6 +929,115 @@ func (s *sessionStore) spillRecordReusing(rec *sessionRecord, limit int, known m
 	return len(all) - kept, err
 }
 
+// maxDeliveredChunks bounds the chunk names a record carries for delivered ids:
+// at about a hundred bytes each they stay a small part of a value.
+const maxDeliveredChunks = 1024
+
+// deliveredChunkEvery sets the average chunk of delivered ids: one ends after an
+// id whose hash is a multiple of it. Where a chunk ends depends on its last id
+// alone, so ids trimmed off the front or appended at the back leave the other
+// chunks, and their keys, as they were.
+const deliveredChunkEvery = 512
+
+func endsChunk(id string) bool {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(id))
+	return h.Sum32()%deliveredChunkEvery == 0
+}
+
+// spillDelivered moves the ids in rec.deliveredOver, which Delivered could not
+// hold, to chunks in the payload bucket named in rec.DeliveredSpill, so that the
+// record still carries every id above its replay cursor [MQTT-4.4.0-1]. A chunk
+// with the same content has the same key (putBlob), so one in known, written by
+// the last record and still stored, is named without being written. The writes
+// share one deadline. It returns how many ids it could not keep (a chunk
+// that did not fit the names, or was not written in time), and the record then
+// carries no cursor.
+//
+// Ids Delivered holds beyond half the value (long ids) move to chunks too.
+func (s *sessionStore) spillDelivered(rec *sessionRecord, limit int, known map[string]struct{}) (lost int) {
+	over := rec.deliveredOver
+	rec.deliveredOver = nil
+	if len(over) == 0 {
+		return 0
+	}
+	rec.DeliveredSpill = nil
+	if budget, used, n := limit/2, 0, 0; len(rec.Delivered) > 0 {
+		for ; n < len(rec.Delivered); n++ {
+			raw, _ := json.Marshal(rec.Delivered[n])
+			if used += len(raw) + 1; used > budget {
+				break
+			}
+		}
+		if n < len(rec.Delivered) {
+			over = append(append([]storedDelivered(nil), rec.Delivered[n:]...), over...)
+			rec.Delivered = rec.Delivered[:n]
+		}
+	}
+
+	chunkMax := s.blobLimit()
+	var chunks [][]storedDelivered
+	used, from := 2, 0
+	for i, d := range over {
+		raw, _ := json.Marshal(d)
+		if i > from && used+len(raw)+1 > chunkMax {
+			chunks, from, used = append(chunks, over[from:i]), i, 2
+		}
+		used += len(raw) + 1
+		if endsChunk(d.ID) {
+			chunks, from, used = append(chunks, over[from:i+1]), i+1, 2
+		}
+	}
+	if from < len(over) {
+		chunks = append(chunks, over[from:])
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), sessionOpTimeout)
+	defer cancel()
+	var err error
+	for i, chunk := range chunks {
+		if i < maxDeliveredChunks && err == nil {
+			raw, _ := json.Marshal(chunk)
+			key := blobKeyFor(blobOwner(rec.ClientID), raw)
+			if _, have := known[key]; have {
+				rec.DeliveredSpill = append(rec.DeliveredSpill, key)
+				continue
+			}
+			if _, err = s.putBlob(ctx, blobOwner(rec.ClientID), raw); err == nil {
+				rec.DeliveredSpill = append(rec.DeliveredSpill, key)
+				continue
+			}
+		}
+		lost += len(chunk)
+	}
+	if lost > 0 {
+		// The ids left out may be above the cursor, which promises them all.
+		rec.ReplayCursor, rec.ReplayHoles = 0, nil
+		s.logger.Warn("delivered ids could not be kept beside the session record; a replay may repeat a QoS 2 message",
+			"client", rec.ClientID, "dropped", lost, "error", err)
+	}
+	return lost
+}
+
+// loadDeliveredSpill reads the ids named by keys back, in order. A value that
+// cannot be read is counted and skipped.
+func (s *sessionStore) loadDeliveredSpill(ctx context.Context, keys []string) (ids []storedDelivered, unreadable int) {
+	for _, key := range keys {
+		raw, err := s.getBlob(ctx, key)
+		var chunk []storedDelivered
+		if err == nil {
+			err = json.Unmarshal(raw, &chunk)
+		}
+		if err != nil {
+			unreadable++
+			s.logger.Warn("spilled delivered ids of a session could not be read", "key", key, "error", err)
+			continue
+		}
+		ids = append(ids, chunk...)
+	}
+	return ids, unreadable
+}
+
 // loadSpill reads the entries named by keys back, in order. A value that cannot
 // be read is counted and skipped; the entries of the others keep their order.
 func (s *sessionStore) loadSpill(ctx context.Context, keys []string) (entries []storedInflight, unreadable int) {
@@ -1158,6 +1282,9 @@ func (c *blobClaims) add(rec *sessionRecord) {
 		}
 	}
 	for _, k := range rec.Spill {
+		c.keys[k] = true
+	}
+	for _, k := range rec.DeliveredSpill {
 		c.keys[k] = true
 	}
 	if !rec.Attached {

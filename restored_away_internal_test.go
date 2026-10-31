@@ -84,8 +84,13 @@ func TestTheStoredIDsAreBounded(t *testing.T) {
 	s.markAwayLocked(away{at: time.Now(), fromSeq: 1})
 
 	_, _, ids, dropped := awayStateOf(s)
-	assert.Len(t, ids, maxStoredDelivered)
-	assert.Equal(t, 10, dropped)
+	assert.Len(t, ids, maxStoredDelivered, "the value holds the lowest sequences")
+	assert.Zero(t, dropped, "the ten past it are for chunks beside the record")
+
+	was := spilledDeliveredBound.Swap(4)
+	t.Cleanup(func() { spilledDeliveredBound.Store(was) })
+	_, _, _, dropped = awayStateOf(s)
+	assert.Equal(t, 6, dropped, "past the chunks' bound too, the highest sequences are left out")
 }
 
 // What the record carries is what keeps the rewind from repeating a message: a

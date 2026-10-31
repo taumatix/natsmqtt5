@@ -303,7 +303,7 @@ What it costs and what it does not cover yet:
 - With `PersistentSessions` it also covers a session restored after a restart
   or on another broker: the stored record says when the session was released,
   and, for a client that was behind, the lowest queue sequence it had not been
-  sent and the ids it had been sent above that (up to 4096), so the replay starts
+  sent and the ids it had been sent above that (up to 4096 in the record, 65536 more beside it), so the replay starts
   where the client stopped, as for a session held in memory. Limits there. A
   record without that position (one from a connection that had delivered
   everything) replays from the release itself rather than a moment before it,
