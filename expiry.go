@@ -42,13 +42,30 @@ import (
 // set on are built inside the broker for delivery.
 const hdrArrived = "Mqtt5-Arrived"
 
+// hdrPublishedAt is the publishing broker's receipt time of a message that carries a Message Expiry
+// Interval, in nanoseconds since the epoch, set only with Options.PublisherClockExpiry.
+const hdrPublishedAt = "Mqtt5-Published-At"
+
 // arrivedAt is when the broker took the message in: the stream timestamp of a
-// copy read back from JetStream, or now for a message arriving live.
-func arrivedAt(msg *nats.Msg, now time.Time) time.Time {
+// copy read back from JetStream, or now for a message arriving live. With
+// publisherClock (Options.PublisherClockExpiry) a live message counts from the
+// time the publishing broker stamped on it instead, which is never later than now:
+// a stamp from a clock ahead of this one counts as no wait, so it cannot shorten
+// the interval the message was sent with.
+func arrivedAt(msg *nats.Msg, now time.Time, publisherClock bool) time.Time {
 	if msg.Header != nil {
 		if v := msg.Header.Get(hdrArrived); v != "" {
 			if ns, err := strconv.ParseInt(v, 10, 64); err == nil {
 				return time.Unix(0, ns)
+			}
+		}
+		if publisherClock {
+			if v := msg.Header.Get(hdrPublishedAt); v != "" {
+				if ns, err := strconv.ParseInt(v, 10, 64); err == nil {
+					if at := time.Unix(0, ns); at.Before(now) {
+						return at
+					}
+				}
 			}
 		}
 	}

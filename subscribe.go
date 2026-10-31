@@ -441,7 +441,7 @@ func (c *conn) deliveryFor(sub *subscription, name string, msg *nats.Msg) *deliv
 		retain:  retain,
 		payload: msg.Data,
 		props:   props,
-		arrived: arrivedAt(msg, time.Now()),
+		arrived: arrivedAt(msg, time.Now(), c.broker.opts.PublisherClockExpiry),
 	}
 }
 

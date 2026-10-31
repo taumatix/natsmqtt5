@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -136,6 +137,9 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 	if dedupe {
 		// JetStream drops a second publish with the same id inside the stream's duplicate window.
 		msg.Header.Set(jetstream.MsgIDHeader, id)
+	}
+	if c.broker.opts.PublisherClockExpiry && p.Properties != nil && p.Properties.MessageExpiryInterval != nil {
+		msg.Header.Set(hdrPublishedAt, strconv.FormatInt(time.Now().UnixNano(), 10))
 	}
 	if q := c.broker.queue.Load(); q != nil && p.QoS > packet.QoS0 {
 		// Queued first, and confirmed; see offlineQueue.keep for why the
