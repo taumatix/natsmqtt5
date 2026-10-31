@@ -161,10 +161,10 @@ func (w *writer) byte(b byte) { w.buf = append(w.buf, b) }
 
 func (w *writer) bytes(b []byte) { w.buf = append(w.buf, b...) }
 
-func (w *writer) uint16(v uint16) { w.buf = append(w.buf, byte(v>>8), byte(v)) }
+func (w *writer) uint16(v uint16) { w.buf = append(w.buf, byte(v>>8), byte(v&0xff)) }
 
 func (w *writer) uint32(v uint32) {
-	w.buf = append(w.buf, byte(v>>24), byte(v>>16), byte(v>>8), byte(v))
+	w.buf = append(w.buf, byte(v>>24), byte(v>>16&0xff), byte(v>>8&0xff), byte(v&0xff))
 }
 
 func (w *writer) varByteInt(v int) {
@@ -172,12 +172,12 @@ func (w *writer) varByteInt(v int) {
 }
 
 func (w *writer) binary(b []byte) {
-	w.uint16(uint16(len(b)))
+	w.uint16(uint16(len(b) & math.MaxUint16)) // checkBinaryLen has already refused anything longer
 	w.bytes(b)
 }
 
 func (w *writer) string(s string) {
-	w.uint16(uint16(len(s)))
+	w.uint16(uint16(len(s) & math.MaxUint16)) // checkStringLen has already refused anything longer
 	w.buf = append(w.buf, s...)
 }
 

@@ -452,7 +452,7 @@ func (w *willStore) watchOnce(ctx context.Context) {
 		w.logger.Warn("could not watch the Will bucket; checks read it directly", "error", err)
 		return
 	}
-	defer watcher.Stop()
+	defer func() { _ = watcher.Stop() }() // a stop error on the way out has nothing to act on
 	for {
 		select {
 		case <-ctx.Done():

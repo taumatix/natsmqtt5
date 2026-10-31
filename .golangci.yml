@@ -1,0 +1,21 @@
+# errcheck and gosec, beside staticcheck (ci.yml). Pinned in CI; see CONTRIBUTING.md.
+version: "2"
+linters:
+  default: none
+  enable:
+    - errcheck
+    - gosec
+  settings:
+    errcheck:
+      exclude-functions:
+        # Writes to the process's own stdout/stderr (usage text, -version): there is nowhere to report a failure.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+  exclusions:
+    rules:
+      # Tests close clients, listeners and brokers on the way out, where a failure changes no
+      # assertion, and build wire bytes by hand: the narrowing there is the point (a length
+      # prefix, a packet identifier) and is bounded by the test's own constants.
+      - path: _test\.go
+        linters: [errcheck, gosec]

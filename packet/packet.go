@@ -57,7 +57,7 @@ func Read(r *bufio.Reader, maxPacketSize uint32) (Packet, error) {
 	if err != nil {
 		return nil, err
 	}
-	if maxPacketSize > 0 && uint64(1+headerLen+remaining) > uint64(maxPacketSize) {
+	if maxPacketSize > 0 && int64(1+headerLen+remaining) > int64(maxPacketSize) {
 		return nil, ErrPacketTooLarge
 	}
 

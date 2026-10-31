@@ -202,7 +202,8 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 	}
 	if queueRetryNeeded {
 		b.wg.Add(1)
-		go b.retryQueueLoop(r)
+		// The start-up context ends when New returns; the loop outlives it and ends on b.shutdown.
+		go b.retryQueueLoop(r) //nolint:gosec // G118: deliberately not tied to New's start-up context
 	}
 	return b, nil
 }
@@ -244,7 +245,7 @@ func (b *Broker) Serve(ctx context.Context) error {
 	go func() {
 		select {
 		case <-ctx.Done():
-			b.listener.Close()
+			_ = b.listener.Close() // unblocks Accept; a close error has nothing to act on
 		case <-stop:
 		}
 	}()
@@ -294,7 +295,7 @@ func (b *Broker) Close() error {
 	b.mu.Unlock()
 
 	if b.listener != nil {
-		b.listener.Close()
+		_ = b.listener.Close() // the broker is shutting down; a close error has nothing to act on
 	}
 	b.drainConns()
 	// Waiting for the connections means every session has been through finish
@@ -392,7 +393,9 @@ func (b *Broker) closeNATS() {
 	// shutdown read it without a lock, and a drained connection answers them
 	// with an error where a nil one would race or panic.
 	if b.ownsNC && b.nc != nil {
-		b.nc.Drain()
+		if err := b.nc.Drain(); err != nil {
+			b.logger.Debug("draining the NATS connection", "error", err)
+		}
 	}
 }
 
