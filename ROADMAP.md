@@ -443,19 +443,18 @@ PUBLISH-to-acknowledgement exchange, and only in the moment the backlog is given
 
 ## Without the queue, a client that falls behind still loses QoS 1 and 2
 
-**Blocked by:** real deployments without JetStream asking for the opt-in limit.
-
-**Decided (2026-10-30):** documented (README, "What it does not do"), and back-pressure is not built. With
-`DisableOfflineQueue` or without JetStream there is no copy to catch up from, so past 2048 waiting messages the broker
-drops, as before, and says so in its log. Blocking the subscription's NATS handler holds back only that client's
-subscriptions, but it does not slow the publishers: messages pile up in nats.go's per-subscription pending buffer,
-which has a count and byte limit, and past it nats.go drops them and reports a slow consumer on the broker's one
-shared connection. That moves the loss to a place with less information and a wider blast radius, and the memory
-held until then is bounded only by those pending limits. Reasoned from nats.go's documented behaviour, not measured.
-QoS 0, and messages published straight onto NATS, are dropped the same way with the queue on.
-**Left, only if a deployment without JetStream asks:** an opt-in per-connection limit that closes a connection that is
-2048 messages behind and leaves the session to resume, which loses nothing it had not already lost and makes the
-failure visible to the client. It would need a test with a client that stops reading.
+**Done (2026-10-31):** `Options.CloseBehindClients` (off by default): with no queue, the connection of a client that
+lost a QoS 1 or 2 message because it was 2048 behind is closed with DISCONNECT 0x97 and its session is kept
+(`close_behind_test.go`: a client that reads nothing while 2300 messages are published through a real broker and NATS,
+the DISCONNECT, the session resumed, a default broker that stays connected, a client that keeps up, and one with the
+queue on that is never closed). The DISCONNECT is written with a short write deadline because the delivery loop holds
+the write lock while it is blocked on this very client.
+**Decided (2026-10-30), unchanged:** back-pressure (blocking the subscription's NATS handler) is not built. It holds
+back only that client's subscriptions, does not slow the publishers, and moves the loss into nats.go's pending buffer
+and a slow-consumer report on the broker's one shared connection.
+**Left:** the message that triggered the close and the ones queued behind it are still lost; without a queue they have
+no copy. The limit is the fixed 2048 (`deliveryQueueDepth`), not an option; a deployment that wants a lower or higher
+one should say so. QoS 0, and messages published straight onto NATS, are dropped without closing, as with the queue on.
 
 ## Statements covered only by unit tests
 
