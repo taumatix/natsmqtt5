@@ -71,7 +71,10 @@ with more than 1024 holes inside one rewind); not measured.
 
 **Also:** a hole is sent only at the next resume. A message whose live copy never comes stays owed while the client is
 connected, which [MQTT-4.4.0-1] allows (it requires the resend on reconnect) but a client cannot tell from a lost one.
-A scan that finds a hole older than a few seconds could hand it to the catch-up path. And each SUBSCRIBE now costs a
+A scan that finds a hole older than a few seconds could hand it to the catch-up path. A resume whose queue read fails
+(an error other than an empty or unanswered fetch, which are read again since 2026-10-31) logs "what it held is lost
+for this session" and sends nothing until the next resume, though the cursor did not move; retrying the read while
+the client stays connected would close that. And each SUBSCRIBE now costs a
 stream info request and each 1024 deliveries a filtered read; neither is measured over a clustered, replicated stream.
 
 ## Self-fencing on a cluster: what is left
@@ -247,9 +250,22 @@ on a miss), and clients in the field that mishandle aliases, which only a trial 
 
 ## QoS 2 on shared subscriptions
 
-**Blocked by:** a release: entry 3 waits for a release that carries `SharedQoS2` (entries 1 and 2 are on `main`,
-unreleased). Two windows remain (below), both after a client answered; neither blocks the switch but both are named
-for whoever flips it.
+**Blocked by:** known duplicates (checked 2026-10-31, after v0.13.0 carried entries 1 and 2). The release is out, so
+that blocker is gone. The default stays off because three known windows still let one QoS 2 message reach a group
+twice, which a QoS 2 grant forbids [MQTT-4.3.3-2]. A SUBACK granting QoS 2 by default would promise more than the
+broker keeps:
+
+1. the late backlog (*A default queue that failed at startup*, **Left:**): a message the group acknowledged from the
+   backlog before its live copy reached this broker is delivered live as well. No crash is needed, only a slow live
+   copy at the moment the backlog is given, so this one alone keeps the default off;
+2. a message pulled and sent but not yet checkpointed when its broker is killed goes back to the group after AckWait
+   (entry 1, **Not covered**);
+3. a broker killed after reading the PUBREC and before writing the record that names the PUBREL (entry 2, **Not
+   covered**).
+
+Flip the default when (1) is closed, with a test that fails before the fix. (2) and (3) need either a fix or a line in
+the README naming them as the guarantee's limit across a killed broker, as `shared_killed_test.go` already does for
+QoS 1 ("seen twice at worst, never lost"). Until then the README keeps "leave it off in production".
 
 **Today:** a QoS 2 request on a `$share/` filter is granted QoS 1, reported
 honestly in the SUBACK, which [MQTT-3.8.4-7] permits.
@@ -298,8 +314,9 @@ answered, the group gets the message after AckWait).
 
 ### 3. Grant QoS 2 on `$share/`
 
-Make `Options.SharedQoS2` (added by entry 1, off) the default once a release has
-carried 1 and 2, and document it in the README. The SUBACK test moves from QoS 1 to the
+Make `Options.SharedQoS2` (added by entry 1, off) the default once the duplicates under **Blocked by** are settled,
+keep an explicit opt-out (an `Options` field and a flag, since `false` is the zero value), add a CHANGELOG line that
+names the SUBACK change, and document it in the README. The SUBACK test moves from QoS 1 to the
 requested QoS ([MQTT-3.8.4-7]); with the switch off a QoS 2 request is still
 granted QoS 1.
 
