@@ -298,6 +298,26 @@ type Options struct {
 	// acknowledged is forgotten, so a later message that reuses the packet identifier is never mistaken
 	// for a duplicate. Requires DurablePublish; it is an error without it.
 	DurablePublishDedupe bool
+	// NATSIngest lets a plain NATS client publish through a broker. A message
+	// published on a live subject straight onto NATS has no queue copy, so a
+	// session that was away never gets it and a shared subscription gets it
+	// only through its NATS queue group, which can pick a member whose client is
+	// away. With this option the broker also listens on
+	// <SubjectPrefix>.$ingest.<subject>, in a NATS queue group of every broker
+	// that has it on, so one broker takes each message and handles it as an
+	// MQTT PUBLISH on <subject>: the Mqtt5-* headers give its QoS, Retain flag
+	// and properties (as on a live copy, see the README), the topic is checked
+	// as a PUBLISH's is (and one starting with $ is always refused), a retained
+	// message is stored, a QoS 1 or 2 message gets
+	// its queue copy, and the live copy goes out with the broker's id and queue
+	// sequence. A request is answered once that is done: an empty reply carrying
+	// Mqtt5-Msg-Id and, when queued, Mqtt5-Queue-Seq; or one carrying
+	// Mqtt5-Ingest-Error with the reason, after which nothing was published.
+	//
+	// The Authorizer is not asked: a NATS client has no MQTT identity, and NATS
+	// permissions on the ingest subject decide who may use it. Off by default,
+	// and then nothing listens on the subject.
+	NATSIngest bool
 	// OfflineQueueMaxAge is how long a queued message is kept. Defaults to 24
 	// hours. A session away for longer loses what is older.
 	OfflineQueueMaxAge time.Duration

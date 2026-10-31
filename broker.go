@@ -84,6 +84,9 @@ type Broker struct {
 	queue atomic.Pointer[offlineQueue]
 	// reauthSub answers other brokers' Reauthorize; see reauthorize.go.
 	reauthSub *nats.Subscription
+	// ingestSub takes messages from the ingest subject, with
+	// Options.NATSIngest; see ingest.go.
+	ingestSub *nats.Subscription
 	conns     map[*conn]struct{}
 	closed    bool
 	// shutdown closes when Close is called, so background work such as a
@@ -197,7 +200,16 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 		b.closeNATS()
 		return nil, err
 	}
+	if err := b.listenForIngest(); err != nil {
+		b.stopReauthorize()
+		b.closeWills()
+		b.closeSessionStore()
+		b.closeRetain()
+		b.closeNATS()
+		return nil, err
+	}
 	if err := b.listen(); err != nil {
+		b.stopIngest()
 		b.stopReauthorize()
 		b.closeWills()
 		b.closeSessionStore()
@@ -307,6 +319,8 @@ func (b *Broker) Close() error {
 	if b.listener != nil {
 		_ = b.listener.Close() // the broker is shutting down; a close error has nothing to act on
 	}
+	// The other brokers in the ingest queue group take what comes next.
+	b.stopIngest()
 	b.drainConns()
 	// Waiting for the connections means every session has been through finish
 	// and has released its stored record, so a broker that shuts down cleanly

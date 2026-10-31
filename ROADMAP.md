@@ -355,15 +355,40 @@ default cannot do better without paying a lookup per entry on a timer for every 
 
 ## Offline queue for messages published by plain NATS clients
 
-**Blocked by:** a cross-broker design (a decision against the membership bucket with a revision check).
+**Blocked by:** a major version, for what is left: queueing a message published *unchanged* on a live subject
+without a second delivery needs the brokers to be the first to see it, which is a subject layout change (MQTT
+subscribers on subjects only brokers publish to), a wire break for every broker and plain NATS subscriber.
 
 Only messages that pass through a broker are copied to the queue. They also
 reach a shared subscription only through its NATS queue group, as QoS 0
 messages do, and NATS still picks members whose client is away, whose share is
-dropped. Leaving the queue group while the session has no connection would stop
-that, as long as the last member leaving does not leave the group with nobody.
+dropped.
 
-Evaluated and not built: the queue group is a property of a NATS subscription on one broker,
+**Design (2026-10-31).** A copy stored *after* a plain publish cannot be told apart from it: the live copy has
+reached subscribers with no id, so every session that had it would get the queue copy again on a resume or a
+catch-up, and a shared group would get it twice (queue group and backlog). The broker has to come first. So a
+plain NATS client that wants the queue publishes through a broker: on `<prefix>.$ingest.<subject>`, which
+nothing but the brokers subscribes to (one NATS queue group), and the broker that takes it does what it does for
+an MQTT PUBLISH. The live copy then carries the id and queue sequence, so away sessions are replayed, the shared
+backlog hands QoS 1 and 2 work only to connected members (which closes the shared half of this entry for those
+messages without touching queue groups), and `ReconnectCatchUp` covers it. Additive, off by default.
+
+**Done (2026-10-31):** `Options.NATSIngest` (`-nats-ingest`, `ingest.go`): topic and QoS checked as a PUBLISH's, a `$`
+topic always refused (it would write `$retained` or `$queue`), retained stored, queue copy kept, live copy published, `DurablePublish`'s flush honoured; a request is answered
+with `Mqtt5-Msg-Id` and `Mqtt5-Queue-Seq`, or `Mqtt5-Ingest-Error`. Tests (`ingest_test.go`, two brokers on one
+NATS, a plain nats.go client): an away session is replayed, a connected one gets it once with its properties, 30
+shared jobs all reach the connected member with the other away, QoS 0 is live only, a retained message is stored,
+refusals are answered, and nothing answers with the option off.
+
+**Left:**
+
+1. Messages published unchanged on a live subject (above): not queued, and a shared group still gets them
+   through its queue group.
+2. For those, a QoS 0 or unqueued share NATS hands to a member whose client is away is dropped. MQTT allows that
+   for QoS 0; it matters only for a plain publish with `Mqtt5-Qos` 1 or 2, which `NATSIngest` now serves. Leaving
+   the queue group while away was evaluated and not built:
+
+The queue group is a property of a NATS subscription on one broker,
 while "nobody left" is a fact about every broker's members, which only the membership bucket
 knows and which changes between the check and the unsubscribe. A broker that leaves on the
 strength of a stale read, or a member that returns while the group is empty, loses live QoS 0
