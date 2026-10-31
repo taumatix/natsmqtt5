@@ -320,18 +320,6 @@ size rather than by identifier shifts as before; identifiers that do not cycle i
 out of order leaves gaps) make the chunks uneven, not wrong. A session attached to a broker that died has its unnamed payloads judged only once
 its record is reclaimed, or they age out.
 
-## Other tests still sleep for a checkpoint or a publish
-
-**Blocked by:** nothing; each remaining sleep needs a condition to wait on.
-
-**Today:** tests that slept after a connection ended wait on `waitDetached` / `waitDetachedTimes`, and the
-checkpoint-with-a-message-in-flight sleeps poll the stored record (`awaitCheckpointedInflight`). What remains are sleeps
-that wait for something else: the ageing of a message past the checkpoint skew now waits only for the remainder of the
-stream's own timestamp (`awaitQueuedOlderThanTheCheckpointSkew`, a clock condition with no event), 1500 ms for a session's expiry to pass
-(`spec_integration_test.go`), and the "a session that is only away keeps its payload" check, which is negative by nature.
-`TestSmokeSessionMovesBetweenBrokers` keeps its 200 ms: the back-off of a retry loop against brokers in containers,
-whose logs the test cannot read. Same flake risk; each needs a condition to wait on rather than a drop log.
-
 ## Retained view: a stale entry that cancels an unseen one
 
 **Blocked by:** *real deployments*: what is left is a partition shorter than the NATS client's ping interval, which the

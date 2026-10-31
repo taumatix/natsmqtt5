@@ -263,6 +263,21 @@ func SetQueueRetryEvery(t interface {
 	t.Cleanup(func() { queueRetryEvery, queueRetryMax = wasFirst, wasMax })
 }
 
+// HasSharedBacklog reports whether the session clientID, held by b, has a
+// shared subscription with a backlog consumer.
+func HasSharedBacklog(b *Broker, clientID string) bool {
+	s := b.peekSession(clientID)
+	if s == nil {
+		return false
+	}
+	for _, sub := range s.subscriptions() {
+		if sub.share != "" && sub.backlog() != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // SetQueueRetryGate makes the broker's retry of a default queue that failed at
 // start-up ask f first, and wait for its next turn while f says no.
 func SetQueueRetryGate(b *Broker, f func() bool) { b.queueRetryGate.Store(&f) }
