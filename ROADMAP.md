@@ -534,65 +534,12 @@ goroutines (`pullWG`) did not hang with NATS frozen, killed or cut off while one
 
 **Left:** `Close` racing the `catchUpAfterReconnect` goroutine, which is not in `b.wg`; no hang seen.
 
-## Statements covered only by unit tests
+## `Broker.Close` with NATS down while a catch-up read is held can hang
 
-**Blocked by:** nothing; driving the cursor's bounds over a socket needs a hook to lower them.
+**Blocked by:** nothing; it needs a reproduction.
 
-Found by the 2026-10-08 audit of the offline-queue, session and replay work (v0.9.1 to v0.10.0 and
-after) against the rule in [CONTRIBUTING.md](CONTRIBUTING.md): each statement a change touches needs
-an integration test over a real socket against a real NATS server. `spec_integration_test.go` closed
-most of them; these remain, each with why:
-
-- **A delivered message above the replay's start, produced by the broker.** The guard against
-  sending a QoS 2 message twice on a restored rewind [MQTT-4.3.3-2], [MQTT-4.3.3-6] is proved over
-  the wire with a record written from the queue's real sequences and ids
-  (`TestARestoredRewindDoesNotRedeliverAQoS2MessageItAlreadyDelivered`), because the state needs two
-  publishers' copies to arrive out of order. The unit tests cover how the broker arrives at it
-  (`restored_away_internal_test.go`). A stress test with six concurrent publishers across a drop and a move to another
-  broker (2026-10-13, `restored_concurrent_qos2_test.go`) finds every message once and none sent as new twice, but it
-  is weak evidence for this guard: with the delivered-id test removed from `offline.go` and `catchup.go` it still passes,
-  because the replay in that run starts past what was delivered. The out-of-order state is now produced by the broker
-  (2026-10-30, `out_of_order_queue_test.go`): `SetPublishQueuedGate` (test-only) holds one publisher between its queue
-  copy and its live publish while another is delivered, and the detached session's restored rewind sends the held one
-  and not the delivered one again. With the delivered-id test removed from `offline.go` and `catchup.go` that test fails
-  (it is sent again), so it proves the guard.
-- **The cap on stored delivered ids** (4096 in the value, 65536 more in chunks since 2026-10-31, hooks
-  `SetStoredDeliveredBound`, which also removes the chunks, and `SetInlineDeliveredBound`): past it a restored rewind
-  repeats a QoS 2 message [MQTT-4.3.3-6]. Driven end to end with the bound lowered to 20
-  (`TestAClientAheadOfMoreThanTheStoredIDBoundIsWarnedAndRepeatedOnlyPastIt`: a warning on release,
-  and exactly the ids past the bound repeated), because 4100 deliveries take minutes under `-race`;
-  that the bound is 4096 is `TestTheStoredIDsAreBounded`'s alone; 4396 ids in the value and chunks, with the real
-  bound, are `TestMoreThan4096IDsAboveTheCursorSurviveARestartWithTheCursor_MQTT_4_4_0_1`. The test shows which ids the cap
-  drops: the highest-sequence ones, which are the newest and the likeliest to be redelivered. Keeping
-  the newest instead would trade one repeat for another. The chunks moved the cap from 4096 to 69632 ids; a session
-  without a cursor that delivers more within the rewind still repeats.
-- **The replay cursor's bounds and its race with a live copy: driven end to end since 2026-11-01 except one instant**
-  (`cursor_bounds_test.go`, bounds lowered by `SetCursorIDBound` and `SetStoredDeliveredBound`). A cursor dropped past
-  its bound of ids above it (16384 in production, 5 in the test) leaves the connected session without one, and a
-  message whose live copy never came and is older than the rewind is then not replayed, where with the bound at its
-  default it is [MQTT-4.4.0-1]; a record that left ids out carries no cursor, logs the warning, and the broker that
-  restores it replays from the time rewind. That the bound is 16384 is `TestTooManyIDsAboveTheCursorDropIt`'s alone.
-  The hole bound, the restart after it and a live copy below a restarted cursor's base were driven already
-  (`replay_cursor_test.go`). A live copy arriving while a scan applies is driven too (`cursor_scan_live_test.go`, a hook in `scanOnce` holds the scan between its read and its apply). Still unit tests: the restart's other refusals (a message held below base, a scan longer than the rewind, a
-  subscription made while it read) are unit tests and the randomized model (`cursor_model_internal_test.go`), which
-  drives the session's code with scans applied after other events, not the broker's goroutines. The new test found a
-  data race in `noteLiveCopy` (it read the cursor under `cursorMu` while `dropCursorLocked` wrote it under `mu`), fixed
-  with it.
-- **Driven end to end since 2026-11-01: the offline queue on a broker without JetStream.** A QoS 1 message
-  published while a session is away is held in memory, bounded by `AwayBufferMessages`, and delivered on resume;
-  an overflowing session is ended and answered with Session Present 0 [MQTT-3.1.2-23], [MQTT-4.5.0-1]
-  (`away_buffer_test.go`, over real sockets against a NATS server with no JetStream). Not covered end to end: a
-  race between a message arriving and the connection ending (unit-level reasoning in `away.go`, `-race` runs).
-- **Driven end to end since 2026-10-31 (these were unit-tested only).** `NATSIngest` when the queue copy cannot be
-  stored (stream deleted: error reply, no sequence, nothing live) and when `DurablePublish`'s flush cannot be confirmed
-  (the broker's NATS cut after the queue copy: error reply once NATS is back, copy stored; `ingest_fault_test.go`).
-  The session-record chunks when they cannot be written (payload bucket deleted under the broker: no cursor, no chunk
-  names, a warning) and when one cannot be read (purged: cursor dropped on restore, a warning;
-  `replay_cursor_spill_fault_test.go`). `ReconnectCatchUp` across a second drop during a 300-message catch-up held by a
-  client at Receive Maximum 2: every message once and in order, the client never closed
-  (`reconnect_catchup_cut_test.go`). Still unit-only: `catchUp`'s `retryAfterDrop` branch. A proxy drop does not
-  reach it, because the ordered consumer rides over a dropped connection (the server keeps it) and a read blocked on
-  a dead connection did not return an error in 40 s; it needs the consumer lost, which only a JetStream server restart
-  does (`TestClusterReconnectCatchUp...` kills the server, but its read is not cut mid-way). Also: closing a broker
-  whose NATS is down while a catch-up read waits did not return in the test's cleanup (observed once, test
-  failing); not investigated, worth its own entry.
+`TestCloseReturnsWhileACatchUpReadIsHeldAndNATSIsDown` was seen not returning on a macOS runner (PR #246's CI, Go 1.26:
+the test sat 17 minutes until the 20 minute `go test` limit; the other three matrix jobs passed), and once before in a
+test cleanup. It is not a regression of #246 (the test and the code it drives are untouched). `Close` should return
+within the NATS drain's timeout whatever a catch-up read is waiting for; find the goroutine it waits on (the test's
+panic output on the failed job names the stacks) and fix it or bound it.
