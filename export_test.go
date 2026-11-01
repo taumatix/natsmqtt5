@@ -110,6 +110,17 @@ func SetResumeGate(b *Broker, f func(filter string)) {
 	b.resumeGate.Store(&f)
 }
 
+// SetScanGate makes a replay-cursor scan call f after it has read the queue and
+// before it applies what it read, which is where a live copy can arrive while
+// the cursor is about to move. nil removes it.
+func SetScanGate(b *Broker, f func()) {
+	if f == nil {
+		b.scanGate.Store(nil)
+		return
+	}
+	b.scanGate.Store(&f)
+}
+
 // SetSessionExpiredHook makes the session sweep call f with the Client
 // Identifier and the number of subscriptions of every session it expires. nil
 // removes it.

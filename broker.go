@@ -64,6 +64,10 @@ type Broker struct {
 	// resumeGate, when set, is called with each stored filter after it has been
 	// authorised and before it is rebuilt: the window a takeover can land in.
 	resumeGate atomic.Pointer[func(filter string)]
+	// scanGate, when set, is called by a replay-cursor scan after it has read
+	// the queue and before it applies the result: the window a live copy can
+	// land in. A seam for tests.
+	scanGate atomic.Pointer[func()]
 
 	// liveSeen counts the live NATS copies the subscription handlers have
 	// finished with, delivered or dropped. Tests wait on it for a copy to have
