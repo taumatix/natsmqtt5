@@ -121,9 +121,17 @@ func TestDurablePublishQoS2RecIsAcknowledgedAfterStorageAndDeliveredOnce(t *test
 // must say so with an error Reason Code rather than a PUBACK / PUBREC that
 // means success. Nothing is delivered live either: a refused publish that
 // still reached subscribers would be delivered again when the client resends.
+//
+// QueuePlainPublishes is pinned off: with it on, the broker's subscription on the live
+// subjects makes a JetStream publish to a missing stream wait for its timeout
+// (offlineKeepTimeout, 5 s) instead of failing at once with "no responders", so the refusal
+// comes later than this test's read deadline. MIGRATION.md lists the change.
 func TestDurablePublishWithoutTheStreamRefusesInsteadOfAcknowledging(t *testing.T) {
 	natsURL := startNATS(t)
-	addr := durableBroker(t, natsURL)
+	addr := startBroker(t, natsURL, func(o *natsmqtt5.Options) {
+		o.DurablePublish = true
+		o.PinQueuePlainPublishes = natsmqtt5.Ptr(false)
+	})
 
 	sub, _ := connectClient(t, addr, connectOpts("dpx-sub"))
 	_, err := sub.Subscribe(context.Background(), &paho.Subscribe{

@@ -330,11 +330,12 @@ func TestSharedSubscriptionDeliversToOneMember(t *testing.T) {
 	b.expectNoMessage()
 }
 
-// A QoS 2 shared subscription is granted QoS 1 instead, which the server is
+// With the v1 pin (PinSharedQoS2 false; v2 grants QoS 2 by default) a QoS 2
+// shared subscription is granted QoS 1 instead, which the server is
 // permitted to do [MQTT-3.8.4-7]. Delivery affinity for a half-finished QoS 2
 // exchange cannot be expressed with a NATS queue group.
 func TestSharedSubscriptionDowngradesQoS2(t *testing.T) {
-	addr := startBroker(t, startNATS(t))
+	addr := startBroker(t, startNATS(t), func(o *natsmqtt5.Options) { o.PinSharedQoS2 = natsmqtt5.Ptr(false) })
 	c, _ := connectClient(t, addr, connectOpts("worker"))
 
 	ack := c.subscribe(paho.SubscribeOptions{Topic: "$share/g/jobs/#", QoS: 2})

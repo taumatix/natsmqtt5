@@ -410,8 +410,9 @@ session's subjects. It also catches up after a route between NATS servers drops 
 connected: the broker watches the server list its connection learns from the server, and a change
 starts the same hold and catch-up. Known limits: it does not see a route the server has not yet
 noticed is dead (set `ping_interval` on the servers to shorten that), a flap shorter than 200 ms, or
-a connection created with `nats.IgnoreDiscoveredServers`; and it does not see messages published straight onto a live subject, which have no
-queue copy (publish them through `NATSIngest` instead; [ROADMAP.md](ROADMAP.md)).
+a connection created with `nats.IgnoreDiscoveredServers`; and it does not see messages published
+straight onto a live subject with no `Mqtt5-Qos` header (or QoS 0), which have no queue copy; one with
+an `Mqtt5-Qos` of 1 or 2 is queued by a broker (see below).
 
 ## How MQTT maps onto NATS
 
@@ -438,11 +439,34 @@ must differ.
 A NATS message with no `Mqtt5-*` headers is delivered as a QoS 0 message with
 no properties, which is what makes plain `nats pub` reach MQTT subscribers.
 
+### Publishing from plain NATS: queued since v2.0.0
+
+A message a plain NATS client publishes on a live subject, `<prefix>.<subject>`, with an
+`Mqtt5-Qos` header of 1 or 2 is queued (`Options.QueuePlainPublishes`, on by default since v2.0.0;
+`Options.PinQueuePlainPublishes: natsmqtt5.Ptr(false)` or `-queue-plain-publishes=false` keeps the
+v1 behaviour). Every broker with an offline queue leaves the first copy to plain NATS subscribers
+and one broker, chosen by a NATS queue group on `<prefix>.>`, handles it as it handles an ingest
+message (below): the queue copy is stored and the live copy is published again with
+`Mqtt5-Msg-Id` and `Mqtt5-Queue-Seq`, which is the copy MQTT sessions are delivered. A session
+that was away gets it when it comes back, and a shared group's QoS 1 and 2 work goes only to
+members whose client is connected.
+
+    nats pub 'mqtt.sensors.7.temp' 21.5 -H 'Mqtt5-Qos: 1'
+
+What a plain NATS **subscriber** sees changes: such a message arrives twice, the original (no
+`Mqtt5-Msg-Id`) and the broker's copy (with one); filter on the header. A message with no
+`Mqtt5-Qos`, QoS 0, a subject starting with `$` and a message that already has an id are not
+touched. Nothing answers the publisher; the broker logs a refusal (a topic that fails validation, a
+QoS above `MaximumQoS`) at WARN, and the message is then dropped for MQTT sessions. Every broker
+now has one more NATS subscription, on `<prefix>.>` in a queue group, which sees every message under
+the prefix once per message in the cluster, so measure it on a busy subject space. Brokers sharing
+a `SubjectPrefix` must agree on the option, or a broker that does not hold the first copy back
+delivers it as well as the republished one.
+
 ### Publishing from plain NATS through a broker
 
-A message published straight onto a live subject has no queue copy, whatever its `Mqtt5-Qos`
-header says: a session that was away never gets it, and a shared subscription gets it only through
-its NATS queue group, which can pick a member whose client is away and drop it there. With
+A message published straight onto a live subject has no queue copy unless it asks for one as
+above. Through the ingest subject the publisher is also told the outcome. With
 `Options.NATSIngest` (`-nats-ingest`, `NATSMQTT5_NATS_INGEST=true`) the brokers also listen on
 `<prefix>.$ingest.<subject>`, in one NATS queue group, and the broker that takes a message handles
 it as an MQTT PUBLISH on `<subject>`. It checks the topic and the QoS (and refuses a topic starting
@@ -603,9 +627,9 @@ outlasted that and the time the owner takes to notice (about 5 times
 only after its client's connection is closed [MQTT-3.1.2-8]. The price is that
 the Will of a broker that really died waits that long longer than it did.
 
-## Three defaults that changed in v1.0.0
+## Defaults that changed in v1.0.0 and v2.0.0
 
-Three behaviours are on by default since v1.0.0. Each can be pinned either way with an option that
+Three behaviours are on by default since v1.0.0 and two since v2.0.0. Each can be pinned either way with an option that
 beats the plain one, and a pin is the only way to keep the old behaviour (a plain `false` cannot
 turn off what is on by default). [MIGRATION.md](MIGRATION.md) says per change what differs, who is
 affected and the one setting that keeps the old behaviour.
@@ -615,6 +639,8 @@ affected and the one setting that keeps the old behaviour.
 | Durable Wills | `Options.PinDurableWills` | `-durable-wills[=false]` |
 | Restricting `$` topics | `Options.PinRestrictDollarTopics` | `-restrict-dollar-topics[=false]` |
 | Outbound topic aliases | `Options.PinOutboundTopicAliases` | `-outbound-topic-aliases[=false]` |
+| QoS 2 on shared subscriptions (v2.0.0) | `Options.PinSharedQoS2` | `-shared-qos2[=false]` |
+| Queueing plain NATS publishes (v2.0.0) | `Options.PinQueuePlainPublishes` | `-queue-plain-publishes[=false]` |
 
 
 ## What it does not do
@@ -661,9 +687,10 @@ one with fewer features:
   unacknowledged, with their original Packet Identifiers [MQTT-4.4.0-1]. A
   session restored from the store instead — after a restart, or on another
   broker — has nothing to resend.
-- **Shared subscriptions are granted QoS 1 by default.** A QoS 2 request on a
-  `$share/` filter is answered with `Granted QoS 1` in the SUBACK, which
-  [MQTT-3.8.4-7] permits. `Options.SharedQoS2` (`-shared-qos2`) grants QoS 2: the
+- **Shared subscriptions are granted QoS 2 since v2.0.0.** A QoS 2 request on a
+  `$share/` filter is answered with `Granted QoS 2` in the SUBACK;
+  `Options.PinSharedQoS2: natsmqtt5.Ptr(false)` (`-shared-qos2=false`) answers `Granted QoS 1`
+  as v1 did, which [MQTT-3.8.4-7] permits. With QoS 2 granted: the
   member that is sent a message owns it from then on, a held message survives a
   killed broker and a takeover (also for a client that stays away longer than the
   group's 30 s AckWait: the surviving brokers keep saying the message is being
@@ -671,9 +698,9 @@ one with fewer features:
   at PUBREC. Across a killed broker the guarantee is that of QoS 2 without a
   shared subscription: it needs `PersistentSessions` and a positive
   `SessionCheckpointInterval`, and a record write that fails still lets the
-  PUBLISH go out. It stays off by default because turning it on changes what a
-  v1 client is granted ([ROADMAP.md](ROADMAP.md)); a group consumer made by a
-  release before the start was recorded (CHANGELOG [Unreleased]) does not carry
+  PUBLISH go out. Granting it changes what a v1 client is told, which is why it
+  waited for a major version ([MIGRATION.md](MIGRATION.md)); a group consumer made by a
+  release before the start was recorded (v1.1.0) does not carry
   the start the late-backlog check reads. `Options.SharedHoldLimit` hands a
   message a connected member never acknowledges back to the group, and one held
   for a dead broker's session once the limit has passed.

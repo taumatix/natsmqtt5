@@ -44,21 +44,66 @@ func (c *rawClient) completeQoS2(p *packet.Publish) {
 	c.send(&packet.Pubcomp{Ack: packet.Ack{PacketID: p.PacketID}})
 }
 
-// [MQTT-3.8.4-7]: a QoS 2 request on a shared filter is granted QoS 1 unless
-// the broker was told otherwise, and the SUBACK says which.
-func TestASharedSubscriptionIsGrantedQoS1UnlessSharedQoS2IsOn_MQTT_3_8_4_7(t *testing.T) {
+// [MQTT-3.8.4-7]: since v2.0.0 a QoS 2 request on a shared filter is granted QoS
+// 2; Options.PinSharedQoS2 set to false keeps the v1 grant of QoS 1. The SUBACK
+// says which, and a QoS 1 request is granted QoS 1 either way.
+func TestASharedSubscriptionIsGrantedQoS2ByDefaultAndQoS1WhenPinnedOff_MQTT_3_8_4_7(t *testing.T) {
+	pinned := func(v bool) func(*natsmqtt5.Options) {
+		return func(o *natsmqtt5.Options) { o.PinSharedQoS2 = &v }
+	}
 	for name, tc := range map[string]struct {
-		opts []func(*natsmqtt5.Options)
-		want packet.ReasonCode
+		opts    []func(*natsmqtt5.Options)
+		request packet.QoS
+		want    packet.ReasonCode
 	}{
-		"off": {nil, packet.GrantedQoS1},
-		"on":  {[]func(*natsmqtt5.Options){sharedQoS2}, packet.GrantedQoS2},
+		"unset":                       {nil, packet.QoS2, packet.GrantedQoS2},
+		"pinned off keeps v1":         {[]func(*natsmqtt5.Options){pinned(false)}, packet.QoS2, packet.GrantedQoS1},
+		"pinned on":                   {[]func(*natsmqtt5.Options){pinned(true)}, packet.QoS2, packet.GrantedQoS2},
+		"the plain bool is redundant": {[]func(*natsmqtt5.Options){sharedQoS2}, packet.QoS2, packet.GrantedQoS2},
+		"a pin beats the plain bool":  {[]func(*natsmqtt5.Options){sharedQoS2, pinned(false)}, packet.QoS2, packet.GrantedQoS1},
+		"a QoS 1 request stays QoS 1": {nil, packet.QoS1, packet.GrantedQoS1},
+		"a QoS 0 request stays QoS 0": {nil, packet.QoS0, packet.GrantedQoS0},
 	} {
 		t.Run(name, func(t *testing.T) {
 			addr := startBroker(t, startNATS(t), append([]func(*natsmqtt5.Options){persistentWithQueue}, tc.opts...)...)
 			c := dialRaw(t, addr)
 			c.connect(rawConnect("asks-for-2", 300))
-			assert.Equal(t, []packet.ReasonCode{tc.want}, c.subscribeCodes(group, packet.QoS2))
+			assert.Equal(t, []packet.ReasonCode{tc.want}, c.subscribeCodes(group, tc.request))
+		})
+	}
+}
+
+// The grant is more than a SUBACK: a member that asked for QoS 2 on a shared
+// subscription and was published to at QoS 2 gets the four-step exchange, once,
+// with nothing configured. With the v1 pin the same message reaches it at QoS 1.
+func TestASharedMemberIsSentQoS2ByDefaultAndQoS1WhenPinnedOff_MQTT_3_8_4_8(t *testing.T) {
+	pinOff := func(o *natsmqtt5.Options) { v := false; o.PinSharedQoS2 = &v }
+	for name, tc := range map[string]struct {
+		opts []func(*natsmqtt5.Options)
+		want packet.QoS
+	}{
+		"unset":               {nil, packet.QoS2},
+		"pinned off keeps v1": {[]func(*natsmqtt5.Options){pinOff}, packet.QoS1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			natsURL := startNATS(t)
+			addr := startBroker(t, natsURL, append([]func(*natsmqtt5.Options){persistentWithQueue}, tc.opts...)...)
+			member := dialRaw(t, addr)
+			member.connect(rawConnect("member-q2", 300))
+			member.subscribeCodes(group, packet.QoS2)
+
+			pub, _ := connectClient(t, addr, connectOpts("producer-q2-default"))
+			pub.publish(&paho.Publish{Topic: "jobs/x", QoS: 2, Payload: []byte("job")})
+
+			p := member.expectPublish()
+			assert.Equal(t, tc.want, p.QoS)
+			assert.Equal(t, "job", string(p.Payload))
+			if p.QoS == packet.QoS2 {
+				member.completeQoS2(p)
+			} else {
+				member.send(&packet.Puback{Ack: packet.Ack{PacketID: p.PacketID}})
+			}
+			member.expectNothing()
 		})
 	}
 }

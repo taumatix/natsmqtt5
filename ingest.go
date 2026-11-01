@@ -89,7 +89,13 @@ func (b *Broker) ingest(m *nats.Msg) (*nats.Msg, error) {
 	if !strings.HasPrefix(m.Subject, marker) || len(m.Subject) == len(marker) {
 		return nil, errors.New("no topic after the ingest prefix")
 	}
-	name := b.codec.subjectToName(m.Subject[len(marker):])
+	return b.publishThrough(m, m.Subject[len(marker):])
+}
+
+// publishThrough handles m, a plain NATS message for the NATS subject (without
+// the prefix), as handlePublish handles a PUBLISH, and returns the live copy.
+func (b *Broker) publishThrough(m *nats.Msg, subjectSuffix string) (*nats.Msg, error) {
+	name := b.codec.subjectToName(subjectSuffix)
 	if err := b.codec.validateName(name); err != nil {
 		return nil, err
 	}

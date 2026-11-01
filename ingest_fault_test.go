@@ -23,7 +23,10 @@ import (
 // and nothing is published live: a requester that retries would otherwise deliver twice.
 func TestNATSIngestAnswersWithAnErrorWhenTheQueueCopyCannotBeStored(t *testing.T) {
 	natsURL := startNATS(t)
-	addr := startBroker(t, natsURL, withNATSIngest)
+	// QueuePlainPublishes is pinned off: with it on, the broker's own subscription on the live
+	// subjects makes the JetStream publish to the missing stream wait for its timeout instead of
+	// failing at once with "no responders", and this test is about the answer, not its delay.
+	addr := startBroker(t, natsURL, withNATSIngest, queuePlainPinned(false))
 	sub, _ := connectClient(t, addr, connectOpts("ingest-nostore"))
 	sub.subscribe(paho.SubscribeOptions{Topic: "ingest/nostore", QoS: 1})
 	nc := plainNATS(t, natsURL)

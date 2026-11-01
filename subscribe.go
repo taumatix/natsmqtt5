@@ -154,8 +154,8 @@ func (c *conn) subscribeOne(ctx context.Context, want packet.Subscription, subID
 		granted = c.broker.opts.maxQoS
 	}
 	// A message a shared member has been sent is its own in-flight state, held
-	// in JetStream until it is settled (held.go), so QoS 2 can be granted; until
-	// that guarantee is complete (Options.SharedQoS2) the server grants QoS 1,
+	// in JetStream until it is settled (held.go), so QoS 2 is granted (the
+	// default since v2.0.0); with Options.PinSharedQoS2 off the server grants QoS 1,
 	// which is its choice to make [MQTT-3.8.4-7], recorded in the SUBACK.
 	if share != "" && granted == packet.QoS2 && !c.broker.opts.SharedQoS2 {
 		granted = packet.QoS1
@@ -295,6 +295,11 @@ func (c *conn) bindNATS(sub *subscription) error {
 	sub.cell = cell
 	handler := func(msg *nats.Msg) {
 		defer c.broker.liveSeen.Add(1)
+		if c.broker.heldForQueue(msg) {
+			// A plain publish that asked for a queue copy: a broker publishes it
+			// again with its id and sequence, and that copy is the one delivered.
+			return
+		}
 		// The newest subscription for the filter delivers: a client that
 		// subscribed again has replaced this one, and the message must reach it
 		// anyway [MQTT-3.8.4-4].

@@ -10,8 +10,8 @@ import (
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/stretchr/testify/require"
 
-	"github.com/taumatix/natsmqtt5"
-	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/v2"
+	"github.com/taumatix/natsmqtt5/v2/packet"
 )
 
 // Broker.Close against the NATS failures a cluster has and an embedded server does not: the server

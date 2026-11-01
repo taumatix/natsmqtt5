@@ -868,13 +868,14 @@ func TestConformance_MQTT_4_8_2_3_DeliveryRespectsTheGrantedQoS(t *testing.T) {
 	assert.Equal(t, byte(0x30), first, "ordinary subscription granted QoS 0")
 }
 
-// Shared subscriptions are granted at most QoS 1, so the broker never starts the
+// With Options.PinSharedQoS2 false (the v1 behaviour; v2 grants QoS 2 by default)
+// shared subscriptions are granted at most QoS 1, so the broker never starts the
 // QoS 2 delivery that [MQTT-4.8.2-4] ("the Server MUST complete the delivery of
 // the message to that Client when it reconnects") and [MQTT-4.8.2-5] ("the Server
 // MUST NOT send the Application Message to any other subscribed Client") speak
 // of: a QoS 2 PUBLISH reaches a member as QoS 1. This test pins that premise.
 func TestConformance_MQTT_4_8_2_4_SharedSubscriptionsAreGrantedAtMostQoS1(t *testing.T) {
-	addr := p3Broker(t)
+	addr := p3Broker(t, func(o *natsmqtt5.Options) { o.PinSharedQoS2 = natsmqtt5.Ptr(false) })
 	member := p3Client(t, addr, "share-q2")
 	member.writeRaw(p3SubscribeBytes(1, "$share/g/sq/#", 0x02))
 	ack, ok := member.read().(*packet.Suback)

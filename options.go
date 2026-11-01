@@ -351,6 +351,30 @@ type Options struct {
 	// permissions on the ingest subject decide who may use it. Off by default,
 	// and then nothing listens on the subject.
 	NATSIngest bool
+	// QueuePlainPublishes queues a message a plain NATS client publishes straight
+	// on a live subject, <SubjectPrefix>.<subject>, when its Mqtt5-Qos header is 1
+	// or 2. On by default since v2.0.0 (MIGRATION.md). Such a message used to
+	// reach the sessions subscribed to it and no queue: a session that was away
+	// never got it, and a shared subscription got it only through its NATS queue
+	// group, which can pick a member whose client is away. Now every broker with
+	// an offline queue ignores it as a live copy, and one broker (a NATS queue
+	// group on <SubjectPrefix>.>) takes it and does what NATSIngest does: checks
+	// the topic and QoS as a PUBLISH's, stores a retained message, keeps the queue
+	// copy and publishes the live copy again with Mqtt5-Msg-Id and
+	// Mqtt5-Queue-Seq. A plain NATS subscriber therefore sees such a message
+	// twice, the original and the broker's copy, which carries the Mqtt5-Msg-Id
+	// header to tell them apart. A message with no Mqtt5-Qos header, or QoS 0, a
+	// subject starting with $ and a message that already has an id are not
+	// touched. Nothing answers the publisher: use NATSIngest to be told the
+	// outcome. Brokers sharing a SubjectPrefix must agree on it.
+	//
+	// Because the default is on, false here cannot turn it off: set
+	// PinQueuePlainPublishes to Ptr(false) for the v1 behaviour.
+	QueuePlainPublishes bool
+	// PinQueuePlainPublishes fixes QueuePlainPublishes whatever the default is,
+	// and beats it when both are set. nil leaves the choice to the default, which
+	// is on.
+	PinQueuePlainPublishes *bool
 	// ReconnectCatchUp makes a connected session get the QoS 1 and 2 messages
 	// published while this broker's NATS connection was down. Live delivery is
 	// core NATS: a broker that has lost its connection has no interest on the
@@ -420,14 +444,23 @@ type Options struct {
 	// value would otherwise make unreachable.
 	MaximumQoS *uint8
 	// SharedQoS2 grants QoS 2 on a shared subscription ($share/...) when a
-	// client asks for it; by default the SUBACK grants QoS 1, which
-	// [MQTT-3.8.4-7] permits. A message a member holds is kept for it across a
-	// killed broker, a takeover and a client away past the group's AckWait; use it
-	// with PersistentSessions and a positive SessionCheckpointInterval, without
-	// which a killed broker's held messages go back to the group. Off by default
-	// because it changes what a client is granted (ROADMAP.md, "QoS 2 on shared
-	// subscriptions").
+	// client asks for it. On by default since v2.0.0 (MIGRATION.md): a QoS 2
+	// request is answered QoS 2 in the SUBACK, and the messages the member is sent
+	// start the four-step exchange, where v1 answered QoS 1 [MQTT-3.8.4-7]. A
+	// message a member holds is kept for it across a killed broker, a takeover
+	// and a client away past the group's AckWait; use it with PersistentSessions
+	// and a positive SessionCheckpointInterval, without which a killed broker's
+	// held messages go back to the group (ROADMAP.md, "QoS 2 on shared
+	// subscriptions", lists what is left).
+	//
+	// Because the default is on, false here cannot turn it off: set
+	// PinSharedQoS2 to Ptr(false) to grant only QoS 1 on $share/ as v1 did.
 	SharedQoS2 bool
+	// PinSharedQoS2 fixes SharedQoS2 whatever the default is, and beats
+	// SharedQoS2 when both are set: Ptr(false) keeps granting QoS 1 on a shared
+	// subscription (the behaviour before v2.0.0), Ptr(true) grants QoS 2. nil
+	// leaves the choice to the default, which is on.
+	PinSharedQoS2 *bool
 	// PublisherClockExpiry counts a live message's Message Expiry Interval from when the
 	// publishing broker received it, not from when this broker did. The publisher stamps the
 	// time (sub-second) on messages that carry an interval, so the wait spent in NATS between
@@ -612,6 +645,20 @@ func (o Options) resolve() (*resolved, error) {
 	r.DurableWills = o.DurableWills || !o.DisableRetained || o.PersistentSessions || o.OfflineQueue
 	if o.PinDurableWills != nil {
 		r.DurableWills = *o.PinDurableWills
+	}
+	// v2.0.0 default (MIGRATION.md): QoS 2 on shared subscriptions, unless pinned.
+	r.SharedQoS2 = true
+	if o.PinSharedQoS2 != nil {
+		r.SharedQoS2 = *o.PinSharedQoS2
+	}
+	// v2.0.0 defaults (MIGRATION.md): on, unless pinned.
+	r.QueuePlainPublishes = true
+	if o.PinQueuePlainPublishes != nil {
+		r.QueuePlainPublishes = *o.PinQueuePlainPublishes
+	}
+	r.SharedQoS2 = true
+	if o.PinSharedQoS2 != nil {
+		r.SharedQoS2 = *o.PinSharedQoS2
 	}
 	if o.PinRestrictDollarTopics != nil {
 		r.RestrictDollarTopics = *o.PinRestrictDollarTopics

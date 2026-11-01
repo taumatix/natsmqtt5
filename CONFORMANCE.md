@@ -67,11 +67,11 @@ These are features the specification lets a Server leave out. A statement behind
 NOT-APPLICABLE, and the row names the feature's [ROADMAP.md](ROADMAP.md) entry and a test that
 shows the broker refusing or not advertising it the way the specification requires.
 
-- **QoS 2 on shared subscriptions.** A QoS 2 request on a `$share/` filter is granted QoS 1,
-  reported in the SUBACK, which [MQTT-3.8.4-7] permits. `Options.SharedQoS2` (off) grants QoS 2 and
-  is tested (`shared_qos2_test.go`, `shared_qos2_killed_test.go`, `shared_qos2_late_test.go`); the
-  duplicate windows are closed or no wider than QoS 2 without a shared subscription has (ROADMAP.md),
-  and the default stays because granting QoS 2 there changes what a v1 client is told.
+- **QoS 2 on shared subscriptions** is granted since v2.0.0 (it is no longer left out). A QoS 2
+  request on a `$share/` filter is granted QoS 2 in the SUBACK; `Options.PinSharedQoS2: Ptr(false)`
+  grants QoS 1 as v1 did, which [MQTT-3.8.4-7] permits. Both are tested (`shared_qos2_test.go`,
+  `shared_qos2_killed_test.go`, `shared_qos2_late_test.go`); the duplicate windows are closed or no
+  wider than QoS 2 without a shared subscription has (ROADMAP.md).
 - **Server-to-client Topic Aliases** are sent since v1.0.0 to a Client that offered a Topic Alias
   Maximum, which is what permits them; `PinOutboundTopicAliases: Ptr(false)` sends none, which a
   Server may do.
@@ -159,7 +159,7 @@ CHANGELOG has the full text.
 - **Since v0.12.1, not re-reviewed against the table.** Enhanced authentication (`Options.Auther`,
   AUTH exchange and re-authentication, §4.12) and the `scram` package; the command serves WebSocket
   and TLS (`-ws-listen`, `-tls-cert`); the WebSocket read limit now applies; a resume reads
-  overlapping filters as a covering set; QoS 2 on shared subscriptions behind `SharedQoS2`; QoS 2
+  overlapping filters as a covering set; QoS 2 on shared subscriptions behind `SharedQoS2` (on by default since v2.0.0); QoS 2
   messages that wait together share a record write; the Will index holds a reference per record;
   a retained view is verified after a NATS reconnect. The table's rows were updated as these landed
   (the §4.12 statements are TESTED by `enhanced_auth_test.go`); the review as a whole was not re-run.

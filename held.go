@@ -47,7 +47,7 @@ func (b *Broker) settle(subject string, reply []byte) {
 	}
 }
 
-// holdOrphans is holdLoop for the sessions of dead brokers (Options.SharedQoS2).
+// holdOrphans is holdLoop for the sessions of dead brokers (Options.SharedQoS2, on by default).
 // A broker that was killed holds its sessions' messages no longer, and its
 // client may stay away for as long as its session lasts: the group is not to be
 // given a message that is that client's [MQTT-4.8.2-4], [MQTT-4.8.2-5], so the

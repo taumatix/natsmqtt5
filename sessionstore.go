@@ -406,11 +406,14 @@ func newSessionStore(ctx context.Context, js jetstream.JetStream, nc *nats.Conn,
 
 func replyEmpty(m *nats.Msg) { _ = m.Respond(nil) }
 
-// brokerPingSubject is where a broker instance answers liveness checks. It sits
-// under the shared subject prefix, so it is reachable from every broker sharing
-// the bucket and nowhere near MQTT traffic.
+// brokerPingSubject is where a broker instance answers liveness checks. Since
+// v2.0.0 it is a sibling of the subject prefix, not under it ("mqtt$broker.<id>.ping"
+// for the prefix "mqtt"): the queue group that takes plain NATS publishes
+// (plainpublish.go) subscribes to everything under the prefix, and a subscription that
+// matched this subject would turn the immediate "no responders" a dead broker gives into
+// a timeout, slowing every Will adoption and session takeover.
 func brokerPingSubject(prefix, owner string) string {
-	return prefix + ".$broker." + owner + ".ping"
+	return prefix + "$broker." + owner + ".ping"
 }
 
 // sessionKey encodes a Client Identifier into a key-value key. A Client

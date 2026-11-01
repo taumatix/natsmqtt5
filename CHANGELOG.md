@@ -11,6 +11,36 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+**2.0.0, a breaking release (not yet cut).** The module path gains `/v2` and two defaults flip. Read the
+"v1 → v2" section of [MIGRATION.md](MIGRATION.md); pinning both options to the v1 behaviour and changing the
+import path leaves a deployment as v1.1.0 left it. v1.x stays tagged and fetchable at the old path.
+
+- **Breaking:** the Go module is `github.com/taumatix/natsmqtt5/v2`, and so are its packages (`/v2/packet`,
+  `/v2/topic`, `/v2/scram`) and the command (`/v2/cmd/natsmqtt5`). The package name is unchanged. A sed one-liner
+  for the imports is in MIGRATION.md. No exported identifier was removed or changed in meaning.
+- **Breaking:** the broker liveness subject moved from `<prefix>.$broker.<id>.ping` to `<prefix>$broker.<id>.ping`,
+  out of reach of the new subscription on `<prefix>.>`. v1 and v2 brokers cannot see each other's pings: do not
+  mix them with `DurableWills` or `PersistentSessions`; restricted NATS permissions must allow the new subject.
+- **Breaking:** `SharedQoS2` is on by default. A QoS 2 request on a `$share/` filter is granted QoS 2 in the
+  SUBACK (v1 answered QoS 1, [MQTT-3.8.4-7]), and the member is sent QoS 2 messages through the four-step exchange.
+  `Options.PinSharedQoS2: natsmqtt5.Ptr(false)`, `-shared-qos2=false` or `NATSMQTT5_SHARED_QOS2=false` keeps the v1
+  grant. The plain `SharedQoS2` bool can no longer say "off" and a pin beats it. With `PersistentSessions` the
+  brokers now read the session records every AckWait/3, which only `SharedQoS2` did.
+- **Breaking:** a message a plain NATS client publishes on a live subject with an `Mqtt5-Qos` header of 1 or 2 is
+  queued (`Options.QueuePlainPublishes`, on by default; `PinQueuePlainPublishes`, `-queue-plain-publishes`). MQTT
+  subscriptions leave the first copy alone and one broker, chosen by a NATS queue group on `<SubjectPrefix>.>`,
+  stores the queue copy and publishes the message again with `Mqtt5-Msg-Id` and `Mqtt5-Queue-Seq`: an away session
+  is replayed it, a shared group's work reaches only connected members. A plain NATS **subscriber** sees such a
+  message twice (the original, and the copy that has an id). Brokers of one `SubjectPrefix` must agree on the
+  option, so upgrade the whole fleet. A request to the ingest subject with `NATSIngest` off times out where it was
+  answered "no responders", because a broker now subscribes to `<SubjectPrefix>.>`. Pin it off for the v1 behaviour.
+- **Changed:** `TestModulePathCarriesTheMajorVersion` keeps go.mod's module path, the newest CHANGELOG release and
+  the README install lines in step; `TestReleaseVersionsAgree` accepts the `/vN` suffix.
+- The README install lines still name `v1.1.0` at the v1 path; the release commit moves them to
+  `/v2@v2.0.0` and the newest heading to `2.0.0`, which the two tests above hold together.
+
+Other changes since 1.1.0:
+
 - **Fixed:** `Broker.Close` no longer hangs when a client never reads its socket and its send buffer is full: the DISCONNECT write now has a 2 s deadline. Found against a three-server NATS cluster while looking for #216's hang. No API change.
 - **Added:** with `Options.ReconnectCatchUp`, a live copy lost because a route between NATS servers dropped, with both brokers still connected to their own servers, is now caught up from the queue once the cluster's servers have been stable for 1.5 s. The broker watches the server list its NATS connection learns from the server. It does not see a route the server has not yet noticed is dead, a flap shorter than 200 ms, or a connection that sets `nats.IgnoreDiscoveredServers`. No new option.
 - **Docs:** measured the replay cursor's cost over a clustered, replicated stream (a SUBSCRIBE is one stream info request; the restart scans are not visible in the delivery rate) and decided against a per-group `SharedHoldLimit` (ROADMAP.md).

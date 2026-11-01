@@ -228,15 +228,15 @@ worse on the skewed mix (256: 26%).
 - [ ] CPU of the encode (aliasing encodes twice on a miss), and clients in the field that mishandle aliases, which only a
   trial tells; v1.0.0 users who see one pin `PinOutboundTopicAliases: Ptr(false)`.
 
-## QoS 2 on shared subscriptions
+## QoS 2 on shared subscriptions: a failed record write still lets the PUBLISH go out
 
-**Blocked by:** a decision about a wire-visible default, no longer by duplicates (checked 2026-11-01). Every duplicate
-window below is closed, or is the same as what QoS 2 without a shared subscription has; what is left is whether to
-change what a v1 client is granted. Granting QoS 2 on `$share/` by default changes the SUBACK and the QoS of every
-message a v1 deployment's shared members are sent (a QoS 2 request that was answered QoS 1 starts a four-step exchange
-the client's library may not expect), which is a behaviour change in a major version's sense (MIGRATION.md has the three
-v1.0.0 flips as the precedent). It is not additive, so it stays opt-in until a major release or a decision to take it as
-a documented default flip with a pin.
+**Blocked by:** nothing.
+
+Granted by default since v2.0.0 (`Options.SharedQoS2`, `PinSharedQoS2: Ptr(false)` for the v1 QoS 1 grant; MIGRATION.md,
+"v1 → v2"). A member owns a QoS 2 message from the moment it is sent: it survives a killed broker, a takeover and a client
+away past the group's AckWait (`shared_qos2_test.go`, `shared_qos2_killed_test.go`, `shared_qos2_late_test.go`), and the
+group is told at PUBREC. Every duplicate window that blocked the default is closed (2026-10-31 and 2026-11-01); what is left
+is below.
 
 1. **Closed (2026-11-01).** The late backlog (*A default queue that failed at startup*): a message the group acknowledged
    from the backlog before its live copy reached this broker was delivered live as well. A group consumer now carries the
@@ -277,62 +277,12 @@ a documented default flip with a pin.
    in-flight state, and the client may get the message twice, as for QoS 2 without a shared subscription; the README says
    so. Lifted by turning the checkpoint on (not a NATS limit).
 
-Flipping the default is no longer blocked by a duplicate. It is blocked by the decision above; do it with the entry 3
-below (an `Options` field and a `*bool` pin like `PinDurableWills`, a CHANGELOG line that names the SUBACK change, a
-MIGRATION.md note) in a major release, or earlier only if the human takes it as a default flip.
-
-**Today:** a QoS 2 request on a `$share/` filter is granted QoS 1, reported
-honestly in the SUBACK, which [MQTT-3.8.4-7] permits.
-
-**Why it is hard:** a shared subscription is a work queue, and QoS 2 is a
-four-step conversation with one specific client. Once a QoS 2 message has been
-offered to a group member it must stop being the group's message and become
-that member's, durably, so a broker that has never seen the exchange can still
-tell "delivered" from "possibly lost". JetStream can record "unacked on
-consumer G" but has no concept of "unacked by member B".
-
-**Shape:** a separate arbitration stream with create-only compare-and-set for
-ownership, a private per-member copy of the message, and cleanup for every way
-the exchange can end — unsubscribe, disconnect, session expiry, takeover.
-
-The shared backlog changed this: a member takes a message off the group's consumer
-and the message becomes that session's in-flight state, exactly the handover
-described above, and QoS 1 is held in JetStream until its PUBACK (`held.go`). The
-separate arbitration stream is therefore not needed; what is needed is below, in
-the order that ships something each time. SUBACK keeps granting QoS 1 on `$share/`
-(`subscribe.go`, the cap before `granted`) until the last piece is done, so the
-first two change nothing a client sees.
-
-### 1. Done (2026-10-31): a held QoS 2 message survives a killed broker and a takeover
-
-`Options.SharedQoS2` (`-shared-qos2`, off) lifts the cap; with it a message held
-before its PUBREC is resent with DUP and its original identifier after a SIGKILL
-and after a takeover, and the group's other member is not given it
-(`shared_qos2_test.go`). Found on the way: a broker that lost a session to another
-broker handed its held messages back to the group (`discardMoved` now keeps them).
-Not covered then: a message pulled but not yet checkpointed when its broker dies. For
-QoS 2 the record is written before the PUBLISH, so within the AckWait this is closed
-(**Blocked by**, window 2); a client away past it is window 4.
-
-### 2. Done (2026-10-31): the ownership point, acknowledged to the group at PUBREC
-
-Once the record naming the PUBREL is written (`handlePubrec`, `settleOwned`) the
-JetStream message is acknowledged, `handBackHeld` skips an entry that
-`awaitingPubcomp`, and a restore acknowledges a `Rel` entry still naming one. Tested
-past PUBREC with an unsubscribe, a clean start, a session expiry, a returning client
-and a SIGKILLed broker; before PUBREC the end of the session still gives the message
-to another member. An UNSUBSCRIBE does not hand back a message already sent (QoS 1
-either): it stays the session's until the exchange ends. Not covered then: a broker
-killed after the PUBREC is read and before its record is written. Closed for a client
-back within the AckWait (**Blocked by**, window 3); one away past it is window 4.
-
-### 3. Grant QoS 2 on `$share/`
-
-Make `Options.SharedQoS2` (added by entry 1, off) the default once the duplicates under **Blocked by** are settled,
-keep an explicit opt-out (an `Options` field and a flag, since `false` is the zero value), add a CHANGELOG line that
-names the SUBACK change, and document it in the README. The SUBACK test moves from QoS 1 to the
-requested QoS ([MQTT-3.8.4-7]); with the switch off a QoS 2 request is still
-granted QoS 1.
+- With `SessionCheckpointInterval` negative, or without `PersistentSessions`, no record is written, and a message that is not held in a shared group is still sent after a failed write; a broker killed then loses the in-flight state and the client may get the message twice, as for QoS 2 without a shared subscription (README, Known limits). Lifted by turning the checkpoint on.
+- `Broker.holdOrphans` (`held.go`) reads every session record each AckWait/3 for as long as `PersistentSessions` is on,
+  which is now every deployment that uses them with a shared subscription or not. **Left:** measure what the scan costs on
+  a bucket of 10 000 sessions and read only the records that name a held message, if the number is not small.
+- **Mixed fleets.** A group consumer made by a v1.0.x broker carries no start sequence, so the late-backlog check falls back
+  to the acknowledgement floor (the window as it was before v1.1.0). Nothing to do but upgrade the fleet.
 
 # Operations and robustness (not conformance)
 
@@ -376,23 +326,22 @@ default cannot do better without paying a lookup per entry on a timer for every 
 
 ## Offline queue for messages published by plain NATS clients
 
-**Blocked by:** a major version, for what is left: queueing a message published *unchanged* on a live subject
-without a second delivery needs the brokers to be the first to see it, which is a subject layout change (MQTT
-subscribers on subjects only brokers publish to), a wire break for every broker and plain NATS subscriber.
+**Blocked by:** nothing for what is left; the two items below are a measurement and a choice.
 
-Only messages that pass through a broker are copied to the queue. They also
-reach a shared subscription only through its NATS queue group, as QoS 0
-messages do, and NATS still picks members whose client is away, whose share is
-dropped.
+Only messages that pass through a broker are copied to the queue. Since v2.0.0 that includes a plain publish on a live
+subject whose `Mqtt5-Qos` header is 1 or 2 (`Options.QueuePlainPublishes`, `plainpublish.go`; MIGRATION.md): MQTT
+subscriptions ignore the first copy, one broker chosen by a queue group on `<prefix>.>` stores the queue copy and
+publishes it again with its id and sequence, and `plain_publish_test.go` drives a plain nats.go client against real
+brokers (an away session is replayed it once, a connected one is delivered it once, a shared group's work reaches only
+the connected member, QoS 0 and header-less messages are untouched, the pin restores v1). What it costs: a plain NATS
+**subscriber** sees such a message twice (the original, and the copy that has an id), and every broker gets one more
+subscription on `<prefix>.>`.
 
 **Design (2026-10-31).** A copy stored *after* a plain publish cannot be told apart from it: the live copy has
 reached subscribers with no id, so every session that had it would get the queue copy again on a resume or a
-catch-up, and a shared group would get it twice (queue group and backlog). The broker has to come first. So a
-plain NATS client that wants the queue publishes through a broker: on `<prefix>.$ingest.<subject>`, which
-nothing but the brokers subscribes to (one NATS queue group), and the broker that takes it does what it does for
-an MQTT PUBLISH. The live copy then carries the id and queue sequence, so away sessions are replayed, the shared
-backlog hands QoS 1 and 2 work only to connected members (which closes the shared half of this entry for those
-messages without touching queue groups), and `ReconnectCatchUp` covers it. Additive, off by default.
+catch-up, and a shared group would get it twice (queue group and backlog). The broker has to come first. The ingest
+subject (below) puts it first by asking the publisher to use another subject; v2.0.0 puts it first on the live subject
+itself, by having MQTT subscriptions hold back an id-less message that asked for a queue.
 
 **Done (2026-10-31):** `Options.NATSIngest` (`-nats-ingest`, `ingest.go`): topic and QoS checked as a PUBLISH's, a `$`
 topic always refused (it would write `$retained` or `$queue`), retained stored, queue copy kept, live copy published, `DurablePublish`'s flush honoured; a request is answered
@@ -403,9 +352,20 @@ refusals are answered, and nothing answers with the option off.
 
 **Left:**
 
-1. Messages published unchanged on a live subject (above): not queued, and a shared group still gets them
-   through its queue group.
-2. For those, a QoS 0 or unqueued share NATS hands to a member whose client is away is dropped. MQTT allows that
+1. **The duplicate a plain subscriber sees, and the price of the subscription (2026-11-01).** Removing the duplicate
+   needs MQTT subscribers on a subject only brokers publish to (`<prefix>.$live.<subject>`), with brokers publishing
+   a copy for plain subscribers too; that is another wire change for every broker and plain subscriber, so it waits for
+   v3 or a decision that v2.x may break it. Measure first what the `<prefix>.>` queue-group subscription costs a broker
+   on a busy subject space (it sees each message once per cluster and discards it), and whether a per-prefix filter
+   (a configured set of subjects to queue) is worth the option.
+2. **A refused plain publish is dropped for MQTT sessions** with a WARN and no answer to the publisher; `NATSIngest`
+   answers. A plain publish that fails queueing (stream missing, JetStream down) is lost to MQTT sessions although plain
+   subscribers had it. Consider delivering the live copy anyway, as v1 did, when only the queue copy failed.
+3. **Mixed v1/v2 fleets deliver a plain QoS 1 publish twice** to a v1 broker's sessions, and cannot see each
+   other's liveness pings (the ping subject moved out from under the prefix so that the plain-publish
+   subscription does not swallow "no responders"). A v2 broker could also answer the old subject and ping both, to
+   allow a rolling upgrade; today stopping the fleet is the documented rule.
+4. A QoS 0 or unqueued share NATS hands to a member whose client is away is dropped. MQTT allows that
    for QoS 0; it matters only for a plain publish with `Mqtt5-Qos` 1 or 2, which `NATSIngest` now serves. Leaving
    the queue group while away was evaluated and not built:
 

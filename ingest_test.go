@@ -1,6 +1,7 @@
 package natsmqtt5_test
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -214,5 +215,8 @@ func TestNATSIngestIsOffByDefault(t *testing.T) {
 
 	msg := nats.NewMsg("mqtt.$ingest.ingest.off")
 	_, err := plainNATS(t, natsURL).RequestMsg(msg, 2*time.Second)
-	require.ErrorIs(t, err, nats.ErrNoResponders)
+	// Nothing answers. With QueuePlainPublishes (on since v2.0.0) a broker subscribes to the live
+	// subjects, which includes this one, so NATS sees a subscriber and the request times out
+	// where it used to be refused with "no responders".
+	require.True(t, errors.Is(err, nats.ErrNoResponders) || errors.Is(err, nats.ErrTimeout), "got %v", err)
 }

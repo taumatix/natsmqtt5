@@ -7,7 +7,7 @@ import (
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/stretchr/testify/require"
 
-	"github.com/taumatix/natsmqtt5"
+	"github.com/taumatix/natsmqtt5/v2"
 )
 
 // Options.ReconnectCatchUp when the route between two NATS servers goes, with both brokers
