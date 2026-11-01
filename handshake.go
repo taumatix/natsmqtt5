@@ -264,6 +264,9 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 	// replaces, or one waiting out its delay, is not published
 	// [MQTT-3.1.2-8], [MQTT-3.1.3-9]. The old connection's own end then finds
 	// nothing of its to take.
+	// c.sess is set before attach publishes c: a NATS callback of the session's
+	// subscriptions reads it as soon as attach names c.
+	c.sess = sess
 	cancelled := sess.cancelWills()
 	if prev := sess.attach(c); prev != nil && prev != c {
 		prev.close()
@@ -272,7 +275,6 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 	// the stored copy goes with it, or a broker that adopted it later would
 	// publish it for a client that came back.
 	c.broker.wills.drop(cancelled)
-	c.sess = sess
 	c.broker.registerSession(sess)
 
 	if resumed {
