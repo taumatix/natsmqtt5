@@ -278,6 +278,17 @@ type Options struct {
 	// closes only the connection that fell behind, not the broker's NATS connection. QoS 0 loss never
 	// closes a connection. It does nothing while the offline queue is on, where such a client catches up.
 	CloseBehindClients bool
+	// AwayBufferMessages is how many QoS 1 and 2 messages the broker holds in memory for a session
+	// that is away, when it has no offline queue (DisableOfflineQueue, or no JetStream). They are
+	// delivered, in publish order, when the client resumes the session. It is per session, counts
+	// messages not bytes, and 0 means 1000; a negative value holds none, and the largest is 2048
+	// (what a connection can wait to send). A session whose messages do not fit is ended instead of
+	// kept with a gap: its client's next CONNECT with Clean Start 0 gets Session Present 0
+	// [MQTT-3.2.2-3] and subscribes again, so a client told Session Present 1 has been sent
+	// everything published while it was away [MQTT-3.1.2-23], [MQTT-4.5.0-1]. The messages are
+	// lost with the process: a restart ends the sessions held in memory. It does nothing while the
+	// offline queue is on.
+	AwayBufferMessages int
 	// DurablePublish makes the PUBACK of a QoS 1 PUBLISH and the PUBREC of a QoS 2
 	// one mean that the message is safe, not only that the broker has it. It
 	// implies OfflineQueue (the broker fails to start without the queue) and is

@@ -264,9 +264,21 @@ natsmqtt5.Options{DisableOfflineQueue: true}          // off
 
 For the binary and the image they are `-offline-queue-max-age`,
 `-offline-queue` / `NATSMQTT5_OFFLINE_QUEUE=true` and `-no-offline-queue` /
-`NATSMQTT5_NO_OFFLINE_QUEUE=true`. Turning it off is a deviation from MQTT 5: a
-resumed session is told Session Present 1 and misses what was published while
-it was away.
+`NATSMQTT5_NO_OFFLINE_QUEUE=true`.
+
+**Without the queue (no JetStream, or `DisableOfflineQueue`) the broker still
+does not promise what it cannot keep.** It holds the QoS 1 and 2 messages
+published while a session is away in its own memory, up to
+`Options.AwayBufferMessages` per session (1000 by default, at most 2048;
+`-away-buffer-messages` / `NATSMQTT5_AWAY_BUFFER_MESSAGES`), and delivers them in
+publish order when the client resumes, ahead of anything newer. A session that
+is away and misses more than that is ended: its client's next CONNECT with
+Clean Start 0 is answered with Session Present 0 and it subscribes again. So a
+client told Session Present 1 has been sent everything published while it was
+away [MQTT-3.1.2-23], [MQTT-4.5.0-1]. What the memory buffer does not give you
+is survival of a broker restart (sessions held in memory end with the process,
+and the CONNACK says so with Session Present 0), a second broker taking the
+session over, or a bound in bytes; for any of those keep the queue on.
 
 The same stream serves a client that is connected but slower than its
 publishers. A connection holds up to 2048 messages waiting for its client;
@@ -609,9 +621,10 @@ Stated plainly, because a broker you cannot trust the limits of is worse than
 one with fewer features:
 
 - **The offline queue needs JetStream, and covers what passes through a
-  broker.** A broker without JetStream, or with `DisableOfflineQueue`, drops QoS
-  1 and 2 messages for a session that is away, and messages published straight
-  onto NATS are never queued. See [Offline queue](#offline-queue).
+  broker.** A broker without JetStream, or with `DisableOfflineQueue`, holds QoS
+  1 and 2 messages for a session that is away in memory only, up to
+  `AwayBufferMessages` (an overflowing session is ended, Session Present 0), and
+  messages published straight onto NATS are never queued. See [Offline queue](#offline-queue).
 - **A shared subscription hands QoS 1 and 2 work only to connected members,
   through a backlog in the offline queue.** A QoS 1 message stays unacknowledged
   in the backlog until the member's PUBACK, and goes to another member if the
@@ -637,8 +650,9 @@ one with fewer features:
   (`-close-behind-clients`, `NATSMQTT5_CLOSE_BEHIND_CLIENTS=true`, off by default)
   makes the loss visible instead: with no queue, the connection of a client that
   lost a QoS 1 or 2 message this way is closed with DISCONNECT 0x97 (Quota
-  exceeded), and its session is kept to resume. The message is still lost, and
-  so is anything published while the client is away; the client now knows.
+  exceeded). The message is still lost; the client now knows. Its session is
+  kept to resume while what waits for it fits `AwayBufferMessages` and ended
+  (Session Present 0) when more than that was lost.
 - **Retransmission on reconnect reaches as far as the broker's memory.** A
   client that reconnects with Clean Start 0 to a broker still holding its
   session is resent the PUBLISH and PUBREL packets that connection left

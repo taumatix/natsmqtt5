@@ -116,9 +116,10 @@ func TestTheOfflineQueueIsOnByDefault(t *testing.T) {
 }
 
 // DisableOfflineQueue is the opt-out, for a deployment that would rather not
-// store every QoS 1 and 2 message and accepts the deviation: nothing is kept,
-// so a resumed session gets only what was already in flight.
-func TestWithoutTheOfflineQueueNothingPublishedWhileAwayArrives(t *testing.T) {
+// store every QoS 1 and 2 message: nothing is stored in JetStream, and the
+// broker holds what is published while a session is away in memory instead,
+// bounded by Options.AwayBufferMessages (away_buffer_test.go).
+func TestWithoutTheOfflineQueueWhatWasPublishedWhileAwayIsHeldInMemory(t *testing.T) {
 	natsURL := startNATS(t)
 	var logs syncBuffer
 	b, addr, _ := startBrokerHandle(t, natsURL, func(o *natsmqtt5.Options) {
@@ -147,14 +148,14 @@ func TestWithoutTheOfflineQueueNothingPublishedWhileAwayArrives(t *testing.T) {
 	seen := natsmqtt5.LiveCopies(b)
 	pub.publish(&paho.Publish{Topic: "q/1", QoS: 1, Payload: []byte("1")})
 	// The PUBACK means NATS has the message, not that it has reached the
-	// session's subscription, which drops it silently. Resumed too soon, the
-	// session is attached again when it arrives and takes it live, which is
-	// not a fault: the opt-out keeps nothing, it does not promise a loss.
-	// The copy having been seen is the event to wait on.
+	// session's subscription. The copy having been seen is the event to wait on.
 	awaitLiveCopies(t, b, seen, 1)
 
 	back := dialRaw(t, addr)
 	require.True(t, back.connect(rawConnect("offline-off", 300)).SessionPresent)
+	got := back.expectPublish()
+	assert.Equal(t, "q/1", got.Topic, "Session Present 1 and the message published while away [MQTT-3.1.2-23]")
+	back.send(&packet.Puback{Ack: packet.Ack{PacketID: got.PacketID}})
 	back.expectNothing()
 }
 

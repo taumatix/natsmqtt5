@@ -316,6 +316,15 @@ func (c *conn) bindNATS(sub *subscription) error {
 				q.saw(seq)
 			}
 		}
+		if c.broker.holdsAway() {
+			// No offline queue: a message for a session that is away is held for it, not dropped.
+			if d := c.deliveryOf(cur, msg); d != nil {
+				if conn := sess.routeAway(d, c.broker.awayLimit(), c.logger); conn != nil {
+					conn.enqueue(d)
+				}
+			}
+			return
+		}
 		conn := sess.currentConn()
 		if conn == nil {
 			// Between connections. The message is dropped unless the offline
@@ -406,9 +415,16 @@ func (c *conn) handleUnsubscribe(p *packet.Unsubscribe) error {
 // onNATSMessage runs on a nats.go dispatcher goroutine. It must not block, so
 // it does the cheap filtering here and hands the result to the delivery loop.
 func (c *conn) onNATSMessage(sub *subscription, msg *nats.Msg) {
+	if d := c.deliveryOf(sub, msg); d != nil {
+		c.enqueue(d)
+	}
+}
+
+// deliveryOf is what sub delivers for a NATS message, or nil when it delivers nothing.
+func (c *conn) deliveryOf(sub *subscription, msg *nats.Msg) *delivery {
 	subject, ok := topic.TrimPrefix(c.broker.opts.SubjectPrefix, msg.Subject)
 	if !ok {
-		return
+		return nil
 	}
 	name := c.broker.codec.subjectToName(subject)
 
@@ -416,11 +432,9 @@ func (c *conn) onNATSMessage(sub *subscription, msg *nats.Msg) {
 	// parent subscription for '#' and the '$' rule both need a check against
 	// the MQTT filter itself (MQTT-5.0 §4.7.2).
 	if !topic.Match(sub.filter, name) {
-		return
+		return nil
 	}
-	if d := c.deliveryFor(sub, name, msg); d != nil {
-		c.enqueue(d)
-	}
+	return c.deliveryFor(sub, name, msg)
 }
 
 // deliveryFor turns a message on name into what sub delivers, or nil when the
@@ -475,15 +489,24 @@ func (c *conn) enqueue(d *delivery) {
 		c.enqueueQueued(d)
 		return
 	}
+	if d.qos > packet.QoS0 && c.broker.holdsAway() {
+		c.enqueueHeld(d)
+		return
+	}
 	select {
 	case c.deliveries <- d:
 	case <-c.done:
 	default:
-		c.logger.Warn("dropping a message: the client is not keeping up",
-			"topic", d.topic, "queue_depth", deliveryQueueDepth)
-		if d.qos > packet.QoS0 && c.broker.opts.CloseBehindClients && c.broker.queue.Load() == nil {
-			c.closeBehind()
-		}
+		c.dropBehind(d)
+	}
+}
+
+// dropBehind drops a message the client has no room for.
+func (c *conn) dropBehind(d *delivery) {
+	c.logger.Warn("dropping a message: the client is not keeping up",
+		"topic", d.topic, "queue_depth", deliveryQueueDepth)
+	if d.qos > packet.QoS0 && c.broker.opts.CloseBehindClients && c.broker.queue.Load() == nil {
+		c.closeBehind()
 	}
 }
 
@@ -622,12 +645,13 @@ drain:
 		ready = nil
 		return nil
 	}
-	for _, d := range ds {
+	for i, d := range ds {
 		select {
 		case <-c.done:
 			// Nothing more may leave the queue of waiting deliveries once the
 			// connection has ended, or what was waiting is gone before awayFloor
 			// can see it.
+			c.keepUnsent(ds[i:])
 			return nil
 		default:
 		}
@@ -645,6 +669,10 @@ drain:
 		}
 		if p != nil {
 			ready = append(ready, p)
+		} else if c.isClosed() {
+			// prepare gave up waiting for send quota because the connection ended.
+			c.keepUnsent(ds[i:])
+			break
 		}
 	}
 	err := flush()

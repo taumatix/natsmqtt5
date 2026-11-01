@@ -47,8 +47,8 @@ func (c *rawClient) readUntilClosed(within time.Duration) *packet.Disconnect {
 }
 
 // With CloseBehindClients and no offline queue, a client that is 2048 messages behind is disconnected with
-// 0x97 (Quota exceeded) instead of silently losing the QoS 1 messages past that point, and its session is
-// kept, so it can resume and see the loss as a reconnect.
+// 0x97 (Quota exceeded) instead of silently losing the QoS 1 messages past that point, so it sees the loss
+// as a reconnect, and as Session Present 0 when more was lost than the session can hold for it.
 func TestCloseBehindClientsDisconnectsAClientThatFallsBehindWithoutTheQueue(t *testing.T) {
 	t.Parallel()
 	addr := startBroker(t, startNATS(t), func(o *natsmqtt5.Options) {
@@ -66,7 +66,10 @@ func TestCloseBehindClientsDisconnectsAClientThatFallsBehindWithoutTheQueue(t *t
 	cp := rawConnect("cb-slow", 300)
 	cp.CleanStart = false
 	ack := back.connect(cp)
-	assert.True(t, ack.SessionPresent, "the session was left to resume")
+	// The flood is more than the session can hold for its client (Options.AwayBufferMessages caps at the
+	// 2048 a connection waits with), so messages it was owed are gone, and a broker that cannot send them
+	// does not claim the session [MQTT-3.2.2-3].
+	assert.False(t, ack.SessionPresent, "messages were lost, so the session is not present")
 }
 
 // Off by default: the connection stays open and the broker drops, as before.

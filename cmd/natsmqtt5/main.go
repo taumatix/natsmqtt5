@@ -146,8 +146,9 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 		retainVerify    = fs.Duration("retained-verify-interval", 0, "check every retained message against its stream at least this often, to find a stale entry a short NATS partition left behind; 0 turns it off")
 		checkpoint      = fs.Duration("session-checkpoint-interval", 0, "with -persistent-sessions, how often a connected client's replay position is written to its session record, so a broker that is killed costs a client that long of repeats and not the whole queue; 0 means 1s, negative turns it off")
 		offlineQueue    = fs.Bool("offline-queue", false, "require the offline queue, failing to start without it (it is on by default whenever JetStream is used)")
-		closeBehind     = fs.Bool("close-behind-clients", false, "with no offline queue, disconnect (0x97) a client that is 2048 messages behind instead of silently dropping its QoS 1 and 2 messages; its session is kept")
-		noOffline       = fs.Bool("no-offline-queue", false, "do not keep QoS 1 and 2 messages for disconnected sessions; a resumed session misses what was published while it was away")
+		closeBehind     = fs.Bool("close-behind-clients", false, "with no offline queue, disconnect (0x97) a client that is 2048 messages behind instead of silently dropping its QoS 1 and 2 messages; its session is kept to resume unless more was lost than -away-buffer-messages holds")
+		awayBuffer      = fs.Int("away-buffer-messages", 0, "with no offline queue, how many QoS 1 and 2 messages to hold in memory per session that is away (0 means 1000, negative holds none, at most 2048); a session that overflows is ended and its client told Session Present 0")
+		noOffline       = fs.Bool("no-offline-queue", false, "do not store QoS 1 and 2 messages for disconnected sessions in JetStream; they are held in memory instead, see -away-buffer-messages")
 		offlineMaxAge   = fs.Duration("offline-queue-max-age", 24*time.Hour, "how long a queued message is kept for a disconnected session")
 		durableDedupe   = fs.Bool("durable-publish-dedupe", false, "with -durable-publish, let the queue stream drop the copy a client's retry of a refused publish would add (inside its duplicate window)")
 		durablePub      = fs.Bool("durable-publish", false, "acknowledge QoS 1 and 2 publishes only once the offline queue has stored them and NATS has confirmed the live copy (implies -offline-queue)")
@@ -256,6 +257,7 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 			OfflineQueue:              *offlineQueue,
 			DisableOfflineQueue:       *noOffline,
 			CloseBehindClients:        *closeBehind,
+			AwayBufferMessages:        *awayBuffer,
 			OfflineQueueMaxAge:        *offlineMaxAge,
 			MaximumQoS:                natsmqtt5.Ptr(uint8(*maxQoS)),
 			SharedQoS2:                *sharedQoS2,

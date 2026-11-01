@@ -507,6 +507,12 @@ the write lock while it is blocked on this very client.
 **Decided (2026-10-30), unchanged:** back-pressure (blocking the subscription's NATS handler) is not built. It holds
 back only that client's subscriptions, does not slow the publishers, and moves the loss into nats.go's pending buffer
 and a slow-consumer report on the broker's one shared connection.
+**Done (2026-11-01):** the loss of a message published while a session is away is closed without JetStream:
+`Options.AwayBufferMessages` (`-away-buffer-messages`) holds QoS 1 and 2 messages in memory per session and
+delivers them in order on resume, and a session that overflows is ended so the CONNACK says Session Present 0
+rather than 1 with a gap (`away_buffer_test.go`). Chosen over making Session Present 0 for every no-queue
+session because [MQTT-3.1.2-23] requires the session state to be kept for the Session Expiry Interval.
+It is memory only: a restart, or another broker taking the session over, loses it (the CONNACK says 0).
 **Left:** the message that triggered the close and the ones queued behind it are still lost; without a queue they have
 no copy. The limit is the fixed 2048 (`deliveryQueueDepth`), not an option; a deployment that wants a lower or higher
 one should say so. QoS 0, and messages published straight onto NATS, are dropped without closing, as with the queue on.
@@ -529,8 +535,7 @@ send buffer and `Close`, under a deadline; if it hangs, give `shutdown`'s write 
 
 ## Statements covered only by unit tests
 
-**Blocked by:** a decision for the JetStream-less queue (undecided); nothing for the rest, though driving the cursor's
-bounds over a socket needs a hook to lower them.
+**Blocked by:** nothing; driving the cursor's bounds over a socket needs a hook to lower them.
 
 Found by the 2026-10-08 audit of the offline-queue, session and replay work (v0.9.1 to v0.10.0 and
 after) against the rule in [CONTRIBUTING.md](CONTRIBUTING.md): each statement a change touches needs
@@ -568,11 +573,11 @@ most of them; these remain, each with why:
   rewind, a subscription made while it read) are unit tests and the randomized model
   (`cursor_model_internal_test.go`), which drives the session's code with scans applied after other events, not the
   broker's goroutines.
-- **The offline queue on a broker without JetStream** is not there: a QoS 1 message published while a
-  session is away is lost although the CONNACK said Session Present 1 [MQTT-3.1.2-23],
-  [MQTT-4.5.0-1]. `TestABrokerWithoutJetStreamStillStartsWithNoQueue` pins it as the known
-  deviation. Closing it needs a queue that does not depend on JetStream, which is undecided; until
-  then the README and CONNACK should not promise more than the test shows.
+- **Driven end to end since 2026-11-01: the offline queue on a broker without JetStream.** A QoS 1 message
+  published while a session is away is held in memory, bounded by `AwayBufferMessages`, and delivered on resume;
+  an overflowing session is ended and answered with Session Present 0 [MQTT-3.1.2-23], [MQTT-4.5.0-1]
+  (`away_buffer_test.go`, over real sockets against a NATS server with no JetStream). Not covered end to end: a
+  race between a message arriving and the connection ending (unit-level reasoning in `away.go`, `-race` runs).
 - **Driven end to end since 2026-10-31 (these were unit-tested only).** `NATSIngest` when the queue copy cannot be
   stored (stream deleted: error reply, no sequence, nothing live) and when `DurablePublish`'s flush cannot be confirmed
   (the broker's NATS cut after the queue copy: error reply once NATS is back, copy stored; `ingest_fault_test.go`).

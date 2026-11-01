@@ -42,7 +42,8 @@ func startNATSWithoutJetStream(t *testing.T) string {
 }
 
 // A broker told not to use JetStream does not start using it for the queue:
-// it starts, and a session that was away gets nothing, as before.
+// it starts, and a session that was away gets what was published meanwhile
+// from the broker's memory (away_buffer_test.go), not from a stream.
 func TestABrokerWithoutJetStreamStillStartsWithNoQueue(t *testing.T) {
 	var logs syncBuffer
 	b, addr, _ := startBrokerHandle(t, startNATSWithoutJetStream(t), func(o *natsmqtt5.Options) {
@@ -65,6 +66,9 @@ func TestABrokerWithoutJetStreamStillStartsWithNoQueue(t *testing.T) {
 
 	back := dialRaw(t, addr)
 	require.True(t, back.connect(rawConnect("no-js", 300)).SessionPresent)
+	got := back.expectPublish()
+	assert.Equal(t, "q/1", got.Topic, "Session Present 1 and the message published while away [MQTT-3.1.2-23]")
+	back.send(&packet.Puback{Ack: packet.Ack{PacketID: got.PacketID}})
 	back.expectNothing()
 }
 
