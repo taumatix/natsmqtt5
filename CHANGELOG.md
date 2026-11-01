@@ -11,6 +11,12 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-01
+
+Patch release: one data race fixed and outbound Topic Aliases no longer cost bytes on a small client table. No API change; no new option.
+
+Install: `go get github.com/taumatix/natsmqtt5@v1.0.1`.
+
 - **Changed:** outbound Topic Aliases, once a client's table is full, give an alias to a new name only on its second sighting (a bounded set of 32 names seen once), so a topic sent once no longer evicts a hot one. On the skewed mix at a table of 8 the bytes saved rise from 19% to 32%, a round robin over 40 names at a table of 8 goes from 0% to 6%, and no measured mix or table sends more bytes. Aliases are still per connection, never above the client's maximum, and a free alias is still taken on first sight. No new option.
 
 - **Fixed:** outbound Topic Aliases (on by default since v1.0.0) no longer send more bytes than no aliases to a client whose Topic Alias Maximum is smaller than the set of topics it receives. Each new name used to take the least recently used alias, costing 3 bytes and saving nothing when no name returned before the next displaced it (up to 6% more bytes than aliases off; a maximum of 1 always lost). The connection's table now remaps an alias only while the aliases already set have saved at least what they cost. Aliases are still per connection, never above the client's maximum, and a table of 8 or more sends the same bytes as before. No new option.
