@@ -11,6 +11,8 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** outbound Topic Aliases (on by default since v1.0.0) no longer send more bytes than no aliases to a client whose Topic Alias Maximum is smaller than the set of topics it receives. Each new name used to take the least recently used alias, costing 3 bytes and saving nothing when no name returned before the next displaced it (up to 6% more bytes than aliases off; a maximum of 1 always lost). The connection's table now remaps an alias only while the aliases already set have saved at least what they cost. Aliases are still per connection, never above the client's maximum, and a table of 8 or more sends the same bytes as before. No new option.
+
 ## [1.0.0] - 2026-11-01
 
 **Breaking release.** The first major version: V1 scope is every MUST addressed, and the three defaults deprecated in v0.14.0 flip. The Go module path stays `github.com/taumatix/natsmqtt5` (no `/v2`). Read [MIGRATION.md](MIGRATION.md) before upgrading; pinning the three options to what you run on v0.14.0 makes the upgrade a no-op.

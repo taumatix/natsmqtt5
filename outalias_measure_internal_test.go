@@ -53,14 +53,7 @@ func savings(t *testing.T, topics []string, payload []byte, max uint16, minLen i
 		plain += len(raw)
 		out := raw
 		if len(topic) >= minLen && max > 0 {
-			if alias, ok := tab.hit(topic); ok {
-				out, err = packet.Encode(withAlias(p, alias, true))
-				require.NoError(t, err)
-			} else {
-				out, err = packet.Encode(withAlias(p, tab.next(), false))
-				require.NoError(t, err)
-				tab.assign(topic)
-			}
+			out = tab.encode(p, raw, 0)
 		}
 		aliased += len(out)
 	}
@@ -132,4 +125,24 @@ func repeat(s string, n int) []string {
 		out[i] = s
 	}
 	return out
+}
+
+// Measured before the fix (ROADMAP.md): the first-sighting policy sends more bytes than no aliases at
+// a table of 1 and in every mix that cycles through more names than the table holds. Whatever the
+// policy, aliases must not cost more than a constant over none.
+func TestAliasesNeverCostBytesWhateverTheClientMaximum(t *testing.T) {
+	cycle := make([]string, 0, 3000)
+	for i := 0; i < 3000; i++ { // a round robin over 40 names, the worst case for an LRU
+		cycle = append(cycle, fmt.Sprintf("dt/site-1/building-2/device-%03d/telemetry", i%40))
+	}
+	mixes := map[string][]string{"skewed mix": topicMix(5000, 7), "round robin over 40 names": cycle}
+	for name, topics := range mixes {
+		for _, max := range []uint16{1, 2, 4, 8, 32} {
+			plain, aliased := savings(t, topics, []byte("21.5"), max, minAliasedTopic)
+			t.Logf("%s, table %d: %d -> %d bytes", name, max, plain, aliased)
+			// A constant, not a share of the stream: the ledger lets a table pay for at most one alias
+			// beyond what it has earned, plus the free ones.
+			assert.LessOrEqual(t, aliased, plain+3*(int(max)+1), "%s with table %d", name, max)
+		}
+	}
 }
