@@ -165,6 +165,8 @@ CHANGELOG has the full text.
   broker and after a kill, without repeating a completed QoS 2 message. [MQTT-4.4.0-1],
   [MQTT-4.3.3-2], [MQTT-4.3.3-6]. A record whose delivered ids outgrew its value (4096) is kept
   with the cursor, the rest in chunks beside it (`replay_cursor_spill_test.go`).
+  The two bounds that fall back to the time rewind, 16384 ids above the cursor and a record that left ids
+  out, are driven over a socket with the bounds lowered by hooks (`cursor_bounds_test.go`) [MQTT-4.4.0-1].
 - **v0.11.3.** A client with more QoS 2 PUBLISH packets unacknowledged than the Receive
   Maximum the CONNACK stated was served; it is now sent DISCONNECT 0x93 and the connection is
   closed. The specification's sentence for this (§3.3.4) has no statement id of its own, but §4.13.1
