@@ -11,6 +11,8 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Tests:** shared QoS 2 over a real three-server NATS cluster with replicated streams and buckets: a message whose session record cannot be written goes to a member on another server and is not sent twice, a PUBREL whose record cannot be written is completed after the client reconnects to another server, and a message held for a killed broker's client is completed by it on another server. No product change, no API change.
+
 ## [1.2.0] - 2026-11-01
 
 Minor release, all additive and opt-in; every default is unchanged. New option `QueuePlainPublishes`, shared-group fixes (the last leaver no longer deletes a joiner's backlog; a shared QoS 2 message whose session record cannot be written is no longer sent), a `Broker.Close` hang fixed, a route-flap catch-up for `ReconnectCatchUp`, and a README "Known limits" section.

@@ -297,6 +297,11 @@ a documented default flip with a pin.
    failed write (it is the session's alone, so there is nowhere better for it to go). A broker killed then loses the
    in-flight state, and the client may get the message twice, as for QoS 2 without a shared subscription; the README says
    so. Lifted by turning the checkpoint on (not a NATS limit).
+   Item 5's two tests and the killed-broker case of item 4 now also run over a three-server cluster with replicated streams
+   and buckets (`shared_qos2_cluster_test.go`, `TestClusterASharedQoS2...`): the hand-back goes to a member on another
+   server, and a PUBREL waits for a client that returns to another server. The orphan scan reads the replicated session
+   bucket within AckWait/3, which does not fit at the tests' 900 ms AckWait, so that test uses 4 s; the default AckWait
+   (30 s) gives it 10 s.
 
 Flipping the default is no longer blocked by a duplicate. It is blocked by the decision above; do it with the entry 3
 below (an `Options` field and a `*bool` pin like `PinDurableWills`, a CHANGELOG line that names the SUBACK change, a
