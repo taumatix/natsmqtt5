@@ -47,7 +47,10 @@ a takeover and a client away past the group's AckWait (the duplicate windows tha
 are closed; what remains is the same as QoS 2 without a shared subscription, listed in the README
 under "What it does not do"). With `PersistentSessions`, every broker also reads the session
 records every AckWait/3 (10 s) to keep a dead broker's held messages from the group; that is a
-scan of the session bucket per interval.
+scan of the session bucket per interval. That hold applies to QoS 1 messages as well: after a
+broker is killed, its sessions' unacknowledged shared messages stay with those sessions until the
+client returns or `SharedHoldLimit` passes, where v1 gave them to another member after the
+AckWait (30 s).
 
 **Who is affected.** Deployments whose clients subscribe to `$share/` at QoS 2 (a client library
 that requested QoS 2 and was quietly granted QoS 1 now sees the QoS 2 exchange and its packets),

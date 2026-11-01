@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/taumatix/natsmqtt5/v2"
 	"github.com/taumatix/natsmqtt5/v2/packet"
 )
 
@@ -53,7 +54,10 @@ func killedSharedMember(t *testing.T) (survivor string, sent *packet.Publish, ot
 	}
 	natsURL = startNATS(t)
 	child := startBrokerBinary(t, natsURL, "-persistent-sessions", "-session-checkpoint-interval", killedBrokerCheckpoint)
-	survivor = startBroker(t, natsURL, persistentWithQueue)
+	// SharedQoS2 is pinned off on the survivor: these tests pin the QoS 1 hand-back after AckWait,
+	// and since v2.0.0 a default broker holds a dead broker's shared messages (of any QoS) for the
+	// dead session until SharedHoldLimit. shared_qos2_killed_test.go covers that behaviour.
+	survivor = startBroker(t, natsURL, persistentWithQueue, func(o *natsmqtt5.Options) { o.PinSharedQoS2 = natsmqtt5.Ptr(false) })
 
 	victim := dialRaw(t, child.addr)
 	victim.connect(noKeepAlive(rawConnect("killed-member", 300)))
