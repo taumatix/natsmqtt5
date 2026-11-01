@@ -11,6 +11,12 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-01
+
+Minor release, all additive and opt-in; every default is unchanged. New option `QueuePlainPublishes`, shared-group fixes (the last leaver no longer deletes a joiner's backlog; a shared QoS 2 message whose session record cannot be written is no longer sent), a `Broker.Close` hang fixed, a route-flap catch-up for `ReconnectCatchUp`, and a README "Known limits" section.
+
+Install: `go get github.com/taumatix/natsmqtt5@v1.2.0`.
+
 - **Added:** `Options.QueuePlainPublishes` (`-queue-plain-publishes`, `NATSMQTT5_QUEUE_PLAIN_PUBLISHES=true`), **opt-in, off by default**: a message a plain NATS client publishes on a live subject with an `Mqtt5-Qos` header of 1 or 2 is queued by a broker (a NATS queue group on `<prefix>.>`), so an away session and a shared group get it. Caveats, only with the option on: a plain NATS subscriber sees such a message twice, the original without `Mqtt5-Msg-Id` and then the broker's copy with one; the broker liveness subject moves from `<prefix>.$broker.<id>.ping` to `<prefix>$broker.<id>.ping`, so restricted NATS permissions must allow it and every broker of a fleet using `DurableWills` or `PersistentSessions` must have the same value; a durable publish to a missing queue stream is refused after up to 5 s instead of at once. With the option off the behaviour and the liveness subject are those of v1.1.0, so a mixed v1.1/v1.2 fleet works.
 - `SharedQoS2` stays off by default. Enabling it and `QueuePlainPublishes` by default is a v2 decision, recorded in ROADMAP.md; the prepared v2 change lives on the branch `release/v2-prep`.
 
