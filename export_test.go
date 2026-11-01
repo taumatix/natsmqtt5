@@ -11,10 +11,13 @@ import (
 // Seams for the external tests. They exist only in the test binary.
 
 // SetSharedFetchHook makes every batch pull of a shared subscription's backlog
-// call f(asked, got) until the test ends. Set it before the broker starts.
-func SetSharedFetchHook(t interface{ Cleanup(func()) }, f func(asked, got int)) {
-	sharedFetchHook = f
-	t.Cleanup(func() { sharedFetchHook = nil })
+// on b call f(asked, got). nil removes it.
+func SetSharedFetchHook(b *Broker, f func(asked, got int)) {
+	if f == nil {
+		b.sharedFetchHook.Store(nil)
+		return
+	}
+	b.sharedFetchHook.Store(&f)
 }
 
 // SetPubrecGate makes a connection call f(id) when it has read a PUBREC that
@@ -446,4 +449,10 @@ func ReplayCursor(b *Broker, clientID string) (next uint64, holes []uint64) {
 	}
 	sort.Slice(holes, func(i, j int) bool { return holes[i] < holes[j] })
 	return s.cur.next, holes
+}
+
+// PullingGoroutines is the number of goroutines pulling shared backlogs on b,
+// counted through the connections still holding a pull.
+func PullingGoroutines(b *Broker) int {
+	return int(b.pullers.Load())
 }

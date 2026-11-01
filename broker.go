@@ -44,6 +44,14 @@ type Broker struct {
 	// accepted for a QoS 2 delivery, before the record naming its PUBREL is
 	// written. A seam for tests.
 	pubrecGate atomic.Pointer[func(id uint16)]
+	// sharedFetchHook, when set, sees the size asked of each batch pull of a
+	// shared subscription's backlog and the number it returned. A seam for tests.
+	sharedFetchHook atomic.Pointer[func(asked, got int)]
+	// pullWG counts the goroutines pulling a shared subscription's backlog, so
+	// Close can wait for them to stop.
+	pullWG sync.WaitGroup
+	// pullers is how many of them are running, for tests.
+	pullers atomic.Int64
 	// publishFlushGate, when set, is called by a durable publish between the
 	// live publish and the flush that confirms it. A seam for tests.
 	publishFlushGate atomic.Pointer[func()]
@@ -344,6 +352,9 @@ func (b *Broker) Close() error {
 	b.closeRetain()
 	b.unwatchReconnects()
 	b.closeNATS()
+	// A pull blocked in JetStream returns once its connection is closed, or
+	// within sharedPullWait for a connection the caller keeps.
+	b.pullWG.Wait()
 	return nil
 }
 
