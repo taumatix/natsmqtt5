@@ -139,7 +139,7 @@ func TestRestrictedBrokerRefusesAWillOnADollarTopic_MQTT_5_0_4_7_2(t *testing.T)
 // Left at its default, the broker does what it did before: clients exchange
 // messages on "$app/…", and the filters above are granted.
 func TestUnrestrictedBrokerLeavesDollarTopicsToApplications_MQTT_5_0_4_7_2(t *testing.T) {
-	addr := startBroker(t, startNATS(t))
+	addr := startBroker(t, startNATS(t), allowDollarTopics)
 	other := dialRaw(t, addr)
 	other.connect(rawConnect("dollar-other", 0))
 	for _, filter := range []string{"$SYS/#", "$share/g/$app/x"} {
@@ -167,6 +167,7 @@ func TestReservedLevelsAreRefusedWithAndWithoutTheOption(t *testing.T) {
 	for name, opts := range map[string][]func(*natsmqtt5.Options){
 		"restricted": {restrictDollar},
 		"default":    nil,
+		"pinned off": {allowDollarTopics},
 	} {
 		t.Run(name, func(t *testing.T) {
 			c := dialRaw(t, startBroker(t, startNATS(t), opts...))
@@ -185,7 +186,7 @@ func TestRestrictedBrokerDropsStoredDollarSubscriptionsOnResume_MQTT_5_0_4_7_2(t
 	natsURL := startNATS(t)
 	persistent := func(o *natsmqtt5.Options) { o.PersistentSessions = true }
 
-	addrA, stopA := startStoppableBroker(t, natsURL, persistent)
+	addrA, stopA := startStoppableBroker(t, natsURL, persistent, allowDollarTopics)
 	first, _ := connectClient(t, addrA, durableConnect("dollar-resume", 300))
 	first.subscribe(
 		paho.SubscribeOptions{Topic: "$app/x", QoS: 1},
@@ -205,7 +206,7 @@ func TestRestrictedBrokerDropsStoredDollarSubscriptionsOnResume_MQTT_5_0_4_7_2(t
 	stopB()
 
 	// An unrestricted broker would deliver "$app/x" if the record still held it.
-	addrC := startBroker(t, natsURL, persistent)
+	addrC := startBroker(t, natsURL, persistent, allowDollarTopics)
 	third, connack := connectClient(t, addrC, durableConnect("dollar-resume", 300))
 	require.True(t, connack.SessionPresent)
 	pubC, _ := connectClient(t, addrC, connectOpts("pub-c"))

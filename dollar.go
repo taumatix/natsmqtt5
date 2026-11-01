@@ -11,12 +11,11 @@ import (
 // "The Server SHOULD prevent Clients from using such Topic Names to exchange
 // messages with other Clients. Server implementations MAY use Topic Names that
 // start with a leading $ character for other purposes" (MQTT-5.0 §4.7.2; the
-// sentence has no statement id). By default the broker follows it only for the
-// two levels its own data lives under ($retained and $queue, see
-// topic.ValidateName), because refusing every "$" topic would break the
-// applications that use "$app/…" today. Options.RestrictDollarTopics follows
-// the SHOULD for all of them; an unrestricted broker logs once when a client
-// first uses one (warnDollarUse), so an operator learns before a default flips.
+// sentence has no statement id). Since v1.0.0 the broker
+// follows it for every "$" topic (Options.RestrictDollarTopics, on by default);
+// with PinRestrictDollarTopics set to false it follows it only for the two
+// levels its own data lives under ($retained and $queue, see
+// topic.ValidateName).
 //
 // A refusal is a Topic Name invalid (0x90) on a PUBLISH, a Will or a PUBREC, and
 // a Topic Filter invalid (0x8F) in a SUBACK, the codes the broker already uses
@@ -42,20 +41,4 @@ func dollarFilter(filter string) bool {
 		return strings.HasPrefix(inner, "$")
 	}
 	return strings.HasPrefix(filter, "$")
-}
-
-// warnDollarUse logs, the first time a client uses a "$" topic on a broker that is not restricted,
-// that a future major version may refuse them by default. Once per broker: a client that uses
-// "$app/..." does so on every message, and the point is to tell the operator, not to log each use.
-// It is called only after the reserved levels ($retained, $queue) have been refused.
-func (b *Broker) warnDollarUse(clientID, action, name string) {
-	if b.opts.RestrictDollarTopics {
-		return
-	}
-	b.dollarWarned.Do(func() {
-		b.logger.Warn("a client used a topic starting with $ (MQTT-5.0 section 4.7.2 advises servers to prevent it); "+
-			"a future major version may refuse these by default, set Options.RestrictDollarTopics to refuse them now; "+
-			"logged once per broker",
-			"client_id", clientID, "action", action, "topic", name)
-	})
 }

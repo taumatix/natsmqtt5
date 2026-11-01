@@ -23,6 +23,9 @@ func TestClusterARetainedClearMissedDuringAnOutageIsAppliedAfterTheTombstoneIsPu
 		clusterReplicas(o)
 		o.SessionSweepInterval = 500 * time.Millisecond
 		o.RetainedTombstoneTTL = 2 * time.Second
+		// The test needs the isolated broker to keep serving clients; a broker with durable
+		// Wills closes them when it cannot reach NATS (the default since v1.0.0).
+		o.PinDurableWills = pin(false)
 	}
 	_, addrCut, _ := startBrokerHandle(t, c.URL(0), quick)
 	addrOther := startBroker(t, c.URL(1)+","+c.URL(2), quick)

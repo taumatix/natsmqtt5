@@ -175,20 +175,19 @@ type Options struct {
 	// "$": a PUBLISH or Will to one is refused with Topic Name invalid (0x90),
 	// and a subscription to one with Topic Filter invalid (0x8F). A Shared
 	// Subscription ($share/…) is allowed unless the Topic Filter inside it
-	// starts with "$". Off by default, which leaves "$app/…" and the like usable
-	// as before; "$retained" and "$queue", where the broker keeps its own data,
-	// are refused either way. It does not apply to a subscription a persistent
-	// session already stored.
+	// starts with "$". On by default since v1.0.0 (MIGRATION.md); "$retained"
+	// and "$queue", where the broker keeps its own data, are refused whatever
+	// the setting. It does not apply to a subscription a persistent session
+	// already stored.
 	//
-	// Deprecation notice: this is off by default today, and the default will
-	// become on in the next major version (MIGRATION.md). Set
-	// PinRestrictDollarTopics to choose now; leaving both unset logs one INFO
-	// line per process.
+	// Because the default is on, false here cannot turn it off: set
+	// PinRestrictDollarTopics to Ptr(false) to leave "$app/…" and the like
+	// usable. Setting this to true is redundant and kept for compatibility.
 	RestrictDollarTopics bool
 	// PinRestrictDollarTopics fixes RestrictDollarTopics whatever the default
 	// is, and beats RestrictDollarTopics when both are set: Ptr(false) keeps
-	// "$app/…" usable after the default flips, Ptr(true) refuses it today.
-	// nil leaves the choice to RestrictDollarTopics and the default.
+	// "$app/…" usable (the behaviour before v1.0.0), Ptr(true) refuses it.
+	// nil leaves the choice to RestrictDollarTopics and the default, which is on.
 	PinRestrictDollarTopics *bool
 
 	// DurableWills keeps the Will Message of every open connection in a
@@ -199,7 +198,10 @@ type Options struct {
 	// [MQTT-3.1.2-7], [MQTT-3.1.2-8], [MQTT-3.1.3-9]. Exactly one broker publishes a given Will,
 	// by compare-and-swap on the record.
 	//
-	// Off by default, because it changes where Wills live: the Will's payload
+	// On by default since v1.0.0 (MIGRATION.md) whenever JetStream is in use
+	// (retained messages, PersistentSessions or OfflineQueue); a broker that
+	// uses none of them has no JetStream and no durable Wills unless
+	// PinDurableWills forces it. It changes where Wills live: the Will's payload
 	// is written to the "<StreamPrefix>_wills" bucket in clear text, so that
 	// bucket needs the access control of the session bucket. It needs JetStream
 	// and works with or without PersistentSessions; without them a client that
@@ -209,14 +211,15 @@ type Options struct {
 	// The delay is counted from the moment a surviving broker notices, which is
 	// up to WillCheckInterval after the connection was lost.
 	//
-	// Deprecation notice: this is off by default today, and the default will
-	// become on in the next major version (MIGRATION.md). Set PinDurableWills
-	// to choose now; leaving both unset logs one INFO line per process.
+	// Because the default is on, false here cannot turn it off: set
+	// PinDurableWills to Ptr(false) to keep Wills in memory. Setting this to
+	// true also forces JetStream on, as before.
 	DurableWills bool
 	// PinDurableWills fixes DurableWills whatever the default is, and beats
-	// DurableWills when both are set: Ptr(false) keeps Wills in memory after
-	// the default flips, Ptr(true) stores them durably today. nil leaves the
-	// choice to DurableWills and the default.
+	// DurableWills when both are set: Ptr(false) keeps Wills in memory (the
+	// behaviour before v1.0.0), Ptr(true) stores them durably and starts
+	// JetStream if nothing else did. nil leaves the choice to DurableWills and
+	// the default, which is on whenever JetStream is in use.
 	PinDurableWills *bool
 	// WillCheckInterval is how often a broker looks for Wills whose owner has
 	// gone, with DurableWills. It bounds how long after a broker's death its
@@ -436,19 +439,18 @@ type Options struct {
 	// OutboundTopicAliases lets the broker send Topic Aliases to a client that
 	// offered a Topic Alias Maximum in its CONNECT (MQTT-5.0 §3.3.2.3.4), up to
 	// that maximum, least recently used first. It saves bandwidth on long topic
-	// names that repeat. Off by default; a client that offers no maximum is
-	// never sent one either way. A resend after a reconnect carries the full
-	// name again, since the table belongs to the network connection.
+	// names that repeat. On by default since v1.0.0 (MIGRATION.md); a client
+	// that offers no maximum is never sent one either way. A resend after a
+	// reconnect carries the full name again, since the table belongs to the
+	// network connection.
 	//
-	// Deprecation notice: this is off by default today, and the default will
-	// become on in the next major version (MIGRATION.md). Set
-	// PinOutboundTopicAliases to choose now; leaving both unset logs one INFO
-	// line per process.
+	// Because the default is on, false here cannot turn it off: set
+	// PinOutboundTopicAliases to Ptr(false) to send no alias.
 	OutboundTopicAliases bool
 	// PinOutboundTopicAliases fixes OutboundTopicAliases whatever the default
 	// is, and beats OutboundTopicAliases when both are set: Ptr(false) sends
-	// no alias after the default flips, Ptr(true) sends them today. nil leaves
-	// the choice to OutboundTopicAliases and the default.
+	// no alias (the behaviour before v1.0.0), Ptr(true) sends them. nil leaves
+	// the choice to OutboundTopicAliases and the default, which is on.
 	PinOutboundTopicAliases *bool
 	// EscapeNATSWildcards lets a topic contain '*', '>', spaces and the other
 	// whitespace characters, which MQTT allows but a NATS subject cannot carry,
@@ -597,7 +599,12 @@ func (o Options) resolve() (*resolved, error) {
 		r.logger = slog.Default()
 	}
 
-	noteComingDefaults(r.logger, &o)
+	// v1.0.0 defaults (MIGRATION.md): on, unless pinned. The plain bools can
+	// only say "on", so a pin is the one way to choose the old behaviour.
+	r.RestrictDollarTopics = true
+	r.OutboundTopicAliases = true
+	// Durable Wills follow JetStream: on whenever something else already uses it.
+	r.DurableWills = o.DurableWills || !o.DisableRetained || o.PersistentSessions || o.OfflineQueue
 	if o.PinDurableWills != nil {
 		r.DurableWills = *o.PinDurableWills
 	}
