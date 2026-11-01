@@ -159,6 +159,7 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 		restrictDollar  = fs.Bool("restrict-dollar-topics", true, "refuse publishes and subscriptions on topics starting with $ (MQTT 5.0 section 4.7.2), except $share/ subscriptions; give =false to allow them")
 		outboundAliases = fs.Bool("outbound-topic-aliases", true, "send Topic Aliases to a client that offers a Topic Alias Maximum; give =false to send none")
 		maxQoS          = fs.Int("max-qos", 2, "highest QoS the broker accepts (0, 1 or 2)")
+		sharedQoS2      = fs.Bool("shared-qos2", false, "grant QoS 2 on shared subscriptions (default grants QoS 1; the guarantee is incomplete, see ROADMAP.md)")
 		pubClock        = fs.Bool("publisher-clock-expiry", false, "count a message's expiry from when the publishing broker received it (trusts synchronised clocks and that only brokers publish on the subjects)")
 		keepAlive       = fs.Int("server-keep-alive", 0, "override the client's Keep Alive, in seconds; 0 leaves it to the client")
 		wsListen        = fs.String("ws-listen", "", "address to accept MQTT over WebSocket on (for example :8083); empty serves none")
@@ -257,6 +258,7 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 			AwayBufferMessages:        *awayBuffer,
 			OfflineQueueMaxAge:        *offlineMaxAge,
 			MaximumQoS:                natsmqtt5.Ptr(uint8(*maxQoS)),
+			SharedQoS2:                *sharedQoS2,
 			QueuePlainPublishes:       *queuePlain,
 			PublisherClockExpiry:      *pubClock,
 			ServerKeepAlive:           uint16(*keepAlive),
