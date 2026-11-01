@@ -498,10 +498,7 @@ most of them; these remain, each with why:
   default it is [MQTT-4.4.0-1]; a record that left ids out carries no cursor, logs the warning, and the broker that
   restores it replays from the time rewind. That the bound is 16384 is `TestTooManyIDsAboveTheCursorDropIt`'s alone.
   The hole bound, the restart after it and a live copy below a restarted cursor's base were driven already
-  (`replay_cursor_test.go`). Still unit tests: a live copy arriving below the cursor in the instant a scan moves it
-  (`noteLiveCopy` under `cursorMu`, `cursor_internal_test.go`), which needs a hook in `scanOnce` to hold a scan between
-  its read and its apply; a live copy after the apply is a hole already and is driven; add the hook when a bug is
-  suspected there. The restart's other refusals (a message held below base, a scan longer than the rewind, a
+  (`replay_cursor_test.go`). A live copy arriving while a scan applies is driven too (`cursor_scan_live_test.go`, a hook in `scanOnce` holds the scan between its read and its apply). Still unit tests: the restart's other refusals (a message held below base, a scan longer than the rewind, a
   subscription made while it read) are unit tests and the randomized model (`cursor_model_internal_test.go`), which
   drives the session's code with scans applied after other events, not the broker's goroutines. The new test found a
   data race in `noteLiveCopy` (it read the cursor under `cursorMu` while `dropCursorLocked` wrote it under `mu`), fixed

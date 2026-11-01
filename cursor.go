@@ -406,6 +406,9 @@ func (c *conn) scanOnce() (again bool) {
 		c.logger.Debug("could not scan the offline queue for the replay cursor", "error", err)
 		return false
 	}
+	if f := c.broker.scanGate.Load(); f != nil {
+		(*f)()
+	}
 	moved, stale := c.applyScan(gen, start, last, subs, read)
 	return moved || stale
 }
