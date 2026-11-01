@@ -126,7 +126,21 @@ func (b *Broker) natsBack() {
 	if at.IsZero() {
 		return
 	}
-	go b.catchUpAfterReconnect(at, seen, gen)
+	// Added under b.mu, where Close sets closed before it waits, so no catch-up starts after the wait.
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return
+	}
+	b.catchUpWG.Add(1)
+	b.mu.Unlock()
+	go func() {
+		defer b.catchUpWG.Done()
+		if f := b.catchUpHook.Load(); f != nil {
+			(*f)()
+		}
+		b.catchUpAfterReconnect(at, seen, gen)
+	}()
 }
 
 // catchUpAfterReconnect finds the first queue sequence stored a rewind before
