@@ -11,7 +11,11 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
-Planned as **v1.0.0**, the first major version: V1 scope is every MUST addressed, and the three defaults deprecated in v0.14.0 flip. The Go module path stays `github.com/taumatix/natsmqtt5` (no `/v2`). Read [MIGRATION.md](MIGRATION.md) before upgrading; pinning the three options to what you run on v0.14.0 makes the upgrade a no-op.
+## [1.0.0] - 2026-11-01
+
+**Breaking release.** The first major version: V1 scope is every MUST addressed, and the three defaults deprecated in v0.14.0 flip. The Go module path stays `github.com/taumatix/natsmqtt5` (no `/v2`). Read [MIGRATION.md](MIGRATION.md) before upgrading; pinning the three options to what you run on v0.14.0 makes the upgrade a no-op.
+
+Install: `go get github.com/taumatix/natsmqtt5@v1.0.0`.
 
 - **Changed (breaking):** `Options.DurableWills` is on by default whenever JetStream is in use (retained messages, `PersistentSessions` or `OfflineQueue`): every connection's Will is also written to the `<StreamPrefix>_wills` bucket in clear text, so that bucket needs the access control of the session bucket. Keep the old behaviour with `PinDurableWills: natsmqtt5.Ptr(false)` or `-durable-wills=false`.
 - **Changed (breaking):** `Options.RestrictDollarTopics` is on by default: a PUBLISH or Will on any `$` topic is refused with 0x90 and a subscription to one with 0x8F (`$share/...` stays allowed). Keep the old behaviour with `PinRestrictDollarTopics: natsmqtt5.Ptr(false)` or `-restrict-dollar-topics=false`.
