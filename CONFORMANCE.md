@@ -67,7 +67,9 @@ shows the broker refusing or not advertising it the way the specification requir
 
 - **QoS 2 on shared subscriptions.** A QoS 2 request on a `$share/` filter is granted QoS 1,
   reported in the SUBACK, which [MQTT-3.8.4-7] permits. `Options.SharedQoS2` (off) grants QoS 2 and
-  is tested (`shared_qos2_test.go`) but not complete (ROADMAP.md), so the default stays.
+  is tested (`shared_qos2_test.go`, `shared_qos2_killed_test.go`, `shared_qos2_late_test.go`); the
+  duplicate windows are closed or no wider than QoS 2 without a shared subscription has (ROADMAP.md),
+  and the default stays because granting QoS 2 there changes what a v1 client is told.
 - **Server-to-client Topic Aliases** are sent since v1.0.0 to a Client that offered a Topic Alias
   Maximum, which is what permits them; `PinOutboundTopicAliases: Ptr(false)` sends none, which a
   Server may do.

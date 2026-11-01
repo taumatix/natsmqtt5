@@ -419,9 +419,12 @@ type Options struct {
 	MaximumQoS *uint8
 	// SharedQoS2 grants QoS 2 on a shared subscription ($share/...) when a
 	// client asks for it; by default the SUBACK grants QoS 1, which
-	// [MQTT-3.8.4-7] permits. Off until the exactly-once guarantee for a message
-	// a shared member holds is complete (ROADMAP.md, "QoS 2 on shared
-	// subscriptions"); turning it on earlier is for trials.
+	// [MQTT-3.8.4-7] permits. A message a member holds is kept for it across a
+	// killed broker, a takeover and a client away past the group's AckWait; use it
+	// with PersistentSessions and a positive SessionCheckpointInterval, without
+	// which a killed broker's held messages go back to the group. Off by default
+	// because it changes what a client is granted (ROADMAP.md, "QoS 2 on shared
+	// subscriptions").
 	SharedQoS2 bool
 	// PublisherClockExpiry counts a live message's Message Expiry Interval from when the
 	// publishing broker received it, not from when this broker did. The publisher stamps the

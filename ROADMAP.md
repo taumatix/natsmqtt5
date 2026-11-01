@@ -204,15 +204,23 @@ worse on the skewed mix (256: 26%).
 
 ## QoS 2 on shared subscriptions
 
-**Blocked by:** known duplicates (checked again 2026-10-31, after #202). The default stays off: of the three windows
-#202 recorded, two are closed for a client that comes back within the group's AckWait, and what is left of them, with the
-first, still lets one QoS 2 message reach a group twice, which a QoS 2 grant forbids [MQTT-4.3.3-2], [MQTT-4.8.2-5].
+**Blocked by:** a decision about a wire-visible default, no longer by duplicates (checked 2026-11-01). Every duplicate
+window below is closed, or is the same as what QoS 2 without a shared subscription has; what is left is whether to
+change what a v1 client is granted. Granting QoS 2 on `$share/` by default changes the SUBACK and the QoS of every
+message a v1 deployment's shared members are sent (a QoS 2 request that was answered QoS 1 starts a four-step exchange
+the client's library may not expect), which is a behaviour change in a major version's sense (MIGRATION.md has the three
+v1.0.0 flips as the precedent). It is not additive, so it stays opt-in until a major release or a decision to take it as
+a documented default flip with a pin.
 
-1. **Open.** The late backlog (*A default queue that failed at startup*, **Left:**): a message the group acknowledged
-   from the backlog before its live copy reached this broker is delivered live as well. No crash is needed, only a slow
-   live copy at the moment the backlog is given. Closing it needs group consumers created by start sequence, which that
-   entry's **Blocked by** names as a decision (a mixed-version fleet would fail its shared SUBSCRIBEs). This one alone
-   keeps the default off.
+1. **Closed (2026-11-01).** The late backlog (*A default queue that failed at startup*): a message the group acknowledged
+   from the backlog before its live copy reached this broker was delivered live as well. A group consumer now carries the
+   stream sequence it started after in its metadata (`natsmqtt5-start-seq`, written by whichever broker makes it, while
+   nothing has been delivered from it, so the value is exact), and a late backlog skips the live copy of everything
+   above it (`TestALateBacklogSkipsTheLiveCopyOfAMessageTheGroupAlreadyAcknowledged_MQTT_4_3_3_2_MQTT_4_8_2_5`, which
+   failed before: 3 to 7 of ten came twice). Additive, and no `DeliverPolicy` change, so a mixed-version fleet still
+   works; what an earlier release's broker does is update the consumer and drop the metadata, and then the check falls
+   back to the acknowledgement floor, with the window as it was. A consumer that has already delivered when a new
+   broker first sees it has no start either.
 2. **Closed within AckWait.** A message pulled and sent but not yet checkpointed: for QoS 2 there is no such moment,
    since `deliver` and `deliverBurst` (`subscribe.go`) write the record before the PUBLISH. Killed the instant the
    client has the PUBLISH, the survivor resends it with DUP and the original identifier and the other member is never
@@ -223,19 +231,25 @@ first, still lets one QoS 2 message reach a group twice, which a QoS 2 grant for
    answers PUBREC again ([MQTT-4.3.3-10]) and the exchange completes; the other member is never given it
    (`TestAKilledBrokersSharedQoS2MessageAnsweredBeforeItsRecordIsCompletedByTheSameClient_MQTT_4_8_2_4_MQTT_4_8_2_5`, with
    `SetPubrecGate` holding the PUBREC before `awaitPubcomp`; it fails if a restore hands a pre-PUBREC entry back).
-4. **Open, what is left of 2 and 3.** A killed broker's held messages are held again only when the session is restored,
-   which is when its client reconnects. A client that stays away longer than the AckWait (30 s) after its broker was
-   killed finds its message given to another member, and is then resent it as well: a probe with a 0.9 s AckWait saw the
-   other member get `job-away` at QoS 1 after the kill, and the returning client get it with DUP and its original
-   identifier. [MQTT-4.8.2-4] and [MQTT-4.8.2-5] both say the message is that client's. Closing it means a surviving
-   broker holding (`+WPI`) the backlog messages named in a dead broker's attached records, the sweep's job for an
-   orphaned session (`sessionsweep.go`), without restoring the session. Also here: `checkpointNow` drops the record
-   write's error (`checkpoint.go`, `_ = c.broker.checkpointSession(c)`), so a PUBLISH can go out after a failed write,
-   and with `SessionCheckpointInterval` negative no record is written at all.
+4. **Closed (2026-11-01).** A killed broker's held messages were held again only when the session was restored, so a
+   client away longer than the AckWait (30 s) found its message given to another member and was then sent it as well.
+   `Broker.holdOrphans` (`held.go`, started with `SharedQoS2` and persistent sessions) reads the session records every
+   AckWait/3 and says `+WPI` for the Ack subjects that a record Attached to a broker that does not answer a liveness
+   request names (`sessionStore.orphanedHolds`), without restoring the session. It lasts as long as the record, or
+   `SharedHoldLimit` from the first sighting, after which the message goes back to the group once
+   (`TestAKilledBrokersSharedQoS2MessageIsHeldForAClientAwayPastTheAckWait_MQTT_4_8_2_4_MQTT_4_8_2_5`, which failed
+   before: the other member was given the message). The scan reads every session record each interval, which is why it
+   runs only with `SharedQoS2`.
+5. **The same as QoS 2 without a shared subscription, not closed.** `checkpointNow` drops the record write's error
+   (`checkpoint.go`), so a PUBLISH can go out after a failed write; with `SessionCheckpointInterval` negative, or without
+   `PersistentSessions`, no record is written. A broker killed then loses the in-flight state for any QoS 2 message,
+   shared or not, and a shared one is given to the group after the AckWait where a non-shared one is replayed to the
+   client as a new message: a duplicate either way, documented in the README as the limit of QoS 2 across a killed broker.
+   Left as a follow-up: refuse the grant, or fail the delivery, when the record cannot be written.
 
-Flip the default when (1) and (4) are closed, each with a test that fails before the fix, or when (4) is written into the
-README as the guarantee's limit across a killed broker, as `shared_killed_test.go` already does for QoS 1 ("seen twice
-at worst, never lost"). Until then the README keeps "leave it off in production".
+Flipping the default is no longer blocked by a duplicate. It is blocked by the decision above; do it with the entry 3
+below (an `Options` field and a `*bool` pin like `PinDurableWills`, a CHANGELOG line that names the SUBACK change, a
+MIGRATION.md note) in a major release, or earlier only if the human takes it as a default flip.
 
 **Today:** a QoS 2 request on a `$share/` filter is granted QoS 1, reported
 honestly in the SUBACK, which [MQTT-3.8.4-7] permits.
@@ -371,10 +385,9 @@ reconnect before the CONNACK, which is a design of its own.
 
 ## A default queue that failed at startup: a duplicate across brokers
 
-**Blocked by:** closing the last window needs group consumers created by start sequence, and a broker of an earlier
-version updates the consumer with `DeliverNew`, which JetStream refuses to change on an existing consumer, so a
-mixed-version fleet would fail its shared SUBSCRIBEs (see "Looked at 2026-10-31" below). No deployment is known to run a
-fleet with the queue down on one broker only.
+**Blocked by:** nothing; the last window is closed (2026-11-01, below) without creating consumers by start sequence, so
+the mixed-version problem in "Looked at 2026-10-31" below does not arise. What remains is a fleet that has a broker of
+an earlier release updating the group's consumer, which drops the start the later brokers read.
 
 **Done (2026-10-11):** the broker retries a default queue it could not create, with a doubling wait from 5 s to a
 minute, logs at info when it comes up, and `Broker.OfflineQueueActive` says whether it is on.
@@ -397,9 +410,12 @@ delivered too, so the group got them twice, which a shared QoS 2 grant (`SharedQ
 (`TestALateBacklogSkipsTheLiveCopyOfAMessageTheGroupsConsumerAlreadyHeld_MQTT_4_3_3_2`; before, about half of ten held
 messages came twice). JetStream starts a new consumer's floor one below its first sequence, so a message stored before
 the consumer is still delivered live (`TestALateBacklogStillDeliversTheLiveCopyOfAMessageStoredBeforeItsConsumer_MQTT_4_5_0_1_MQTT_4_3_3_2`).
-**Left:** a message the group acknowledged from the backlog before its live copy reached this broker is below the floor
-and still delivered live, so it reaches the group twice. That needs a live copy slower than a member's whole
-PUBLISH-to-acknowledgement exchange, and only in the moment the backlog is given.
+**Done (2026-11-01):** a message the group acknowledged from the backlog before its live copy reached this broker, which
+the floor could not tell from one stored before the consumer, is skipped: the group consumer records, in its metadata,
+the stream sequence it started after (exact while nothing has been delivered from it), and the late backlog uses that
+instead of the floor (`TestALateBacklogSkipsTheLiveCopyOfAMessageTheGroupAlreadyAcknowledged_MQTT_4_3_3_2_MQTT_4_8_2_5`).
+The consumer's `DeliverPolicy` is untouched, so this is additive. **Left:** a consumer with no recorded start (made
+by an earlier release, or whose metadata an earlier release's update dropped) is judged by the floor as before.
 
 **Looked at 2026-10-31, not built, and why it is not an opt-in either:** the fix is to create the group consumer by
 start sequence, and there is no additive form of it. (1) A consumer's `DeliverPolicy` cannot be changed on an existing

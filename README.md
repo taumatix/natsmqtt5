@@ -662,11 +662,18 @@ one with fewer features:
   `$share/` filter is answered with `Granted QoS 1` in the SUBACK, which
   [MQTT-3.8.4-7] permits. `Options.SharedQoS2` (`-shared-qos2`) grants QoS 2: the
   member that is sent a message owns it from then on, a held message survives a
-  killed broker and a takeover, and the group is told at PUBREC. The guarantee is
-  not complete (a message pulled but not yet checkpointed, or a broker killed
-  between reading the PUBREC and writing the record, goes back to the group), so
-  leave it off in production ([ROADMAP.md](ROADMAP.md)). `Options.SharedHoldLimit`
-  hands a message a connected member never acknowledges back to the group.
+  killed broker and a takeover (also for a client that stays away longer than the
+  group's 30 s AckWait: the surviving brokers keep saying the message is being
+  worked on while the dead broker's session record stands), and the group is told
+  at PUBREC. Across a killed broker the guarantee is that of QoS 2 without a
+  shared subscription: it needs `PersistentSessions` and a positive
+  `SessionCheckpointInterval`, and a record write that fails still lets the
+  PUBLISH go out. It stays off by default because turning it on changes what a
+  v1 client is granted ([ROADMAP.md](ROADMAP.md)); a group consumer made by a
+  release before the start was recorded (CHANGELOG [Unreleased]) does not carry
+  the start the late-backlog check reads. `Options.SharedHoldLimit` hands a
+  message a connected member never acknowledges back to the group, and one held
+  for a dead broker's session once the limit has passed.
 - **Enhanced authentication is opt-in.** With `Options.Auther` set, a CONNECT naming an
   Authentication Method runs the AUTH-packet exchange of MQTT-5.0 §4.12 (challenge, response,
   CONNACK) and a client may re-authenticate on the open connection (AUTH 0x19); a failed
