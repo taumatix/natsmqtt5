@@ -366,9 +366,6 @@ func (b *Broker) Close() error {
 	// and has released its stored record, so a broker that shuts down cleanly
 	// leaves no record claiming it is still being served.
 	b.wg.Wait()
-	// A catch-up after a NATS reconnect reads the queue and releases the live copies of the
-	// connections just waited for; shutdown cancels the read it may be in.
-	b.catchUpWG.Wait()
 	// Explicitly, since a NATS connection the caller passed in is not drained.
 	b.stopReauthorize()
 	b.closeWills()
@@ -379,6 +376,10 @@ func (b *Broker) Close() error {
 	// A pull blocked in JetStream returns once its connection is closed, or
 	// within sharedPullWait for a connection the caller keeps.
 	b.pullWG.Wait()
+	// A catch-up after a NATS reconnect can sit inside a JetStream read that retries while its
+	// connection is down (a killed server), which only closing the connection ends; so it is
+	// waited for here, after closeNATS, as the pulls are.
+	b.catchUpWG.Wait()
 	return nil
 }
 
