@@ -24,6 +24,8 @@ from the table between the markers and checked against it
 (`TestTheCountsInConformanceMdAreTheTables`); after the rows change, run
 `UPDATE_CONFORMANCE=1 go test -run TestTheCountsInConformanceMdAreTheTables .`.
 
+An external run of the Eclipse Paho MQTT 5 client tests (22 of 27 pass; the 5 others are the suite's assumptions about its reference broker) is in [conformance/PAHO.md](conformance/PAHO.md).
+
 [conformance/INDEX.md](conformance/INDEX.md) maps every statement id to the tests that cite it, with
 file:line. It is generated and checked (`TestTheConformanceIndexIsCurrent`; regenerate with
 `UPDATE_CONFORMANCE=1 go test -run TestTheConformanceIndexIsCurrent .`), and
