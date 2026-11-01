@@ -170,7 +170,9 @@ func TestAWebSocketClientIsDisconnectedWhenTheBrokerCloses(t *testing.T) {
 	}
 }
 
-// [MQTT-6.0.0-4]: a client that does not offer "mqtt" is refused.
+// [MQTT-6.0.0-4]: a client that does not offer "mqtt" is refused. The Client
+// "MUST include mqtt in the list of WebSocket Sub Protocols it offers"
+// [MQTT-6.0.0-3]; this is what the broker does with one that does not.
 func TestAWebSocketUpgradeWithoutTheMQTTSubprotocolIsRefused(t *testing.T) {
 	b, _, _ := startBrokerHandle(t, startNATS(t))
 	url := startWebSocket(t, b)
