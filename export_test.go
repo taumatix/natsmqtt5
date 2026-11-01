@@ -20,6 +20,16 @@ func SetSharedFetchHook(b *Broker, f func(asked, got int)) {
 	b.sharedFetchHook.Store(&f)
 }
 
+// SetSessionSaveFault makes every write of a session record fail with f's error
+// while f returns one. nil removes it.
+func SetSessionSaveFault(b *Broker, f func() error) {
+	if f == nil {
+		b.store.saveFault.Store(nil)
+		return
+	}
+	b.store.saveFault.Store(&f)
+}
+
 // SetPubrecGate makes a connection call f(id) when it has read a PUBREC that
 // accepts the QoS 2 message id, before anything records that the PUBREL is
 // owed: the window in which a broker killed leaves a record that still names

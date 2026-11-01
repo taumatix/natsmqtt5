@@ -370,8 +370,19 @@ func (c *conn) drainPubrels() {
 			return
 		}
 		c.relMu.Unlock()
-		c.checkpointNow()
+		failed := c.checkpointNowErr()
 		for _, id := range ids {
+			if failed != nil && c.sess.heldGroupMessage(id) {
+				// The record does not say PUBREL, so a broker killed now leaves the
+				// message the group's to give to another member after the AckWait;
+				// a PUBREL sent now would have the client complete a message that
+				// is then given to someone else. The connection ends, and the
+				// PUBREL goes when the client is back and the record can be written.
+				c.logger.Warn("a shared QoS 2 message was not released: the session record "+
+					"could not be written", "client_id", c.sess.clientID, "error", failed)
+				c.close()
+				return
+			}
 			c.sess.settleOwned(id)
 			if err := c.write(&packet.Pubrel{Ack: packet.Ack{PacketID: id}}); err != nil {
 				c.close()

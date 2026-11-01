@@ -180,20 +180,28 @@ func (c *conn) checkpointLoop(interval time.Duration) {
 // is logged by checkpointSession and does not stop the acknowledgement: the
 // session is served as one without persistence would be.
 func (c *conn) checkpointNow() {
+	_ = c.checkpointNowErr()
+}
+
+// checkpointNowErr is checkpointNow, returning the write's error for a caller that
+// must not act on a record it could not write (a held shared QoS 2 message, whose
+// hand-back to the group is what keeps it from being lost).
+func (c *conn) checkpointNowErr() error {
 	if c.broker.opts.SessionCheckpointInterval <= 0 {
-		return
+		return nil
 	}
 	c.activity.Add(1)
 	// A write before the resumed position is taken would replace it, so wait for
 	// that, which is quick: it follows the predecessor's end.
 	select {
 	case <-c.positioned:
-		_ = c.broker.checkpointSession(c)
+		return c.broker.checkpointSession(c)
 	case <-c.done:
 	case <-time.After(checkpointPositionWait):
 		c.logger.Warn("the session was not checkpointed before an acknowledgement: "+
 			"its replay position has not been taken", "client_id", c.sess.clientID)
 	}
+	return nil
 }
 
 // checkpointSession writes the replay position and the in-flight state of c's

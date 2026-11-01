@@ -312,6 +312,9 @@ func (r *sessionRecord) resumable(now time.Time) bool {
 // 0x8E instead of being served in parallel.
 type sessionStore struct {
 	kv jetstream.KeyValue
+	// saveFault, when set, is asked before every checkpoint write and fails it with
+	// its error. A test uses it to make the record unwritable.
+	saveFault atomic.Pointer[func() error]
 	// blobs holds the PUBLISH of an in-flight message that has no queue copy and
 	// is too large for the record, under the digest of its encoding. Values are
 	// immutable and shared by every session that holds the same message; they
@@ -596,6 +599,11 @@ var errLostSession = errors.New("natsmqtt5: the session was claimed by another b
 // save writes the session's current state, keeping ownership, and returns the
 // revision the next write must present.
 func (s *sessionStore) save(ctx context.Context, rec *sessionRecord, rev uint64) (uint64, error) {
+	if f := s.saveFault.Load(); f != nil {
+		if err := (*f)(); err != nil {
+			return rev, fmt.Errorf("%w: %v", errLostSession, err)
+		}
+	}
 	newRev, err := s.kv.Update(ctx, sessionKey(rec.ClientID), encodeRecord(rec), rev)
 	if err != nil {
 		return rev, fmt.Errorf("%w: %v", errLostSession, err)

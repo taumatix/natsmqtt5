@@ -831,6 +831,15 @@ func (s *session) awaitPubcomp(id uint16) {
 	}
 }
 
+// heldGroupMessage reports whether the in-flight entry for id is a shared-subscription
+// backlog message still held in JetStream.
+func (s *session) heldGroupMessage(id uint16) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	o, ok := s.inflight[id]
+	return ok && o.ackSubject != ""
+}
+
 // settleOwned acknowledges to its group the shared-subscription backlog message
 // of a QoS 2 entry that is past its PUBREC, and no longer holds it. The client
 // owns that message [MQTT-4.3.3-8], so the group must never give it to another
