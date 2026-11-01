@@ -61,7 +61,7 @@ func TestAJoinerWhoArrivesAsTheLastMemberLeavesHasAGroup_MQTT_5_0_4_8_2(t *testi
 	// Published after the joiner's SUBACK and before the leaver deletes: it is in the
 	// consumer the leaver is about to delete. It used to go with it.
 	publishJobs(t, addr, 2)
-	first := joiner.expectPublish() // the one slot is taken: job-1 waits in the backlog
+	first := joiner.expectPublish() // the one slot is taken: the other waits in the backlog
 
 	close(release)
 	<-left
@@ -69,8 +69,12 @@ func TestAJoinerWhoArrivesAsTheLastMemberLeavesHasAGroup_MQTT_5_0_4_8_2(t *testi
 	requireConsumers(t, natsURL, 1, "the joiner's group was kept")
 	joiner.send(&packet.Puback{Ack: packet.Ack{PacketID: first.PacketID}})
 	got := joiner.expectPublish()
-	assert.Equal(t, "job-1", string(got.Payload),
-		"a message published after the joiner's SUBACK is its own, whatever the last leaver does next")
+	// Which job comes first is not fixed: the leaver's own pull was still open on the
+	// consumer when the jobs were published, took job-0 and handed it back (a NAK),
+	// and JetStream redelivers a NAKed message after the ones behind it. What the
+	// joiner is owed is both jobs, each once.
+	assert.ElementsMatch(t, []string{"job-0", "job-1"}, []string{string(first.Payload), string(got.Payload)},
+		"both messages published after the joiner's SUBACK are its own, whatever the last leaver does next")
 	joiner.send(&packet.Puback{Ack: packet.Ack{PacketID: got.PacketID}})
 }
 

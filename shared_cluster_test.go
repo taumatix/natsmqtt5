@@ -52,14 +52,17 @@ func TestClusterALastLeaverDoesNotDeleteTheBacklogOfAJoinerOnAnotherBroker_MQTT_
 	joiner.connect(oneAtATime("joiner", 300))
 	joiner.subscribe(group, packet.QoS1)
 	publishJobs(t, addrB, 2)
-	first := joiner.expectPublish() // the joiner's one slot is taken: job-1 waits in the backlog
+	first := joiner.expectPublish() // the joiner's one slot is taken: the other job waits in the backlog
 
 	close(release)
 	<-left
 	requireConsumers(t, c.URL(0), 1, "the joiner's group was kept")
 	joiner.send(&packet.Puback{Ack: packet.Ack{PacketID: first.PacketID}})
 	got := joiner.expectPublish()
-	assert.Equal(t, "job-1", string(got.Payload), "the job waiting in the backlog survived the leaver's delete")
+	// Which job comes first is not fixed: the leaver's own pull may take job-0 and hand it
+	// back (a NAK), and JetStream redelivers it after the one behind it.
+	assert.ElementsMatch(t, []string{"job-0", "job-1"}, []string{string(first.Payload), string(got.Payload)},
+		"both jobs survived the leaver's delete, each once")
 	joiner.send(&packet.Puback{Ack: packet.Ack{PacketID: got.PacketID}})
 }
 
