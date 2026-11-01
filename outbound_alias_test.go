@@ -56,9 +56,11 @@ func TestARepeatedTopicIsSentAsAnAliasAndTheLeastRecentlyUsedIsReplaced(t *testi
 		{"alias/topic-one", "", 1},                    // again: alias alone
 		{"alias/topic-two", "alias/topic-two", 2},     // second slot
 		{"alias/topic-one", "", 1},                    // refreshes one, so two is now the oldest
-		{"alias/topic-three", "alias/topic-three", 2}, // table full: two's slot is remapped
-		{"alias/topic-two", "alias/topic-two", 1},     // one is now the oldest
-		{"alias/topic-two", "", 1},
+		{"alias/topic-three", "alias/topic-three", 0}, // table full, first sighting: sent plain
+		{"alias/topic-two", "", 2},                    // two kept its alias
+		{"alias/topic-three", "alias/topic-three", 1}, // second sighting: one is the oldest, so it is remapped
+		{"alias/topic-three", "", 1},
+		{"alias/topic-one", "alias/topic-one", 0}, // one lost its alias; seen once again, plain
 	} {
 		publishQoS1(t, pub, s.topic)
 		got := sub.expectPublish()
@@ -199,4 +201,37 @@ func TestASmallClientMaximumIsNotSentMoreBytesThanNoAliases(t *testing.T) {
 	on, highest := bytesReceived(t, true)
 	assert.LessOrEqual(t, highest, uint16(1), "no alias above the client's maximum [MQTT-3.3.2-9]")
 	assert.LessOrEqual(t, on, off+3, "aliases on: %d bytes, off: %d", on, off)
+}
+
+// A name seen once while the table is full must not evict a hot one: two hot topics recur among
+// one-off topics for a client whose maximum is 2. Admitting every name on its first sighting
+// remapped an alias to each one-off and evicted the hot topics; now the hot topics keep theirs
+// and the one-offs are sent plain (ROADMAP.md, "admit a name on its second sighting").
+func TestOneOffTopicsDoNotEvictHotTopicsFromAFullTable(t *testing.T) {
+	addr := startBroker(t, startNATS(t), withOutboundAliases)
+	sub := dialRaw(t, addr)
+	sub.connect(aliasConnect("hot-sub", 2))
+	sub.subscribe("hot/#", packet.QoS1)
+	pub, _ := connectClient(t, addr, connectOpts("hot-pub"))
+
+	hot := []string{"hot/device-a/telemetry", "hot/device-b/telemetry"}
+	var hotAliased, oneOffAliased int
+	for i := range 10 {
+		for _, topic := range append(hot, "hot/one-off-"+string(rune('a'+i))+"/telemetry") {
+			publishQoS1(t, pub, topic)
+			got := sub.expectPublish()
+			assert.LessOrEqual(t, aliasOf(got), uint16(2), "no alias above the client's maximum [MQTT-3.3.2-9]")
+			switch {
+			case topic == hot[0] || topic == hot[1]:
+				if got.Topic == "" && i > 0 {
+					hotAliased++
+				}
+			case aliasOf(got) != 0:
+				oneOffAliased++
+			}
+			sub.send(&packet.Puback{Ack: packet.Ack{PacketID: got.PacketID}})
+		}
+	}
+	assert.Equal(t, 18, hotAliased, "every repeat of a hot topic goes as its alias alone")
+	assert.Zero(t, oneOffAliased, "a one-off topic takes no alias from a full table")
 }
