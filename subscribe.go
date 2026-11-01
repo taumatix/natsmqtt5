@@ -517,7 +517,6 @@ func (c *conn) closeBehind() {
 		c.logger.Warn("closing a connection whose client is not keeping up; its session is kept",
 			"queue_depth", deliveryQueueDepth)
 		go func() {
-			_ = c.nc.SetWriteDeadline(time.Now().Add(closeBehindGrace))
 			c.shutdown(packet.QuotaExceeded, "the client is not keeping up with the messages sent to it")
 		}()
 	})

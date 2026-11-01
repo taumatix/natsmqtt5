@@ -26,8 +26,13 @@ in Tier 2.
 
 ## The replay cursor: what falls back to the time rewind, and what waits for a resume
 
-**Blocked by:** a clustered, replicated stream to measure the added requests and the chunk writes on is *real
-deployments*; nothing else here is.
+**Blocked by:** nothing measured remains; what is left is design (the cursor in the record).
+
+**Measured (2026-11-01, `TestClusterReplayCursorCostPerSubscribeAndPerDelivery_MQTT_4_4_0_1`, three `nats:2-alpine`
+servers in Apple containers, an R3 queue):** a SUBSCRIBE costs one stream info request (3-7 ms). 4496 deliveries
+behind a hole take 2.5 s with the scans on (33 consumer creates, 25 deletes, 8 stream infos, about 8 creates per 1024
+deliveries) and 3.0 s with them off, so the scans are not visible in the delivery rate. The 400 ids past the record's
+bound are written as 2 chunks, at the checkpoint and the release. The cost is bounded and small; no change made.
 
 **Today:** a session whose record or memory has a replay cursor (`cursor.go`) is replayed from it; one without is
 replayed from `OfflineQueueRewind` before its release, as before, and keeps the rewind's limits: a message whose live
@@ -85,14 +90,23 @@ connected, which [MQTT-4.4.0-1] allows (it requires the resend on reconnect) but
 A scan that finds a hole older than a few seconds could hand it to the catch-up path. A resume whose queue read fails
 (an error other than an empty or unanswered fetch, which are read again since 2026-10-31) logs "what it held is lost
 for this session" and sends nothing until the next resume, though the cursor did not move; retrying the read while
-the client stays connected would close that. And each SUBSCRIBE now costs a
-stream info request and each 1024 deliveries a filtered read; neither is measured over a clustered, replicated stream.
+the client stays connected would close that. Each SUBSCRIBE costs a
+stream info request and each 1024 deliveries a filtered read; both measured above.
 
 ## DurablePublish does not cover live delivery to subscribers on other brokers
 
-**Blocked by:** real deployments, for what is left: a copy lost while both brokers stay connected has no event
-to react to, and the only ways to see it (a periodic read of the queue per connected session, or per-subscription
-JetStream consumers) cost every session all the time for a loss nobody has reported.
+**Blocked by:** real deployments, for what is left (items 2 and 3 below).
+
+**Reproduced and closed for routes (2026-11-01):** with the subscriber's server cut off from its peers (`Isolate`) and
+both brokers still connected to their own servers, a QoS 1 message published meanwhile was stored in the R3 queue and
+never reached the subscriber. The event exists after all: the server sends its clients an INFO with the cluster's
+client URLs when a route goes or comes, which nats.go keeps as `DiscoveredServers()`. `routewatch.go` polls that set
+(every 200 ms) under `ReconnectCatchUp`; a change is treated as a drop (live copies held), and once it has stayed the
+same for 1.5 s the sessions catch up from the queue as after a reconnect. Test:
+`TestClusterReconnectCatchUpSendsWhatARouteLostWhileBothBrokersStayConnected`. What it does not see: a flap shorter
+than the poll, a route the server has not noticed is dead (its pings take minutes unless `ping_interval` is set), and
+a broker that sets `nats.IgnoreDiscoveredServers`. An isolation longer than the broker's will-bucket check (about
+14.5 s) closes its clients regardless.
 
 **Design (2026-10-31).** No new stream and no subject change: the queue stream already holds a copy of every QoS 1
 and 2 message published through a broker, stored before its live copy goes out (`offlineQueue.keep`), and a
@@ -115,9 +129,7 @@ made after the message) and `TestClusterReconnectCatchUpSendsWhatWasPublishedWhi
 
 **Left:**
 
-1. A live copy lost between two NATS servers of a cluster (a route that drops) while both brokers stay connected:
-   no event reaches either broker. A session with a replay cursor gets it on its next resume (a cursor scan makes
-   it a hole); a connected one does not.
+1. Route flaps: see above for what is covered and not.
 2. A live copy nats.go drops on the broker's side as a slow consumer (its pending limits): reported through the
    connection's error handler, not handled. The same catch-up from the stream would serve, started from the
    subscription's last delivered sequence.
@@ -144,8 +156,12 @@ those, and is not built.
 
 ## A held shared message: the killed-broker window and the packet identifier
 
-**Blocked by:** real deployments for a per-group `SharedHoldLimit` (no known need); the Receive Maximum slot is held
-by [MQTT-3.3.4-9], which no change releases earlier.
+**Blocked by:** the Receive Maximum slot is held by [MQTT-3.3.4-9], which no change releases earlier.
+
+**Decided (2026-11-01):** no per-group `SharedHoldLimit`. Measured over a three-server cluster with R3 streams
+(`TestClusterAMessageHeldPastTheSharedHoldLimitGoesToAMemberOnAnotherServer`: a member on one server holds a message,
+a member on another gets it handed back after the limit, the late PUBACK is accepted, nothing arrives twice), the one
+limit behaves the same as on one server, and no deployment has asked for a different value per group. Revisit if one does.
 
 `SharedHoldLimit` is off by default and applies to every group alike; a per-group value (which
 would be an `Options` map or a callback) is a possible follow-up, with no known need yet. A
@@ -450,21 +466,18 @@ It is memory only: a restart, or another broker taking the session over, loses i
 no copy. The limit is the fixed 2048 (`deliveryQueueDepth`), not an option; a deployment that wants a lower or higher
 one should say so. QoS 0, and messages published straight onto NATS, are dropped without closing, as with the queue on.
 
-## A `Broker.Close` hang reported by #216, not reproduced
+## `Broker.Close` with a client that never reads (found via #216's report, fixed 2026-11-01)
 
-**Blocked by:** *real deployments* (a hang needs a trigger the tests did not find).
+#216's author saw a `Broker.Close` hang. Reproduced under cluster conditions
+(`TestClusterCloseReturnsWhenItsNATSServerFreezesDiesOrIsCutOff`: the broker's server frozen, killed and cut off): it
+hung, with every fault, because of a client that never reads its socket. Its delivery loop sat inside `Write` holding
+the connection's write lock, and `Close` -> `drainConns` -> `conn.shutdown` -> the DISCONNECT write waited for that
+lock for ever. `shutdown` now sets a write deadline (`closeBehindGrace`, 2 s) first, which fails the stuck write.
+Regression test without a cluster: `TestCloseReturnsWhileAClientThatNeverReadsHasAFullSocket` (fails without the fix).
+With the fix all three faults return (about 35 s for the test; the NATS drain's own timeout is 30 s). The shared pull
+goroutines (`pullWG`) did not hang with NATS frozen, killed or cut off while one was inside a fetch.
 
-#216's author saw a `Broker.Close` hang and did not investigate. Looked for on 2026-10-31 with no result: the
-three #216 test files and `ReconnectCatchUp|Ingest|SpillChunk|ReplayCursor` under `-race -count=8` (200s, green;
-`-count=5 -timeout 120s` is *not* a hang, those tests need about 130s, and its goroutine dump shows tests still
-running), the whole suite under `-race` twice (about 520s each, green), and `close_down_test.go`: `Close` with
-NATS cut and a client connected, and with a catch-up read held by a client at Receive Maximum 2 while NATS is cut,
-both return in under a millisecond. Reading `Close`: it waits on `b.wg` (the connections), and `closeNATS` drains
-with nats.go's own 30s drain timeout, so the bounded-by-a-deadline guarantee rests on `conn.shutdown` always ending
-the connection. Not yet looked at: a connection whose client socket accepts no writes while its delivery loop is
-inside a write (the DISCONNECT write has a deadline only on the close-behind path), and `Close` racing the
-`catchUpAfterReconnect` goroutine, which is not in `b.wg`. **Next:** a test with a client that never reads, a full
-send buffer and `Close`, under a deadline; if it hangs, give `shutdown`'s write the same short deadline.
+**Left:** `Close` racing the `catchUpAfterReconnect` goroutine, which is not in `b.wg`; no hang seen.
 
 ## Statements covered only by unit tests
 

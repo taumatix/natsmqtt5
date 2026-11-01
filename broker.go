@@ -240,6 +240,8 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 	}
 	if r.ReconnectCatchUp {
 		b.watchReconnects()
+		b.wg.Add(1)
+		go b.watchRoutes()
 	}
 	if queueRetryNeeded {
 		b.wg.Add(1)

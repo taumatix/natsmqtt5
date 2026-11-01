@@ -367,8 +367,10 @@ type Options struct {
 	// It needs the offline queue (an error together with DisableOfflineQueue)
 	// and covers only messages with a queue copy: those published through a
 	// broker. It covers a drop of this broker's own connection, which nats.go
-	// reports; a copy lost between two NATS servers of a cluster while both
-	// brokers stay connected is not seen (ROADMAP.md). Costs one read of the
+	// reports, and a change in the cluster's servers the connection learns of
+	// (a route that dropped while both brokers stayed connected); a route the
+	// server has not noticed is dead, or nats.IgnoreDiscoveredServers, hides
+	// that (ROADMAP.md). Costs one read of the
 	// queue stream per connected session after each reconnect. Off by default.
 	ReconnectCatchUp bool
 	// OfflineQueueMaxAge is how long a queued message is kept. Defaults to 24

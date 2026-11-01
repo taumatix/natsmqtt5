@@ -11,6 +11,10 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** `Broker.Close` no longer hangs when a client never reads its socket and its send buffer is full: the DISCONNECT write now has a 2 s deadline. Found against a three-server NATS cluster while looking for #216's hang. No API change.
+- **Added:** with `Options.ReconnectCatchUp`, a live copy lost because a route between NATS servers dropped, with both brokers still connected to their own servers, is now caught up from the queue once the cluster's servers have been stable for 1.5 s. The broker watches the server list its NATS connection learns from the server. It does not see a route the server has not yet noticed is dead, a flap shorter than 200 ms, or a connection that sets `nats.IgnoreDiscoveredServers`. No new option.
+- **Docs:** measured the replay cursor's cost over a clustered, replicated stream (a SUBSCRIBE is one stream info request; the restart scans are not visible in the delivery rate) and decided against a per-group `SharedHoldLimit` (ROADMAP.md).
+
 ## [1.1.0] - 2026-11-01
 
 Minor release: two duplicate-delivery windows of shared QoS 2 closed, `Broker.Close` joins its shared pull goroutines, and a Paho interoperability record. No API change; no new option. `SharedQoS2` is unchanged and still off by default.
