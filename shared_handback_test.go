@@ -45,6 +45,8 @@ const group = "$share/g/jobs/#"
 
 type sharedFleet struct {
 	a, b string
+	// brokerA and brokerB are the brokers behind a and b; set by newSharedFleet only.
+	brokerA, brokerB *natsmqtt5.Broker
 }
 
 func newSharedFleet(t *testing.T, customise ...func(*natsmqtt5.Options)) sharedFleet {
@@ -52,7 +54,9 @@ func newSharedFleet(t *testing.T, customise ...func(*natsmqtt5.Options)) sharedF
 	natsmqtt5.SetSharedAckWait(t, handBackAckWait)
 	natsURL := startNATS(t)
 	opts := append([]func(*natsmqtt5.Options){sweeping}, customise...)
-	return sharedFleet{a: startBroker(t, natsURL, opts...), b: startBroker(t, natsURL, opts...)}
+	ba, a, _ := startBrokerHandle(t, natsURL, opts...)
+	bb, b, _ := startBrokerHandle(t, natsURL, opts...)
+	return sharedFleet{a: a, b: b, brokerA: ba, brokerB: bb}
 }
 
 func (f sharedFleet) publish(t *testing.T, payload string) {

@@ -257,12 +257,16 @@ func (c *conn) startPull(sub *subscription) {
 		return
 	}
 	c.pulling[sub] = true
+	c.broker.pullWG.Add(1)
+	c.broker.pullers.Add(1)
 	go c.pull(sub)
 }
 
 // pull takes the subscription's messages from its backlog for as long as this
 // connection is the session's and the subscription is in it.
 func (c *conn) pull(sub *subscription) {
+	defer c.broker.pullWG.Done()
+	defer c.broker.pullers.Add(-1)
 	defer func() {
 		c.pullMu.Lock()
 		delete(c.pulling, sub)
@@ -432,10 +436,6 @@ func (c *conn) fetchOne(sub *subscription) (jetstream.Msg, error) {
 // under the client's Receive Maximum bounds it further.
 const sharedMaxBatch = 64
 
-// sharedFetchHook, when set by a test, sees the size asked of each batch pull
-// and the number of messages it returned.
-var sharedFetchHook func(asked, got int)
-
 // fetchNoWait takes up to n messages that are waiting now, without waiting for
 // more. It returns none when the backlog is empty.
 func (c *conn) fetchNoWait(sub *subscription, n int) ([]jetstream.Msg, error) {
@@ -448,8 +448,8 @@ func (c *conn) fetchNoWait(sub *subscription, n int) ([]jetstream.Msg, error) {
 	for m := range batch.Messages() {
 		got = append(got, m)
 	}
-	if hook := sharedFetchHook; hook != nil {
-		hook(n, len(got))
+	if hook := c.broker.sharedFetchHook.Load(); hook != nil {
+		(*hook)(n, len(got))
 	}
 	if err := batch.Error(); len(got) == 0 && err != nil &&
 		!errors.Is(err, nats.ErrTimeout) && !errors.Is(err, jetstream.ErrNoMessages) {

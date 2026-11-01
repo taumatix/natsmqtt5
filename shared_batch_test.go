@@ -31,12 +31,14 @@ func TestASharedMemberPullsABatchNoLargerThanItsReceiveMaximum_MQTT_3_3_4_9(t *t
 		mu      sync.Mutex
 		largest int
 	)
-	natsmqtt5.SetSharedFetchHook(t, func(asked, _ int) {
+	f := newSharedFleet(t)
+	hook := func(asked, _ int) {
 		mu.Lock()
 		defer mu.Unlock()
 		largest = max(largest, asked)
-	})
-	f := newSharedFleet(t)
+	}
+	natsmqtt5.SetSharedFetchHook(f.brokerA, hook)
+	natsmqtt5.SetSharedFetchHook(f.brokerB, hook)
 	m := dialRaw(t, f.a)
 	cp := rawConnect("batcher", 300)
 	cp.Properties.ReceiveMaximum = packet.Uint16(receiveMax)
