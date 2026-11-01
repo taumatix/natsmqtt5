@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -97,6 +98,137 @@ func newShareMembers(ctx context.Context, js jetstream.JetStream, opts *resolved
 		return nil, err
 	}
 	return &shareMembers{kv: kv, ttl: ttl}, nil
+}
+
+// Serialising a group's last leave against a join.
+//
+// A joiner records its entry, makes sure the consumer exists and answers its
+// SUBACK; a last leaver deletes its entry, finds the group empty and deletes the
+// consumer. JetStream has no conditional consumer delete, so a joiner whose
+// consumer was made before the leaver's delete lost it after its SUBACK, and the
+// consumer its puller made again started at the next message: what was
+// published in between was in no backlog. Both sides therefore take a short
+// lock on the group (a create-only key, which the stream orders for every
+// broker) around what must not interleave: the joiner around "make sure the
+// consumer exists", the leaver around "is the group still empty? delete the
+// consumer". Whichever comes second sees the other's result: a joiner after the
+// delete makes a consumer that begins before its SUBACK; a leaver after the join
+// finds the joiner's entry and keeps the consumer. A lock a broker died holding
+// is taken over after shareLockStale. Brokers of earlier releases do not take
+// the lock, and between them the race is as it was.
+
+// shareLockStale is how long a group's lock may be held before another broker
+// takes it over. A variable so that a test need not wait it out.
+var shareLockStale = 10 * time.Second
+
+const (
+	lockKeyPrefix  = "lock."
+	startKeyPrefix = "start."
+)
+
+func groupHash(group string) string {
+	g := sha256.Sum256([]byte(group))
+	return hex.EncodeToString(g[:12])
+}
+
+// lock takes the group's lock, waiting while another broker holds it. The
+// returned function releases it, and is safe to call when err is not nil.
+func (m *shareMembers) lock(ctx context.Context, group string) (unlock func(), err error) {
+	key := lockKeyPrefix + groupHash(group)
+	release := func(rev uint64) func() {
+		return func() {
+			rctx, cancel := context.WithTimeout(context.Background(), natsFlushTimeout)
+			defer cancel()
+			_ = m.kv.Delete(rctx, key, jetstream.LastRevision(rev))
+		}
+	}
+	stamp := func() []byte { return []byte(strconv.FormatInt(time.Now().UnixNano(), 10)) }
+	for delay := 2 * time.Millisecond; ; delay = min(delay*2, 100*time.Millisecond) {
+		rev, err := m.kv.Create(ctx, key, stamp())
+		if err == nil {
+			return release(rev), nil
+		}
+		if !errors.Is(err, jetstream.ErrKeyExists) {
+			return func() {}, err
+		}
+		if entry, gerr := m.kv.Get(ctx, key); gerr == nil {
+			if at, perr := strconv.ParseInt(string(entry.Value()), 10, 64); perr != nil ||
+				time.Since(time.Unix(0, at)) > shareLockStale {
+				// Its holder died, or wrote what cannot be read: take it over, once
+				// across the brokers that find it so.
+				if rev, uerr := m.kv.Update(ctx, key, stamp(), entry.Revision()); uerr == nil {
+					return release(rev), nil
+				}
+				continue
+			}
+		}
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return func() {}, ctx.Err()
+		}
+	}
+}
+
+// The start of a group's consumer, kept beside it. The consumer's own metadata
+// holds it (shared.go, metaStartSeq), but a broker of an earlier release that
+// updates the consumer replaces the metadata and drops it. This copy is in the
+// members bucket, where nothing else writes it, tagged with the consumer's
+// creation time so that a copy left by a consumer since deleted is never taken
+// for the new one's. A broker that joins the group puts it back into the
+// metadata (sharedConsumer).
+
+func startValue(created time.Time, start string) []byte {
+	return []byte(strconv.FormatInt(created.UnixNano(), 10) + " " + start)
+}
+
+// putStart records start as the start of the consumer made at created.
+func (m *shareMembers) putStart(ctx context.Context, group string, created time.Time, start string) {
+	_, _ = m.kv.Put(ctx, startKeyPrefix+groupHash(group), startValue(created, start))
+}
+
+// start is the recorded start of the consumer made at created.
+func (m *shareMembers) start(ctx context.Context, group string, created time.Time) (string, bool) {
+	entry, err := m.kv.Get(ctx, startKeyPrefix+groupHash(group))
+	if err != nil {
+		return "", false
+	}
+	at, start, ok := strings.Cut(string(entry.Value()), " ")
+	if !ok || at != strconv.FormatInt(created.UnixNano(), 10) {
+		return "", false
+	}
+	if _, err := strconv.ParseUint(start, 10, 64); err != nil {
+		return "", false
+	}
+	return start, true
+}
+
+// forgetStart drops the group's recorded start, with its consumer.
+func (m *shareMembers) forgetStart(ctx context.Context, group string) {
+	_ = m.kv.Delete(ctx, startKeyPrefix+groupHash(group))
+}
+
+// endGroup deletes the consumer of group if no session is a member, under the
+// group's lock so that a joiner is either seen here or makes its consumer after.
+// A lock that cannot be taken is not waited on for ever: the group then ends as
+// it did before the lock, which can lose what a joiner racing it was owed.
+func (q *offlineQueue) endGroup(ctx context.Context, group string) (deleted bool, err error) {
+	unlock, lerr := q.members.lock(ctx, group)
+	defer unlock()
+	if lerr == nil {
+		has, err := q.members.hasMember(ctx, group)
+		if err != nil || has {
+			return false, err
+		}
+		if fn := afterGroupLock.Load(); fn != nil {
+			(*fn)()
+		}
+	}
+	if err := q.stream.DeleteConsumer(ctx, group); err != nil && !errors.Is(err, jetstream.ErrConsumerNotFound) {
+		return false, err
+	}
+	q.members.forgetStart(ctx, group)
+	return true, nil
 }
 
 // refreshEvery is how often the sessions a broker holds rewrite their entries.
@@ -215,7 +347,7 @@ func (b *Broker) sweepShareMembers(ctx context.Context) error {
 		if err != nil || has {
 			continue
 		}
-		if err := q.stream.DeleteConsumer(ctx, group); err != nil && !errors.Is(err, jetstream.ErrConsumerNotFound) {
+		if _, err := q.endGroup(ctx, group); err != nil {
 			b.logger.Warn("could not delete the backlog of an ended shared subscription", "group", group, "error", err)
 		}
 	}
@@ -310,12 +442,15 @@ func (b *Broker) leaveGroup(s *session, filter string) {
 	}
 	// The held messages of this session were handed back before this, so the
 	// consumer deleted here takes them with it, as it does the undelivered ones.
-	if err := q.stream.DeleteConsumer(ctx, group); err != nil && !errors.Is(err, jetstream.ErrConsumerNotFound) {
+	deleted, err := q.endGroup(ctx, group)
+	if err != nil {
 		b.logger.Warn("could not delete the backlog of an ended shared subscription",
 			"filter", filter, "error", err)
 		return
 	}
-	b.logger.Debug("a shared subscription ended: no session is subscribed", "filter", filter)
+	if deleted {
+		b.logger.Debug("a shared subscription ended: no session is subscribed", "filter", filter)
+	}
 }
 
 // leaveGroups is leaveGroup for every shared subscription of a session that
@@ -348,6 +483,11 @@ func (b *Broker) refreshMembersLoop(q *offlineQueue) {
 // empty and deleting its consumer, which is where a joiner can arrive. A test
 // uses it to hold the leaver there.
 var beforeGroupDelete atomic.Pointer[func()]
+
+// afterGroupLock, when set, runs while a leaver holds the group's lock, having
+// found the group empty and before it deletes the consumer. A test uses it to
+// hold the leaver there while a joiner arrives.
+var afterGroupLock atomic.Pointer[func()]
 
 // beforeMemberRefreshWrite, when set, runs between a refresh reading a session's
 // subscription and writing its entry. A test uses it to unsubscribe there.
@@ -384,6 +524,16 @@ func (b *Broker) refreshMembers(q *offlineQueue) {
 			if err != nil {
 				b.logger.Debug("could not refresh a shared subscription's member", "filter", sub.filter, "error", err)
 				continue
+			}
+			// The copy of the consumer's start beside it lapses like an entry does.
+			if bl := sub.backlog(); bl != nil {
+				if info := bl.cons.CachedInfo(); info != nil {
+					if start, ok := info.Config.Metadata[metaStartSeq]; ok {
+						sctx, scancel := context.WithTimeout(context.Background(), natsFlushTimeout)
+						q.members.putStart(sctx, group, info.Created, start)
+						scancel()
+					}
+				}
 			}
 			// The subscription was read before this write. If it was dropped in
 			// between, leaving found no entry (or the old one) and this write

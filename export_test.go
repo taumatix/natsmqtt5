@@ -20,6 +20,16 @@ func SetSharedFetchHook(b *Broker, f func(asked, got int)) {
 	b.sharedFetchHook.Store(&f)
 }
 
+// SetSessionSaveFault makes every write of a session record fail with f's error
+// while f returns one. nil removes it.
+func SetSessionSaveFault(b *Broker, f func() error) {
+	if f == nil {
+		b.store.saveFault.Store(nil)
+		return
+	}
+	b.store.saveFault.Store(&f)
+}
+
 // SetPubrecGate makes a connection call f(id) when it has read a PUBREC that
 // accepts the QoS 2 message id, before anything records that the PUBREL is
 // owed: the window in which a broker killed leaves a record that still names
@@ -284,6 +294,26 @@ func SetBeforeGroupDelete(t interface {
 }, fn func()) {
 	beforeGroupDelete.Store(&fn)
 	t.Cleanup(func() { beforeGroupDelete.Store(nil) })
+}
+
+// SetShareLockStale changes how old a shared group's lock must be before another
+// broker takes it over, for the rest of the test.
+func SetShareLockStale(t interface {
+	Cleanup(func())
+}, d time.Duration) {
+	was := shareLockStale
+	shareLockStale = d
+	t.Cleanup(func() { shareLockStale = was })
+}
+
+// SetAfterGroupLock makes a leaving session call fn while it holds the group's
+// lock, having found the group empty and before it deletes the consumer, until
+// the test ends.
+func SetAfterGroupLock(t interface {
+	Cleanup(func())
+}, fn func()) {
+	afterGroupLock.Store(&fn)
+	t.Cleanup(func() { afterGroupLock.Store(nil) })
 }
 
 // SetEmptyQueueFetches makes the next n fetches of b's offline-queue reads come

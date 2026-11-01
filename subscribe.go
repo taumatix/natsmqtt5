@@ -626,12 +626,9 @@ drain:
 	}
 	var ready []*prepared
 	flush := func() error {
-		record := false
-		for _, p := range ready {
-			record = record || p.record
-		}
-		if record {
-			c.checkpointNow()
+		if err := c.recordQoS2(ready); err != nil {
+			ready = nil
+			return err
 		}
 		for _, p := range ready {
 			if err := c.sendPrepared(p); err != nil {
@@ -708,15 +705,53 @@ func (c *conn) deliver(d *delivery) error {
 	if err != nil || p == nil {
 		return err
 	}
-	if p.record {
-		// In the stored record before the PUBLISH is on the wire, so that a
-		// successor of a broker killed after the client has it resends this one
-		// message with its identifier [MQTT-4.4.0-1] and does not deliver it
-		// again as a new one from the replay (the position and the delivered id
-		// are written with it).
-		c.checkpointNow()
+	if err := c.recordQoS2([]*prepared{p}); err != nil {
+		return err
 	}
 	return c.sendPrepared(p)
+}
+
+// recordQoS2 writes the stored record before the PUBLISH of any QoS 2 message in ps
+// is on the wire, so that a successor of a broker killed after the client has it
+// resends this one message with its identifier [MQTT-4.4.0-1] and does not deliver
+// it again as a new one from the replay (the position and the delivered id are
+// written with it).
+//
+// A failed write does not stop a message that is the session's alone: it is served
+// as one without persistence would be. A shared message held in JetStream is
+// different: with no record naming it, a broker killed once the client has it
+// leaves nobody to resend it, and the group gives it to another member after the
+// AckWait, so the client gets it twice. Such a message is not sent: it goes back
+// to the group, unsent, and the error closes the connection.
+func (c *conn) recordQoS2(ps []*prepared) error {
+	record := false
+	for _, p := range ps {
+		record = record || p.record
+	}
+	if !record {
+		return nil
+	}
+	err := c.checkpointNowErr()
+	if err == nil {
+		return nil
+	}
+	var back []string
+	for _, p := range ps {
+		if !p.record || p.d.ackSubject == "" {
+			continue
+		}
+		if _, ok := c.sess.completeInflightLocked(c, p.pub.PacketID); ok {
+			back = append(back, p.d.ackSubject)
+			c.releaseQuota() // d.held stays set: the puller must not acknowledge what goes back
+		}
+	}
+	if len(back) == 0 {
+		return nil
+	}
+	if c.sess.holds != nil {
+		c.sess.holds.handBack(back)
+	}
+	return fmt.Errorf("the record of a shared QoS 2 message could not be written: %w", err)
 }
 
 // prepare takes what a delivery needs before its PUBLISH: send quota, a Packet

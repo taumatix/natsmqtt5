@@ -736,6 +736,29 @@ one with fewer features:
   subscribe to one by name, so publish an empty retained message to clear one
   before switching off if it should go.
 
+## Known limits
+
+What the broker cannot do because of NATS or the specification, as opposed to what it does not do yet
+([ROADMAP.md](ROADMAP.md)). Each says what would lift it.
+
+- **A shared group's last leave is serialised against a join only among brokers of this release.** JetStream has no
+  conditional consumer delete, so the broker takes a per-group lock in the `<StreamPrefix>_share_members` bucket around a
+  join and around the last leave's recheck-then-delete. A broker of an earlier release takes no lock, so a fleet that
+  mixes releases keeps the old window (a message published just after a joiner's SUBACK can go with the consumer the
+  leaver deletes). A broker killed holding the lock delays the group's next join by up to 10 s. Lifted by upgrading every
+  broker, or by a NATS release with a delete that checks the consumer is unchanged.
+- **A group consumer's start can be missing.** A consumer made by an earlier release, or one that had already delivered
+  when a broker of this release first saw it, has no recorded start, and the late backlog of a default queue that failed at
+  startup falls back to the acknowledgement floor: a message the group acknowledged before its live copy arrived can be
+  delivered twice. JetStream cannot change a consumer's `DeliverPolicy` after it is made, so a consumer cannot be created
+  by start sequence without breaking brokers that did not; lifted by upgrading the fleet together.
+- **A lone QoS 2 delivery costs two record writes.** The record must say PUBLISH before the PUBLISH and PUBREL before the
+  PUBREL goes out [MQTT-4.3.3-6]; messages waiting together share a write, one client in lockstep has nothing to share.
+  Lifted only by a faster key-value store.
+- **QoS 2 across a killed broker can duplicate where no record is written.** With `SessionCheckpointInterval` negative, or
+  without `PersistentSessions`, there is no record, and a message that is not held in a shared group is sent after a failed
+  write. A shared message (`SharedQoS2`) is not sent when its record cannot be written.
+
 ## Correctness
 
 The MQTT layer is written against the [OASIS MQTT v5.0 Standard][spec] of

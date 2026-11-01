@@ -175,8 +175,11 @@ message is seen twice at worst, never lost.
 
 ## A shared subscription's membership: the edges left
 
-**Blocked by:** JetStream, which has no conditional consumer delete (the last-leaver race); the killed-broker edge
-waits on the session store's own reclaim and needs nothing built.
+**Blocked by:** nothing buildable. The last-leaver race is closed between brokers of this release (2026-11-01, below); what
+is left is a documented limit (README, Known limits): JetStream has no conditional consumer delete, so a broker of an
+earlier release, which takes no lock, keeps the old window. A NATS release with a delete that checks the consumer is
+unchanged would lift it for every broker; until then, upgrading the fleet does. The killed-broker edge waits on the
+session store's own reclaim and needs nothing built.
 
 A shared subscription ends when its last session does (`sharedmembers.go`). What remains:
 
@@ -185,11 +188,18 @@ A shared subscription ends when its last session does (`sharedmembers.go`). What
   which point a surviving broker sweeps the entry. A record that a broker still serves
   (`Attached`) and that does not list the group is not swept, because a SUBSCRIBE writes the entry
   before the record; a released one that does not list it is.
-- The race of a last leaver and a joiner is pinned (`shared_race_test.go`): the joiner's puller
-  creates the consumer again on its first failed pull, which comes at once. A message published
-  between the consumer's deletion and that re-creation is not in the new consumer, which starts
-  at the next message. Closing it would need a deletion that a joining member can veto; JetStream
-  has no conditional consumer delete.
+- **Done (2026-11-01):** the race of a last leaver and a joiner is closed by a lock. JetStream has no conditional consumer
+  delete, so a join (`joinGroup`) and the last leave's recheck-then-delete (`endGroup`) take a per-group lock, a create-only
+  key `lock.<hash>` in the `<StreamPrefix>_share_members` bucket (taken over by compare-and-set after `shareLockStale`, 10 s,
+  if its holder was killed). The leaver rechecks the members under the lock, so it finds a joiner's entry and keeps the
+  consumer; a joiner arriving while the leaver deletes waits for the delete and then makes a consumer that begins before
+  its SUBACK. Tested with the leaver held at both points, embedded and on a three-server cluster in containers
+  (`shared_race_test.go`, `TestClusterALastLeaverDoesNotDeleteTheBacklogOfAJoinerOnAnotherBroker_MQTT_5_0_4_8_2`); both
+  fail without the lock. **Limit, not buildable:** the lock binds only brokers that take it. An earlier release's broker
+  deletes unconditionally, so in a mixed fleet its leave can still take a joiner's backlog (a message published after the
+  joiner's SUBACK and before the delete is lost to that group). The consumer cannot be fenced from the server side: a
+  delete cannot name a revision or a consumer-info version, and an update cannot stand in for a delete. Lifted by upgrading
+  every broker, or by NATS offering a delete conditional on the consumer being unchanged (none up to nats-server 2.15.2).
 
 ## A message's wait is counted from this broker's receipt, and in whole seconds
 
@@ -256,12 +266,16 @@ a documented default flip with a pin.
    (`TestAKilledBrokersSharedQoS2MessageIsHeldForAClientAwayPastTheAckWait_MQTT_4_8_2_4_MQTT_4_8_2_5`, which failed
    before: the other member was given the message). The scan reads every session record each interval, which is why it
    runs only with `SharedQoS2`.
-5. **The same as QoS 2 without a shared subscription, not closed.** `checkpointNow` drops the record write's error
-   (`checkpoint.go`), so a PUBLISH can go out after a failed write; with `SessionCheckpointInterval` negative, or without
-   `PersistentSessions`, no record is written. A broker killed then loses the in-flight state for any QoS 2 message,
-   shared or not, and a shared one is given to the group after the AckWait where a non-shared one is replayed to the
-   client as a new message: a duplicate either way, documented in the README as the limit of QoS 2 across a killed broker.
-   Left as a follow-up: refuse the grant, or fail the delivery, when the record cannot be written.
+5. **Closed for a held shared message (2026-11-01); the rest is a documented limit.** `checkpointNow` dropped the record
+   write's error, so a PUBLISH could go out after a failed write. For a message held in a shared group (`recordQoS2`,
+   `subscribe.go`) the delivery now fails when the write does: the message is not sent but handed back to the group, the
+   connection ends, and a PUBREL whose record cannot be written is held (`drainPubrels`, `publish.go`) until the client is
+   back (`shared_qos2_record_test.go`, both fail without the change; the write is made to fail with
+   `SetSessionSaveFault`). **Limit, not buildable:** with `SessionCheckpointInterval` negative, or without
+   `PersistentSessions`, no record is written, and a message that is not held in a shared group is still sent after a
+   failed write (it is the session's alone, so there is nowhere better for it to go). A broker killed then loses the
+   in-flight state, and the client may get the message twice, as for QoS 2 without a shared subscription; the README says
+   so. Lifted by turning the checkpoint on (not a NATS limit).
 
 Flipping the default is no longer blocked by a duplicate. It is blocked by the decision above; do it with the entry 3
 below (an `Options` field and a `*bool` pin like `PinDurableWills`, a CHANGELOG line that names the SUBACK change, a
@@ -324,7 +338,11 @@ granted QoS 1.
 
 ## A lone QoS 2 message still waits for two record writes
 
-**Blocked by:** a decision the spec has taken: a write not waited for breaks [MQTT-4.3.3-6]; only a faster store helps.
+**Limit, not buildable (audited 2026-11-01; README, Known limits):** the record must say PUBLISH before the PUBLISH and
+PUBREL before the PUBREL [MQTT-4.3.3-6], and a client in lockstep has no second message to share a write with, so the two
+writes per message are the floor. JetStream has no cheaper durable write than a key-value update, and a write that is not
+waited for would let a broker killed after the client has the PUBLISH lose the exchange's state. Lifted only by a faster
+store (a quicker disk or `sync_interval` on the NATS server; the broker cannot choose either).
 
 **Done (2026-10-30):** messages waiting together share the record written before their PUBLISH
 (`deliverBurst`, `subscribe.go`) and PUBRELs queued while a record is written share the next one
@@ -401,9 +419,12 @@ reconnect before the CONNACK, which is a design of its own.
 
 ## A default queue that failed at startup: a duplicate across brokers
 
-**Blocked by:** nothing; the last window is closed (2026-11-01, below) without creating consumers by start sequence, so
-the mixed-version problem in "Looked at 2026-10-31" below does not arise. What remains is a fleet that has a broker of
-an earlier release updating the group's consumer, which drops the start the later brokers read.
+**Blocked by:** nothing buildable; what is left is a documented limit (README, Known limits). A consumer's `DeliverPolicy`
+cannot be changed once it exists, so a consumer cannot be created by start sequence without breaking the SUBSCRIBE of a
+broker that did not; the recorded start (below) is the additive substitute. It is missing for a consumer made by an
+earlier release, for one that had already delivered when a broker of this release first saw it, and, until a broker of this
+release next joins, for one whose metadata an earlier release's update dropped. Lifted by upgrading the fleet together, or
+by a NATS release that lets a consumer's start be changed.
 
 **Done (2026-10-11):** the broker retries a default queue it could not create, with a doubling wait from 5 s to a
 minute, logs at info when it comes up, and `Broker.OfflineQueueActive` says whether it is on.
@@ -432,6 +453,14 @@ the stream sequence it started after (exact while nothing has been delivered fro
 instead of the floor (`TestALateBacklogSkipsTheLiveCopyOfAMessageTheGroupAlreadyAcknowledged_MQTT_4_3_3_2_MQTT_4_8_2_5`).
 The consumer's `DeliverPolicy` is untouched, so this is additive. **Left:** a consumer with no recorded start (made
 by an earlier release, or whose metadata an earlier release's update dropped) is judged by the floor as before.
+
+**Done (2026-11-01):** the start survives an earlier release's update. It is also kept in `start.<hash>` in the
+`<StreamPrefix>_share_members` bucket (written with the consumer's creation time, so a copy left by a group that was
+deleted and made again is not mistaken for the new one's), and a broker of this release joining the group puts it back
+into the consumer's metadata (`TestALateBacklogStillSkipsAnAcknowledgedMessageAfterAnEarlierReleaseDroppedTheConsumersStart_MQTT_4_3_3_2_MQTT_4_8_2_5`,
+and on a cluster `TestClusterAJoiningBrokerRestoresTheConsumerStartAnEarlierReleaseDropped_MQTT_4_3_3_2`; the first
+fails without the restore). **Limit, not buildable:** a consumer that had already delivered when this release first saw it
+has a start that can no longer be known exactly, so it keeps the floor.
 
 **Looked at 2026-10-31, not built, and why it is not an opt-in either:** the fix is to create the group consumer by
 start sequence, and there is no additive form of it. (1) A consumer's `DeliverPolicy` cannot be changed on an existing
