@@ -503,3 +503,12 @@ func NATSLostAndBack(b *Broker) {
 	b.natsLost()
 	b.natsBack()
 }
+
+// SetFenceProbeFault makes the Will store's fence probe fail while f returns an error. nil removes it.
+func SetFenceProbeFault(b *Broker, f func() error) {
+	if f == nil {
+		b.wills.probeFault.Store(nil)
+		return
+	}
+	b.wills.probeFault.Store(&f)
+}

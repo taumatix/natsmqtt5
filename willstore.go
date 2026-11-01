@@ -165,6 +165,9 @@ type willStore struct {
 	// cutOff is true from the moment this broker fences itself until it next reaches the
 	// cluster.
 	cutOff atomic.Bool
+	// probeFault, when set, makes the fence probe's write fail with the error it returns (nil
+	// means no fault). A seam for tests.
+	probeFault atomic.Pointer[func() error]
 	// silentSince is when each owner was first seen not answering. Only
 	// adoptOrphans touches it.
 	silentSince map[string]time.Time
@@ -617,6 +620,9 @@ func (w *willStore) reachable(ctx context.Context) bool {
 	// [MQTT-3.1.2-8]. A write is acknowledged only once a majority of the bucket's servers holds it,
 	// which is the same majority a survivor needs to adopt the Will. The key has no dot, so it is
 	// never a record's (willKeyPrefix), and its empty value is skipped by the index and the listing.
+	if f := w.probeFault.Load(); f != nil && (*f)() != nil {
+		return false
+	}
 	_, err := w.kv.Put(ctx, fenceProbeKey, nil)
 	return err == nil
 }
