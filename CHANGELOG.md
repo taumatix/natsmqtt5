@@ -11,6 +11,12 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-01
+
+Fixes to resume, retained delivery and offline-queue reads in clustered deployments (the clustered resume that got nothing, a retained message delivered twice on SUBSCRIBE, a queue read ended early by a lagging replica), delivered-id spill chunks, new opt-in options (all off by default), and a **deprecation notice**: the defaults of `DurableWills`, `RestrictDollarTopics` and `OutboundTopicAliases` are planned to flip to on in v1.0.0. v0.14.0 changes none of them; pin them now with the new `Pin*` options (see [MIGRATION.md](MIGRATION.md), a draft for the next major). No breaking change.
+
+Install: `go get github.com/taumatix/natsmqtt5@v0.14.0`.
+
 - **Deprecated:** relying on the implicit default of three options. `DurableWills`, `RestrictDollarTopics` and `OutboundTopicAliases` are off today and their default becomes on in the next major version; v0.x changes nothing. [MIGRATION.md](MIGRATION.md) is a draft of what each flip changes, who is affected and how to keep the old behaviour. Pin the choice now with the new options below. A broker with any of the three neither pinned nor on logs one INFO line per process naming the unpinned ones.
 - **Added:** `Options.PinDurableWills`, `Options.PinRestrictDollarTopics` and `Options.PinOutboundTopicAliases` (`*bool`, nil by default). A non-nil value fixes the behaviour either way and beats the plain option; `Ptr(false)` is the one-line way to keep today's behaviour across the flip. Defaults are unchanged.
 - **Added:** `-outbound-topic-aliases` for the binary (the option had no flag). A flag or environment variable given as `false` now pins its option, for `-durable-wills`, `-restrict-dollar-topics` and `-outbound-topic-aliases`; left out, it pins nothing. Environment variables are now applied through the flag set, so they count as given.
