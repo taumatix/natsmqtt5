@@ -29,6 +29,10 @@ func (b *Broker) startQueueLoops(q *offlineQueue) {
 	// The interval is read here, on the caller's goroutine: read inside the
 	// loop it races with a later test changing sharedAckWait.
 	go b.holdLoop(sharedAckWait / 3)
+	if b.opts.SharedQoS2 && b.store != nil {
+		b.wg.Add(1)
+		go b.holdOrphans(sharedAckWait / 3)
+	}
 	if q.members != nil {
 		b.wg.Add(1)
 		go b.refreshMembersLoop(q)

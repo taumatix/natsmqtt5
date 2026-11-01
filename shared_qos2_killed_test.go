@@ -139,3 +139,29 @@ func TestAKilledBrokersSharedQoS2MessageAnsweredBeforeItsRecordIsCompletedByTheS
 	k.other.expectNoPublishFor(2 * handBackAckWait)
 	back.expectNoPublishFor(time.Second)
 }
+
+// The window the two tests above leave: the client stays away for much longer than the group's
+// AckWait after its broker was killed. Nobody is saying the message is still being worked on, so
+// JetStream would give it to the group's other member, and the returning client would be sent it
+// again [MQTT-4.8.2-4], [MQTT-4.8.2-5]. The surviving broker holds the messages that the dead
+// broker's record names (Broker.holdOrphans), without restoring the session, so the other member is
+// given nothing however long the client is away, and the client still finds the message waiting
+// for it.
+func TestAKilledBrokersSharedQoS2MessageIsHeldForAClientAwayPastTheAckWait_MQTT_4_8_2_4_MQTT_4_8_2_5(t *testing.T) {
+	k := newKilledSharedQoS2(t, "sq2-away")
+	sharedFleet{a: k.survivor}.publishQoS2(t, "job-away")
+	sent := k.member.expectPublish()
+	require.Equal(t, packet.QoS2, sent.QoS)
+	natsmqtt5.Kill(k.victim)
+	k.joinOther(t)
+
+	k.other.expectNoPublishFor(10 * handBackAckWait)
+
+	back, again := k.resume(t, "sq2-away")
+	assert.True(t, again.Dup, "a resend")
+	assert.Equal(t, sent.PacketID, again.PacketID, "[MQTT-4.4.0-1] with the original Packet Identifier")
+	assert.Equal(t, "job-away", string(again.Payload))
+	back.completeQoS2(again)
+	k.other.expectNoPublishFor(2 * handBackAckWait)
+	back.expectNoPublishFor(time.Second)
+}

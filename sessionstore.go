@@ -1067,6 +1067,59 @@ func (s *sessionStore) loadDeliveredSpill(ctx context.Context, keys []string) (i
 	return ids, unreadable
 }
 
+// orphanedHolds returns the acknowledgement subjects of the shared-subscription
+// messages that the sessions of unreachable brokers hold: the entries of a
+// record that is Attached to another broker which does not answer a liveness
+// request. Nobody is telling JetStream that those messages are still being
+// worked on, so the group would be given them after its AckWait, which
+// [MQTT-4.8.2-4] and [MQTT-4.8.2-5] do not allow while the client's session
+// lives; Broker.holdOrphans does. An entry past its PUBREC (Rel) is already
+// acknowledged and has no subject to name.
+func (s *sessionStore) orphanedHolds(ctx context.Context) []string {
+	keys, err := s.kv.Keys(ctx)
+	if err != nil {
+		return nil
+	}
+	alive := map[string]bool{}
+	var subjects []string
+	for _, key := range keys {
+		if ctx.Err() != nil {
+			return subjects
+		}
+		entry, err := s.kv.Get(ctx, key)
+		if err != nil {
+			continue
+		}
+		rec, err := decodeRecord(entry.Value())
+		if err != nil || !rec.Attached || rec.Owner == s.owner {
+			continue
+		}
+		entries := rec.Inflight
+		if len(rec.Spill) > 0 {
+			spilled, _ := s.loadSpill(ctx, rec.Spill)
+			entries = append(append([]storedInflight(nil), entries...), spilled...)
+		}
+		var acks []string
+		for _, e := range entries {
+			if e.Ack != "" && !e.Rel {
+				acks = append(acks, e.Ack)
+			}
+		}
+		if len(acks) == 0 {
+			continue
+		}
+		up, known := alive[rec.Owner]
+		if !known {
+			up = s.ownerAlive(ctx, rec.Owner)
+			alive[rec.Owner] = up
+		}
+		if !up {
+			subjects = append(subjects, acks...)
+		}
+	}
+	return subjects
+}
+
 // loadSpill reads the entries named by keys back, in order. A value that cannot
 // be read is counted and skipped; the entries of the others keep their order.
 func (s *sessionStore) loadSpill(ctx context.Context, keys []string) (entries []storedInflight, unreadable int) {
