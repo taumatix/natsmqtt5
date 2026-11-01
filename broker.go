@@ -103,8 +103,11 @@ type Broker struct {
 	// ingestSub takes messages from the ingest subject, with
 	// Options.NATSIngest; see ingest.go.
 	ingestSub *nats.Subscription
-	conns     map[*conn]struct{}
-	closed    bool
+	// plainSub takes plain publishes that ask for a queue copy, with
+	// Options.QueuePlainPublishes; see plainpublish.go.
+	plainSub *nats.Subscription
+	conns    map[*conn]struct{}
+	closed   bool
 	// shutdown closes when Close is called, so background work such as a
 	// delayed Will publication stops rather than firing into a dead broker.
 	shutdown chan struct{}
@@ -224,7 +227,17 @@ func NewWithContext(ctx context.Context, opts Options) (*Broker, error) {
 		b.closeNATS()
 		return nil, err
 	}
+	if err := b.listenForPlain(); err != nil {
+		b.stopIngest()
+		b.stopReauthorize()
+		b.closeWills()
+		b.closeSessionStore()
+		b.closeRetain()
+		b.closeNATS()
+		return nil, err
+	}
 	if err := b.listen(); err != nil {
+		b.stopPlain()
 		b.stopIngest()
 		b.stopReauthorize()
 		b.closeWills()
@@ -341,6 +354,7 @@ func (b *Broker) Close() error {
 		_ = b.listener.Close() // the broker is shutting down; a close error has nothing to act on
 	}
 	// The other brokers in the ingest queue group take what comes next.
+	b.stopPlain()
 	b.stopIngest()
 	b.drainConns()
 	// Waiting for the connections means every session has been through finish

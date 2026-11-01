@@ -438,6 +438,40 @@ must differ.
 A NATS message with no `Mqtt5-*` headers is delivered as a QoS 0 message with
 no properties, which is what makes plain `nats pub` reach MQTT subscribers.
 
+### Queueing plain NATS publishes (opt-in)
+
+A message a plain NATS client publishes on a live subject, `<prefix>.<subject>`, with an
+`Mqtt5-Qos` header of 1 or 2 is queued when `Options.QueuePlainPublishes`
+(`-queue-plain-publishes`, `NATSMQTT5_QUEUE_PLAIN_PUBLISHES=true`) is on. It is off by default, and
+then nothing below applies. Every broker with an offline queue leaves the first copy to plain NATS
+subscribers and one broker, chosen by a NATS queue group on `<prefix>.>`, handles it as it handles an
+ingest message (below): the queue copy is stored and the live copy is published again with
+`Mqtt5-Msg-Id` and `Mqtt5-Queue-Seq`, which is the copy MQTT sessions are delivered. A session that
+was away gets it when it comes back, and a shared group's QoS 1 and 2 work goes only to members whose
+client is connected.
+
+    nats pub 'mqtt.sensors.7.temp' 21.5 -H 'Mqtt5-Qos: 1'
+
+What to know before turning it on:
+
+- A plain NATS **subscriber** sees such a message twice: the original (no `Mqtt5-Msg-Id`) and the
+  broker's copy (with one). Filter on the header. A message with no `Mqtt5-Qos`, QoS 0, a subject
+  starting with `$` and a message that already has an id are not touched.
+- Nothing answers the publisher; the broker logs a refusal (a topic that fails validation, a QoS above
+  `MaximumQoS`) at WARN, and the message is then dropped for MQTT sessions. Use `NATSIngest` to be told.
+- The broker liveness subject moves from `<prefix>.$broker.<id>.ping` to `<prefix>$broker.<id>.ping`,
+  out of reach of the subscription on `<prefix>.>`; a dead broker would otherwise answer a liveness
+  request with a timeout instead of "no responders". **Restricted NATS permissions must allow the new
+  subject**, and with `DurableWills` or `PersistentSessions` every broker of the fleet must have the
+  same value, or a broker cannot see the others' pings. With the option off the subject is the one
+  v1.1.0 used, so a mixed v1.1/v1.2 fleet works.
+- Every broker has one more NATS subscription, on `<prefix>.>`, which sees every message under the
+  prefix; measure it on a busy subject space.
+- A publish to a JetStream stream that does not exist (a missing offline queue under `DurablePublish`)
+  waits for its timeout, up to 5 s, instead of failing at once with "no responders".
+- Brokers sharing a `SubjectPrefix` must agree on the option, or a broker that does not hold the first
+  copy back delivers it as well as the republished one.
+
 ### Publishing from plain NATS through a broker
 
 A message published straight onto a live subject has no queue copy, whatever its `Mqtt5-Qos`
@@ -661,7 +695,7 @@ one with fewer features:
   unacknowledged, with their original Packet Identifiers [MQTT-4.4.0-1]. A
   session restored from the store instead — after a restart, or on another
   broker — has nothing to resend.
-- **Shared subscriptions are granted QoS 1 by default.** A QoS 2 request on a
+- **Shared subscriptions are granted QoS 1 by default; `SharedQoS2` is opt-in.** A QoS 2 request on a
   `$share/` filter is answered with `Granted QoS 1` in the SUBACK, which
   [MQTT-3.8.4-7] permits. `Options.SharedQoS2` (`-shared-qos2`) grants QoS 2: the
   member that is sent a message owns it from then on, a held message survives a

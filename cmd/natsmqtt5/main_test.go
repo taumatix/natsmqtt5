@@ -238,6 +238,20 @@ func TestRetainedVerifyIntervalFlag(t *testing.T) {
 	assert.Zero(t, cfg.broker.RetainedVerifyInterval, "off unless asked for")
 }
 
+func TestQueuePlainPublishesFlag(t *testing.T) {
+	cfg, err := parseConfig([]string{"-queue-plain-publishes"}, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.QueuePlainPublishes)
+
+	cfg, err = parseConfig(nil, env(map[string]string{"NATSMQTT5_QUEUE_PLAIN_PUBLISHES": "true"}), io.Discard)
+	require.NoError(t, err)
+	assert.True(t, cfg.broker.QueuePlainPublishes)
+
+	cfg, err = parseConfig(nil, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.False(t, cfg.broker.QueuePlainPublishes, "off unless asked for")
+}
+
 func TestNATSIngestFlag(t *testing.T) {
 	cfg, err := parseConfig([]string{"-nats-ingest"}, env(nil), io.Discard)
 	require.NoError(t, err)
