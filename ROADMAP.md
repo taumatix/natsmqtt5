@@ -192,33 +192,24 @@ interval of 0 still survives a fraction of a second. Neither limits a deployment
 
 # Tier 4: features MQTT 5 defines that the broker does not offer
 
-## Outbound topic aliases thrash against a small client maximum
+## Outbound topic aliases: admit a name on its second sighting
 
-**Blocked by:** nothing; a decision and a measurement. Aliases became the default in v1.0.0 and the two findings below were
-not acted on first.
+**Blocked by:** nothing; a measurement. The thrash itself is fixed (CHANGELOG [Unreleased]): the table now keeps a ledger
+of bytes saved against bytes spent on aliases and stops remapping while it has spent more, so a client whose Topic Alias
+Maximum is below the set of names it sees is sent at most a constant 3 bytes per slot more than with aliases off, where
+it was sent 6% more (a round robin over 40 names, any table under 40) or 1.3% more (the skewed mix at a table of 1).
+Tables of 8 and up send exactly the bytes they did.
 
-**Measured (2026-10-30, `outalias_measure_internal_test.go`, 100,000 PUBLISHes of a skewed mix: 70% 40-byte telemetry
-names over 400 devices, 15% 21-byte command names, 15% names of 4-6 bytes; real codec, the broker's own table):**
+**Left (measured 2026-11-01, `outalias_measure_internal_test.go`):** the ledger bounds the loss and does not recover the
+saving a better admission rule would. At a table of 8 the skewed mix saves 19.2% and raising the name floor to 32 saved
+22.5%, because first-seen 21-byte names evict hot 40-byte ones; a round robin over more names than the table holds saves
+nothing where holding a fixed subset would save the share of names held. Both come from admitting a name on its first
+sighting.
 
-| Payload | Table 1 | 8 | 32 | 128 | 400 |
-|---|---|---|---|---|---|
-| 4 B | -1.3% | 19.2% | 38.9% | 55.5% | 66.4% |
-| 64 B | -0.5% | 7.9% | 15.9% | 22.7% | 27.2% |
-| 512 B | -0.1% | 1.5% | 2.9% | 4.2% | 5.0% |
-
-The saving is the share of bytes on the wire and depends on the client's Topic Alias Maximum and how many distinct
-topics it sees, far more than on the threshold. Findings: (1) a reused name saves its length minus 3 and a first use
-costs 3, so 8 bytes pays off at the 2nd send, 5 bytes at the 3rd, 4 bytes at the 5th, 3 bytes never: 8 is a safe,
-slightly conservative floor and lowering it to 5 gains under 2 points here. (2) With a table smaller than the working
-set the LRU thrashes: a maximum of 1 sends more bytes than no aliases, and raising the floor to 32 saved more than 8
-did at tables of 8 and 32 (22.5% against 19.2%, 40.3% against 38.9%) because the 21-byte names stopped evicting the
-hot 40-byte ones. **Recommendation:** keep `minAliasedTopic` at 8; when it is on by default, send aliases only to a
-client whose maximum is at least 8 (below that the table does not hold a working set), or admit a name to the table on
-its second sighting instead of its first; neither is done. Not measured: CPU of the encode (aliasing encodes twice on a miss), and clients in the field that mishandle aliases, which only
-a trial tells; v1.0.0 users who see one pin `PinOutboundTopicAliases: Ptr(false)`.
-
-- [ ] send aliases only to a client whose maximum is at least 8, or admit a name to the table on its second sighting, and
-  measure it with the harness above.
+- [ ] admit a name to the table on its second sighting (a bounded set of names seen once), and measure it with the harness
+  above against the ledger alone; keep it only if the skewed mix at tables of 8 and 32 gains and nothing loses.
+- [ ] not measured: CPU of the encode (aliasing encodes twice on a miss), and clients in the field that mishandle aliases,
+  which only a trial tells; v1.0.0 users who see one pin `PinOutboundTopicAliases: Ptr(false)`.
 
 ## QoS 2 on shared subscriptions
 

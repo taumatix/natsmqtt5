@@ -164,3 +164,39 @@ func TestAnAliasIsNotSetWhereItWouldTakeAPacketOverTheClientsLimit(t *testing.T)
 	assert.Equal(t, "alias/topic-one", got.Topic)
 	assert.Zero(t, aliasOf(got), "no alias, since naming one would not fit")
 }
+
+// A client whose Topic Alias Maximum is smaller than the set of names it receives must not be
+// sent more bytes than with aliases off: giving each new name the single alias in turn costs
+// three bytes a PUBLISH and saves nothing, since no name returns before the next displaces it
+// (ROADMAP.md, "Outbound topic aliases thrash against a small client maximum").
+func TestASmallClientMaximumIsNotSentMoreBytesThanNoAliases(t *testing.T) {
+	topics := []string{"fleet/site-1/device-a/telemetry", "fleet/site-1/device-b/telemetry", "fleet/site-1/device-c/telemetry", "fleet/site-1/device-d/telemetry"}
+	const rounds = 15
+
+	// bytesReceived is the size of every PUBLISH a subscriber with a maximum of 1 is sent for a
+	// round robin over topics, and the highest alias it was given.
+	bytesReceived := func(t *testing.T, aliasesOn bool) (total int, highest uint16) {
+		addr := startBroker(t, startNATS(t), func(o *natsmqtt5.Options) { o.PinOutboundTopicAliases = pin(aliasesOn) })
+		sub := dialRaw(t, addr)
+		sub.connect(aliasConnect("thrash-sub", 1))
+		sub.subscribe("fleet/#", packet.QoS1)
+		pub, _ := connectClient(t, addr, connectOpts("thrash-pub"))
+		for range rounds {
+			for _, topic := range topics {
+				publishQoS1(t, pub, topic)
+				got := sub.expectPublish()
+				wire, err := packet.Encode(got)
+				require.NoError(t, err)
+				total += len(wire)
+				highest = max(highest, aliasOf(got))
+				sub.send(&packet.Puback{Ack: packet.Ack{PacketID: got.PacketID}})
+			}
+		}
+		return total, highest
+	}
+
+	off, _ := bytesReceived(t, false)
+	on, highest := bytesReceived(t, true)
+	assert.LessOrEqual(t, highest, uint16(1), "no alias above the client's maximum [MQTT-3.3.2-9]")
+	assert.LessOrEqual(t, on, off+3, "aliases on: %d bytes, off: %d", on, off)
+}

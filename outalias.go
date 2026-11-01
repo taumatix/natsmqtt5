@@ -21,7 +21,19 @@ type outAliases struct {
 	max     uint16
 	byTopic map[string]*list.Element // front of order is the most recently used
 	order   *list.List
+	saved   int
+	spent   int
 }
+
+// The table also keeps a ledger: saved is the bytes the aliases already set
+// have taken off the wire (a name left out of a PUBLISH), spent the bytes it
+// took to set them (the Topic Alias property on the PUBLISH that sets one). A
+// client whose maximum is below the set of names it sees would otherwise have
+// each name evict the next before it is reused, paying for every alias and
+// saving nothing; with the ledger the table stops remapping once it has spent
+// more than it saved, and goes on again when the aliases it kept have paid.
+// Filling free aliases is not held to it, which bounds the cost of a
+// connection that never repeats a name at 3 bytes per alias the client offered.
 
 type outAlias struct {
 	topic string
@@ -83,20 +95,34 @@ func withAlias(p *packet.Publish, alias uint16, omitTopic bool) *packet.Publish 
 // Alias table, or raw (its plain encoding) when aliasing does not apply or
 // would take the packet over the client's Maximum Packet Size.
 func (c *conn) aliasPublish(p *packet.Publish, raw []byte) []byte {
-	t := c.outAlias
-	if t == nil || len(p.Topic) < minAliasedTopic {
+	if c.outAlias == nil || len(p.Topic) < minAliasedTopic {
 		return raw
 	}
+	return c.outAlias.encode(p, raw, c.clientMaxPacketSize)
+}
+
+// encode is the aliased form of p, or raw when the table declines. A name
+// already in the table goes as its alias alone. A new name takes a free alias;
+// when the table is full it replaces the least recently used one only while
+// the aliases so far have saved at least what setting them cost (see ledger),
+// so a client whose maximum is smaller than the set of names it receives never
+// pays more than it would without aliases.
+func (t *outAliases) encode(p *packet.Publish, raw []byte, maxPacketSize uint32) []byte {
 	if alias, ok := t.hit(p.Topic); ok {
 		if out, err := packet.Encode(withAlias(p, alias, true)); err == nil {
+			t.saved += len(raw) - len(out)
 			return out
 		}
 		return raw
 	}
-	out, err := packet.Encode(withAlias(p, t.next(), false))
-	if err != nil || (c.clientMaxPacketSize > 0 && overLimit(len(out), c.clientMaxPacketSize)) {
+	if t.order.Len() >= int(t.max) && t.saved < t.spent {
 		return raw
 	}
+	out, err := packet.Encode(withAlias(p, t.next(), false))
+	if err != nil || (maxPacketSize > 0 && overLimit(len(out), maxPacketSize)) {
+		return raw
+	}
+	t.spent += len(out) - len(raw)
 	t.assign(p.Topic)
 	return out
 }
