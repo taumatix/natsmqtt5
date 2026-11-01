@@ -27,7 +27,8 @@ surviving one. The Will's payload sits in that bucket in clear text.
 
 **Who is affected.** Deployments that use JetStream and whose clients send Wills. They gain the bucket, one write per connection with a Will, the
 liveness pings between brokers, and the need to give the bucket the same access control as the
-session bucket. Deployments with no Wills notice nothing beyond the bucket existing.
+session bucket. A broker that cannot reach NATS for about twice `WillCheckInterval` now closes its
+clients (so that a survivor can publish their Wills exactly once) where before it kept serving them. Deployments with no Wills notice nothing beyond the bucket existing.
 
 **Keep the old behaviour.** `Options.PinDurableWills: natsmqtt5.Ptr(false)`, or `-durable-wills=false`.
 
