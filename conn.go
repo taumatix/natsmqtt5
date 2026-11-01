@@ -713,6 +713,10 @@ func (c *conn) sendDisconnect(code packet.ReasonCode, reason string) {
 
 // shutdown disconnects the client with a reason and closes the socket.
 func (c *conn) shutdown(code packet.ReasonCode, reason string) {
+	// A client that never reads leaves another writer inside Write holding writeMu, and the
+	// DISCONNECT would wait behind it (and Broker.Close behind that) for ever. The deadline fails
+	// that write, which frees the lock.
+	_ = c.nc.SetWriteDeadline(time.Now().Add(closeBehindGrace))
 	c.sendDisconnect(code, reason)
 	c.close()
 }

@@ -41,6 +41,7 @@ import (
 
 type natsCluster struct {
 	t       *testing.T
+	conf    string // extra server configuration, written to every node and read with -c
 	runtime string
 	names   [3]string
 	ips     [3]string
@@ -55,7 +56,11 @@ const clusterImageDefault = "docker.io/library/nats:2-alpine"
 
 // startNATSCluster starts the cluster and waits until JetStream can place a three-replica
 // stream, or skips the test when the gate is closed.
-func startNATSCluster(t *testing.T) *natsCluster {
+func startNATSCluster(t *testing.T) *natsCluster { return startNATSClusterWith(t, "") }
+
+// startNATSClusterWith is startNATSCluster with conf, in nats-server's configuration syntax, given to every
+// server: a test that needs a dead route noticed in seconds rather than minutes sets ping_interval.
+func startNATSClusterWith(t *testing.T, conf string) *natsCluster {
 	t.Helper()
 	if os.Getenv("NATSMQTT5_CLUSTER_TESTS") == "" {
 		t.Skip("set NATSMQTT5_CLUSTER_TESTS=1 to run the tests that need a 3-server NATS cluster in containers")
@@ -79,7 +84,7 @@ func startNATSCluster(t *testing.T) *natsCluster {
 
 	var id [4]byte
 	_, _ = rand.Read(id[:])
-	c := &natsCluster{t: t, runtime: rt}
+	c := &natsCluster{t: t, runtime: rt, conf: conf}
 	t.Cleanup(c.remove)
 	for i := range c.names {
 		c.names[i] = fmt.Sprintf("natsmqtt5-ct-%s-%d", hex.EncodeToString(id[:]), i)
@@ -175,7 +180,12 @@ func (c *natsCluster) routes() string {
 // startServer launches nats-server in node i, detached from the exec session that starts it.
 func (c *natsCluster) startServer(i int, routes string) {
 	c.t.Helper()
-	c.sh(i, fmt.Sprintf("nohup setsid nats-server -js -n n%d -sd /data --cluster_name ct "+
+	flags := ""
+	if c.conf != "" {
+		c.sh(i, "echo '"+strings.ReplaceAll(c.conf, "'", "")+"' > /tmp/extra.conf")
+		flags = "-c /tmp/extra.conf "
+	}
+	c.sh(i, fmt.Sprintf("nohup setsid nats-server "+flags+"-js -n n%d -sd /data --cluster_name ct "+
 		"--cluster nats://0.0.0.0:6222 --routes %s -l /tmp/nats.log >/dev/null 2>&1 &", i, routes))
 }
 

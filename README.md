@@ -406,8 +406,11 @@ it. The ids each session keeps stop a message going out twice, and a subscriptio
 what was stored after it was made. Off by default; an error with `DisableOfflineQueue`.
 
 It costs one read of the queue stream per connected session after each reconnect, filtered to the
-session's subjects. It does not see a live copy lost between two servers of a NATS cluster while
-both brokers stay connected, nor messages published straight onto a live subject, which have no
+session's subjects. It also catches up after a route between NATS servers drops while both brokers stay
+connected: the broker watches the server list its connection learns from the server, and a change
+starts the same hold and catch-up. Known limits: it does not see a route the server has not yet
+noticed is dead (set `ping_interval` on the servers to shorten that), a flap shorter than 200 ms, or
+a connection created with `nats.IgnoreDiscoveredServers`; and it does not see messages published straight onto a live subject, which have no
 queue copy (publish them through `NATSIngest` instead; [ROADMAP.md](ROADMAP.md)).
 
 ## How MQTT maps onto NATS
