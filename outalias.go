@@ -23,7 +23,12 @@ type outAliases struct {
 	order   *list.List
 	saved   int
 	spent   int
+	seen    map[string]struct{} // names sent plain once while the table was full
 }
+
+// maxSeenAliasNames bounds seen; when it fills it starts over, so a name must
+// recur within about this many other new names to be admitted.
+const maxSeenAliasNames = 32
 
 // The table also keeps a ledger: saved is the bytes the aliases already set
 // have taken off the wire (a name left out of a PUBLISH), spent the bytes it
@@ -104,7 +109,8 @@ func (c *conn) aliasPublish(p *packet.Publish, raw []byte) []byte {
 // encode is the aliased form of p, or raw when the table declines. A name
 // already in the table goes as its alias alone. A new name takes a free alias;
 // when the table is full it replaces the least recently used one only while
-// the aliases so far have saved at least what setting them cost (see ledger),
+// the name has been sent before and the aliases so far have saved at least what
+// setting them cost (see ledger),
 // so a client whose maximum is smaller than the set of names it receives never
 // pays more than it would without aliases.
 func (t *outAliases) encode(p *packet.Publish, raw []byte, maxPacketSize uint32) []byte {
@@ -117,6 +123,19 @@ func (t *outAliases) encode(p *packet.Publish, raw []byte, maxPacketSize uint32)
 	}
 	if t.order.Len() >= int(t.max) && t.saved < t.spent {
 		return raw
+	}
+	if t.order.Len() >= int(t.max) {
+		// A full table gives a name an alias only on its second sighting: a name
+		// seen once would evict a hot one and, if it never returns, cost the
+		// remapping for nothing.
+		if _, again := t.seen[p.Topic]; !again {
+			if t.seen == nil || len(t.seen) >= maxSeenAliasNames {
+				t.seen = make(map[string]struct{})
+			}
+			t.seen[p.Topic] = struct{}{}
+			return raw
+		}
+		delete(t.seen, p.Topic)
 	}
 	out, err := packet.Encode(withAlias(p, t.next(), false))
 	if err != nil || (maxPacketSize > 0 && overLimit(len(out), maxPacketSize)) {

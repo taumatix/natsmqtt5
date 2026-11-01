@@ -146,3 +146,33 @@ func TestAliasesNeverCostBytesWhateverTheClientMaximum(t *testing.T) {
 		}
 	}
 }
+
+// A full table admits a name on its second sighting. Before it, a table of 8 sent 671,872 bytes
+// for the skewed mix (20,000 PUBLISHes, seed 42) and 150,003 for a round robin over 40 names;
+// first-seen names evicted hot ones. These bounds sit between those figures and today's.
+func TestAFullTableAdmitsANameOnItsSecondSighting(t *testing.T) {
+	cycle := make([]string, 0, 3000)
+	for i := 0; i < 3000; i++ {
+		cycle = append(cycle, fmt.Sprintf("dt/site-1/building-2/device-%03d/telemetry", i%40))
+	}
+	_, skewed := savings(t, topicMix(20000, 42), []byte("21.5"), 8, minAliasedTopic)
+	assert.Less(t, skewed, 600000, "skewed mix, table 8 (was 671,872, plain 832,649)")
+	_, rr := savings(t, cycle, []byte("21.5"), 8, minAliasedTopic)
+	assert.Less(t, rr, 145000, "round robin over 40 names, table 8 (was 150,003, plain 150,000)")
+}
+
+func TestASecondSightingNameTakesTheLeastRecentlyUsedAlias(t *testing.T) {
+	tab := newOutAliases(1)
+	a, b := "dt/aaaaaaaa/telemetry", "dt/bbbbbbbb/telemetry"
+	send := func(topic string) (aliased bool) {
+		p := &packet.Publish{Topic: topic, Payload: []byte("1")}
+		raw, err := packet.Encode(p)
+		require.NoError(t, err)
+		return len(tab.encode(p, raw, 0)) != len(raw)
+	}
+	require.True(t, send(a), "a free alias is taken on first sight")
+	require.True(t, send(a))
+	require.False(t, send(b), "b is first seen with the table full: sent plain")
+	require.True(t, send(a), "a keeps its alias")
+	require.True(t, send(b), "b, seen again, remaps the alias")
+}

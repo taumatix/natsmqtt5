@@ -192,24 +192,15 @@ interval of 0 still survives a fraction of a second. Neither limits a deployment
 
 # Tier 4: features MQTT 5 defines that the broker does not offer
 
-## Outbound topic aliases: admit a name on its second sighting
+## Outbound topic aliases: what is still not measured
 
-**Blocked by:** nothing; a measurement. The thrash itself is fixed (CHANGELOG [Unreleased]): the table now keeps a ledger
-of bytes saved against bytes spent on aliases and stops remapping while it has spent more, so a client whose Topic Alias
-Maximum is below the set of names it sees is sent at most a constant 3 bytes per slot more than with aliases off, where
-it was sent 6% more (a round robin over 40 names, any table under 40) or 1.3% more (the skewed mix at a table of 1).
-Tables of 8 and up send exactly the bytes they did.
+**Blocked by:** a trial. A full table now admits a name on its second sighting (CHANGELOG [Unreleased]; measured
+2026-11-01 in `outalias_measure_internal_test.go`: the skewed mix at a table of 8 saves 32% against 19%, a round robin
+over 40 names 6% against 0%, no mix or table sends more bytes than before). A seen-once set larger than 32 names did
+worse on the skewed mix (256: 26%).
 
-**Left (measured 2026-11-01, `outalias_measure_internal_test.go`):** the ledger bounds the loss and does not recover the
-saving a better admission rule would. At a table of 8 the skewed mix saves 19.2% and raising the name floor to 32 saved
-22.5%, because first-seen 21-byte names evict hot 40-byte ones; a round robin over more names than the table holds saves
-nothing where holding a fixed subset would save the share of names held. Both come from admitting a name on its first
-sighting.
-
-- [ ] admit a name to the table on its second sighting (a bounded set of names seen once), and measure it with the harness
-  above against the ledger alone; keep it only if the skewed mix at tables of 8 and 32 gains and nothing loses.
-- [ ] not measured: CPU of the encode (aliasing encodes twice on a miss), and clients in the field that mishandle aliases,
-  which only a trial tells; v1.0.0 users who see one pin `PinOutboundTopicAliases: Ptr(false)`.
+- [ ] CPU of the encode (aliasing encodes twice on a miss), and clients in the field that mishandle aliases, which only a
+  trial tells; v1.0.0 users who see one pin `PinOutboundTopicAliases: Ptr(false)`.
 
 ## QoS 2 on shared subscriptions
 
