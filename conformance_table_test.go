@@ -93,6 +93,22 @@ func nameCites(name, id string) bool {
 func testFunctions(t *testing.T) map[string]string {
 	t.Helper()
 	funcs := map[string]string{}
+	for name, f := range testFuncs(t) {
+		funcs[name] = f.text
+	}
+	return funcs
+}
+
+// testFunc is a Test function's text (doc comment and body) and where it is declared.
+type testFunc struct {
+	text string
+	file string
+	line int
+}
+
+func testFuncs(t *testing.T) map[string]testFunc {
+	t.Helper()
+	funcs := map[string]testFunc{}
 	err := filepath.WalkDir(".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -121,7 +137,11 @@ func testFunctions(t *testing.T) map[string]string {
 			if fd.Doc != nil {
 				start = fd.Doc.Pos()
 			}
-			funcs[fd.Name.Name] = string(src[fset.Position(start).Offset:fset.Position(fd.End()).Offset])
+			funcs[fd.Name.Name] = testFunc{
+				text: string(src[fset.Position(start).Offset:fset.Position(fd.End()).Offset]),
+				file: filepath.ToSlash(p),
+				line: fset.Position(fd.Pos()).Line,
+			}
 		}
 		return nil
 	})
