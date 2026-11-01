@@ -558,6 +558,9 @@ func (c *conn) restartCursor(q *offlineQueue, gen uint64) {
 	if r.base == 0 {
 		r.base = last + 1
 	}
+	if f := c.broker.scanGate.Load(); f != nil {
+		(*f)()
+	}
 	if c.applyRestart(r) {
 		c.logger.Debug("restarted the replay cursor", "client_id", s.clientID, "base", r.base)
 	}

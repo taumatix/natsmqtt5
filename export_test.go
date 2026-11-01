@@ -123,9 +123,10 @@ func SetResumeGate(b *Broker, f func(filter string)) {
 	b.resumeGate.Store(&f)
 }
 
-// SetScanGate makes a replay-cursor scan call f after it has read the queue and
-// before it applies what it read, which is where a live copy can arrive while
-// the cursor is about to move. nil removes it.
+// SetScanGate makes a replay-cursor scan, including one that restarts a dropped
+// cursor, call f after it has read the queue and before it applies what it
+// read, which is where a live copy can arrive while the cursor is about to
+// move. nil removes it.
 func SetScanGate(b *Broker, f func()) {
 	if f == nil {
 		b.scanGate.Store(nil)

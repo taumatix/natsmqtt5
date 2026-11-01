@@ -49,7 +49,7 @@ observe:
 
 Unit tests are welcome for the parts (the codec, the topic mapping, a bound, a decoder), but they do
 not satisfy this rule. A statement covered only by unit tests is a **gap**: say so in the pull request
-and list it on the roadmap (the "Statements covered only by unit tests" entry).
+and list it on the roadmap in an entry of its own (none is open).
 
 In the pull request description, give a table of statement id to the integration test that proves it.
 When a change touches a row of `conformance/mqtt5-statements.tsv`, update the row and the summary in
