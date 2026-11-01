@@ -12,8 +12,8 @@ import (
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/require"
 
-	"github.com/taumatix/natsmqtt5"
-	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/v2"
+	"github.com/taumatix/natsmqtt5/v2/packet"
 )
 
 // BenchmarkQoS1Publish is the cost of one QoS 1 PUBLISH, sent and waited for

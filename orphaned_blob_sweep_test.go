@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/taumatix/natsmqtt5"
-	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/v2"
+	"github.com/taumatix/natsmqtt5/v2/packet"
 )
 
 // A payload stashed for a session that has no record (the session was discarded

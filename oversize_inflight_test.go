@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/taumatix/natsmqtt5"
-	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/v2"
+	"github.com/taumatix/natsmqtt5/v2/packet"
 )
 
 // A message in flight that has no copy in the offline queue (a retained message

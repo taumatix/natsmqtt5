@@ -11,7 +11,7 @@ import (
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/stretchr/testify/require"
 
-	"github.com/taumatix/natsmqtt5"
+	"github.com/taumatix/natsmqtt5/v2"
 )
 
 // A SUBSCRIBE decided under one principal must not be installed into a session

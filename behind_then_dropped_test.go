@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/v2/packet"
 )
 
 // A connection that is behind when it drops used to lose what was waiting for

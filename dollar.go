@@ -3,7 +3,7 @@ package natsmqtt5
 import (
 	"strings"
 
-	"github.com/taumatix/natsmqtt5/topic"
+	"github.com/taumatix/natsmqtt5/v2/topic"
 )
 
 // Keeping clients off "$" topics.

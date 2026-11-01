@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/taumatix/natsmqtt5"
-	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/v2"
+	"github.com/taumatix/natsmqtt5/v2/packet"
 )
 
 // The replay cursor's two bounds that keep its record small (cursor.go,

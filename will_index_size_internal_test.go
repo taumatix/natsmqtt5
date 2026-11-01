@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/v2/packet"
 )
 
 func heapAfterGC() uint64 {

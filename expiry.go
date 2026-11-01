@@ -6,7 +6,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 
-	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/v2/packet"
 )
 
 // Message Expiry Interval (MQTT-5.0 §3.3.2.3.3).

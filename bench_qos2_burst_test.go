@@ -12,8 +12,8 @@ import (
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/require"
 
-	"github.com/taumatix/natsmqtt5"
-	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/v2"
+	"github.com/taumatix/natsmqtt5/v2/packet"
 )
 
 // BenchmarkQoS2DeliveryBurst is BenchmarkQoS2Delivery with the publisher ahead

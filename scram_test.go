@@ -15,9 +15,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/taumatix/natsmqtt5"
-	"github.com/taumatix/natsmqtt5/packet"
-	"github.com/taumatix/natsmqtt5/scram"
+	"github.com/taumatix/natsmqtt5/v2"
+	"github.com/taumatix/natsmqtt5/v2/packet"
+	"github.com/taumatix/natsmqtt5/v2/scram"
 )
 
 // End to end for the scram package: a real broker, a real socket, and a SCRAM

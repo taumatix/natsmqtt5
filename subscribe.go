@@ -9,8 +9,8 @@ import (
 
 	"github.com/nats-io/nats.go"
 
-	"github.com/taumatix/natsmqtt5/packet"
-	"github.com/taumatix/natsmqtt5/topic"
+	"github.com/taumatix/natsmqtt5/v2/packet"
+	"github.com/taumatix/natsmqtt5/v2/topic"
 )
 
 // handleSubscribe creates or replaces the session's subscriptions and answers

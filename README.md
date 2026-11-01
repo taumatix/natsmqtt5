@@ -115,7 +115,7 @@ import (
 	"context"
 	"log"
 
-	"github.com/taumatix/natsmqtt5"
+	"github.com/taumatix/natsmqtt5/v2"
 )
 
 func main() {
@@ -784,7 +784,7 @@ The MQTT layer is written against the [OASIS MQTT v5.0 Standard][spec] of
 
 | Package | What it is |
 |---|---|
-| `github.com/taumatix/natsmqtt5` | The broker |
+| `github.com/taumatix/natsmqtt5/v2` | The broker |
 | `.../packet` | MQTT v5 wire codec — standard library only, no NATS |
 | `.../topic` | Topic validation, matching and the NATS subject mapping |
 

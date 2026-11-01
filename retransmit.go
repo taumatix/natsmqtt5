@@ -3,7 +3,7 @@ package natsmqtt5
 import (
 	"time"
 
-	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/v2/packet"
 )
 
 // retransmit resends what the previous network connection left unacknowledged:

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/taumatix/natsmqtt5"
+	"github.com/taumatix/natsmqtt5/v2"
 )
 
 // clusterWills is fastWills with every bucket and stream replicated three ways, as a

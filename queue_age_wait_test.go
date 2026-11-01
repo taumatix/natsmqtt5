@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/taumatix/natsmqtt5"
+	"github.com/taumatix/natsmqtt5/v2"
 )
 
 // queuedSkewMargin is what awaitQueuedOlderThanTheCheckpointSkew waits for: the broker's checkpoint skew

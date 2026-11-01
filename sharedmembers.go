@@ -12,7 +12,7 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/taumatix/natsmqtt5/topic"
+	"github.com/taumatix/natsmqtt5/v2/topic"
 )
 
 // Who is subscribed to a shared subscription.

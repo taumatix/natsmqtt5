@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/taumatix/natsmqtt5"
+	"github.com/taumatix/natsmqtt5/v2"
 )
 
 // A rolling restart of a replicated NATS cluster is the routine operation a deployment

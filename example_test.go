@@ -12,8 +12,8 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nuid"
 
-	"github.com/taumatix/natsmqtt5"
-	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/v2"
+	"github.com/taumatix/natsmqtt5/v2/packet"
 )
 
 // Run a broker against an existing NATS server.

@@ -7,7 +7,7 @@ import (
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/stretchr/testify/require"
 
-	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/v2/packet"
 )
 
 // A withdrawn identifier is owed one particular acknowledgement: a PUBACK for a

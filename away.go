@@ -3,7 +3,7 @@ package natsmqtt5
 import (
 	"log/slog"
 
-	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/v2/packet"
 )
 
 // A broker with no offline queue (DisableOfflineQueue, or no JetStream) keeps no copy of a QoS 1 or 2

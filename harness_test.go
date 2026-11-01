@@ -13,7 +13,7 @@ import (
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/require"
 
-	"github.com/taumatix/natsmqtt5"
+	"github.com/taumatix/natsmqtt5/v2"
 )
 
 // The tests run a real NATS server in-process with JetStream enabled, a real

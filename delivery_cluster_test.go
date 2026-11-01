@@ -8,8 +8,8 @@ import (
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/taumatix/natsmqtt5"
-	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/v2"
+	"github.com/taumatix/natsmqtt5/v2/packet"
 )
 
 // A connection's end waits for its delivery goroutine and writes the session record one

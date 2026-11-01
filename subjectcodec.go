@@ -1,6 +1,6 @@
 package natsmqtt5
 
-import "github.com/taumatix/natsmqtt5/topic"
+import "github.com/taumatix/natsmqtt5/v2/topic"
 
 // subjectCodec maps Topic Names and Filters to NATS subjects and back. With
 // escape set (Options.EscapeNATSWildcards) it uses the escaping variants, which

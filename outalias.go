@@ -3,7 +3,7 @@ package natsmqtt5
 import (
 	"container/list"
 
-	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/v2/packet"
 )
 
 // minAliasedTopic is the shortest Topic Name worth an alias. Reusing an alias

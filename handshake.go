@@ -8,8 +8,8 @@ import (
 
 	"github.com/nats-io/nuid"
 
-	"github.com/taumatix/natsmqtt5/packet"
-	"github.com/taumatix/natsmqtt5/topic"
+	"github.com/taumatix/natsmqtt5/v2/packet"
+	"github.com/taumatix/natsmqtt5/v2/topic"
 )
 
 // handshake reads the CONNECT, authenticates it, sets up the session and

@@ -1,4 +1,4 @@
-module github.com/taumatix/natsmqtt5
+module github.com/taumatix/natsmqtt5/v2
 
 go 1.26.0
 

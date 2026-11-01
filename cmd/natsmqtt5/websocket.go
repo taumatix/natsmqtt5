@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/taumatix/natsmqtt5"
+	"github.com/taumatix/natsmqtt5/v2"
 )
 
 // serveWebSocket serves the broker's WebSocket handler at cfg.wsPath on cfg.wsListen, over TLS

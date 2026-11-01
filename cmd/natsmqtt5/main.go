@@ -29,7 +29,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 
-	"github.com/taumatix/natsmqtt5"
+	"github.com/taumatix/natsmqtt5/v2"
 )
 
 // version is stamped at build time with -ldflags "-X main.version=v1.2.3",

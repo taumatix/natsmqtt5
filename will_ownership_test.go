@@ -7,8 +7,8 @@ import (
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/taumatix/natsmqtt5"
-	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/v2"
+	"github.com/taumatix/natsmqtt5/v2/packet"
 )
 
 // Whose Will is whose when a client reconnects while its old connection is

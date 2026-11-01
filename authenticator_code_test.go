@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/taumatix/natsmqtt5"
-	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/v2"
+	"github.com/taumatix/natsmqtt5/v2/packet"
 )
 
 // [MQTT-3.2.2-8]: "The Server sending the CONNACK packet MUST use one of the

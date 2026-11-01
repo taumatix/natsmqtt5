@@ -8,7 +8,7 @@ import (
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/stretchr/testify/require"
 
-	"github.com/taumatix/natsmqtt5/packet"
+	"github.com/taumatix/natsmqtt5/v2/packet"
 )
 
 // Close returns while a catch-up read is held by a client that acknowledges nothing and NATS has dropped again.
