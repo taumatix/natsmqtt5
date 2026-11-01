@@ -122,6 +122,12 @@ func (b *Broker) giveBacklog(q *offlineQueue, s *session, sub *subscription) {
 	if info := cons.CachedInfo(); info != nil {
 		above = min(above, info.AckFloor.Stream)
 	}
+	if start, ok := consumerStart(cons); ok {
+		// Exact: what was stored after the consumer was made is the backlog's,
+		// acknowledged or not; only what was stored before it has no copy but
+		// the live one.
+		above = start
+	}
 	switch {
 	case err != nil:
 		b.logger.Debug("could not give a shared subscription made while the queue was off its backlog",

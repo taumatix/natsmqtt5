@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -125,8 +126,9 @@ func (q *offlineQueue) sharedConsumer(ctx context.Context, opts *resolved, sub *
 	if parent, ok := topic.ParentSubject(subject); ok {
 		filters = append(filters, queuedSubject(q.prefix, parent))
 	}
-	return q.stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
-		Durable:        sharedConsumerName(opts.StreamPrefix, sub.share, subject),
+	name := sharedConsumerName(opts.StreamPrefix, sub.share, subject)
+	cfg := jetstream.ConsumerConfig{
+		Durable:        name,
 		Description:    "natsmqtt5 shared subscription $share/" + sub.share + "/" + subject,
 		FilterSubjects: filters,
 		DeliverPolicy:  jetstream.DeliverNewPolicy,
@@ -136,7 +138,61 @@ func (q *offlineQueue) sharedConsumer(ctx context.Context, opts *resolved, sub *
 		// (MQTT-5.0 §4.8.2). No member pulling for longer than any session can
 		// be away means every member's session has ended.
 		InactiveThreshold: opts.maxSessionExpiry + time.Minute,
-	})
+	}
+	// An update replaces the metadata, so the start the consumer already
+	// carries is passed back.
+	if existing, err := q.stream.Consumer(ctx, name); err == nil {
+		if v, ok := existing.CachedInfo().Config.Metadata[metaStartSeq]; ok {
+			cfg.Metadata = map[string]string{metaStartSeq: v}
+		}
+	}
+	cons, err := q.stream.CreateOrUpdateConsumer(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return q.noteStart(ctx, cons, cfg), nil
+}
+
+// metaStartSeq is the consumer metadata key holding the stream sequence the
+// consumer started after: every queued message above it is in the group's
+// backlog (or was acknowledged from it), every message at or below it was stored
+// before the consumer and has only its live copy.
+const metaStartSeq = "natsmqtt5-start-seq"
+
+// noteStart records the consumer's start in its metadata while it is known
+// exactly, which is while nothing has been delivered from it: a new consumer's
+// delivered stream sequence is then the stream's last sequence when it was made.
+// Brokers that join the group later read it (consumerStart) to tell a message
+// the group has acknowledged from one stored before the consumer. Racing brokers
+// write the same value. A failure leaves the consumer without it, and so does a
+// broker of an earlier release that updates the consumer (it replaces the
+// metadata): in both cases the start is as if never recorded.
+func (q *offlineQueue) noteStart(ctx context.Context, cons jetstream.Consumer, cfg jetstream.ConsumerConfig) jetstream.Consumer {
+	info := cons.CachedInfo()
+	if info == nil || info.Config.Metadata[metaStartSeq] != "" ||
+		info.Delivered.Consumer != 0 || info.AckFloor.Consumer != 0 || info.NumAckPending != 0 {
+		return cons
+	}
+	cfg.Metadata = map[string]string{metaStartSeq: strconv.FormatUint(info.Delivered.Stream, 10)}
+	if updated, err := q.stream.UpdateConsumer(ctx, cfg); err == nil {
+		return updated
+	}
+	return cons
+}
+
+// consumerStart is the stream sequence a group consumer started after, when its
+// metadata records it.
+func consumerStart(cons jetstream.Consumer) (uint64, bool) {
+	info := cons.CachedInfo()
+	if info == nil {
+		return 0, false
+	}
+	v, ok := info.Config.Metadata[metaStartSeq]
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(v, 10, 64)
+	return n, err == nil
 }
 
 // liveSubject turns the subject of a queued copy back into the subject the
