@@ -533,3 +533,13 @@ With the fix all three faults return (about 35 s for the test; the NATS drain's 
 goroutines (`pullWG`) did not hang with NATS frozen, killed or cut off while one was inside a fetch.
 
 **Left:** `Close` racing the `catchUpAfterReconnect` goroutine, which is not in `b.wg`; no hang seen.
+
+## `Broker.Close` with NATS down while a catch-up read is held can hang
+
+**Blocked by:** nothing; it needs a reproduction.
+
+`TestCloseReturnsWhileACatchUpReadIsHeldAndNATSIsDown` was seen not returning on a macOS runner (PR #246's CI, Go 1.26:
+the test sat 17 minutes until the 20 minute `go test` limit; the other three matrix jobs passed), and once before in a
+test cleanup. It is not a regression of #246 (the test and the code it drives are untouched). `Close` should return
+within the NATS drain's timeout whatever a catch-up read is waiting for; find the goroutine it waits on (the test's
+panic output on the failed job names the stacks) and fix it or bound it.
