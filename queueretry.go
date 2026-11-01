@@ -29,6 +29,10 @@ func (b *Broker) startQueueLoops(q *offlineQueue) {
 	// The interval is read here, on the caller's goroutine: read inside the
 	// loop it races with a later test changing sharedAckWait.
 	go b.holdLoop(sharedAckWait / 3)
+	if b.opts.SharedQoS2 && b.store != nil {
+		b.wg.Add(1)
+		go b.holdOrphans(sharedAckWait / 3)
+	}
 	if q.members != nil {
 		b.wg.Add(1)
 		go b.refreshMembersLoop(q)
@@ -121,6 +125,12 @@ func (b *Broker) giveBacklog(q *offlineQueue, s *session, sub *subscription) {
 	above, err := q.lastSeq(ctx)
 	if info := cons.CachedInfo(); info != nil {
 		above = min(above, info.AckFloor.Stream)
+	}
+	if start, ok := consumerStart(cons); ok {
+		// Exact: what was stored after the consumer was made is the backlog's,
+		// acknowledged or not; only what was stored before it has no copy but
+		// the live one.
+		above = start
 	}
 	switch {
 	case err != nil:

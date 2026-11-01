@@ -11,6 +11,10 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** with `SharedQoS2` on, a client that stays away longer than the group's AckWait (30 s) after its broker was killed no longer finds its QoS 2 message given to another member and then resent to itself [MQTT-4.8.2-4], [MQTT-4.8.2-5]. The surviving brokers keep saying the message is being worked on while the dead broker's attached session record stands (every AckWait/3 they read the session records, so this costs a scan of the bucket per interval, and runs only with `SharedQoS2` and `PersistentSessions`); `SharedHoldLimit` bounds it. Off by default; no new option.
+- **Fixed:** a shared subscription on a broker whose default queue came up late no longer delivers a QoS 2 message a second time from its live copy when the group had already acknowledged it from the backlog [MQTT-4.3.3-2]. A group consumer now records the stream sequence it started after in its metadata (`natsmqtt5-start-seq`), and the late backlog uses it instead of the acknowledgement floor. The consumer's configuration is otherwise unchanged, so brokers of earlier releases in the same fleet keep working; one of them updating the consumer drops the record, and the old check applies again. No new option.
+- `SharedQoS2` stays off by default: granting QoS 2 on `$share/` changes what a v1 client is granted, so turning it on is a decision for a major release (ROADMAP.md, "QoS 2 on shared subscriptions"). No MIGRATION.md change.
+
 ## [1.0.1] - 2026-11-01
 
 Patch release: one data race fixed and outbound Topic Aliases no longer cost bytes on a small client table. No API change; no new option.
