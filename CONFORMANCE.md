@@ -89,6 +89,14 @@ CHANGELOG has the full text.
 - **v0.10.0.** QoS 1 and 2 messages published while a session was disconnected were dropped unless
   `OfflineQueue` was on, while the CONNACK said Session Present=1. The queue is on by default
   whenever the broker uses JetStream. [MQTT-3.1.2-23], [MQTT-4.5.0-1].
+- **Without the offline queue (no JetStream, or `DisableOfflineQueue`), a persistent session
+  could be told Session Present 1 after losing QoS 1 and 2 messages.** The broker now holds them
+  in memory, per session, up to `Options.AwayBufferMessages`, and delivers them in order on
+  resume; a session that overflows is ended and answered with Session Present 0 rather than
+  kept with a gap, so a client told Session Present 1 has been sent everything
+  (`away_buffer_test.go`, `offline_default_test.go`, `offline_test.go`).
+  [MQTT-3.1.2-23], [MQTT-4.5.0-1], [MQTT-3.2.2-3]. The buffer is lost with the process, and a
+  restart answers Session Present 0 (`TestWithoutJetStreamSessionPresentIsTruthful`).
 - **v0.11.0, shared subscriptions.** A disconnected shared-subscription member kept receiving, and
   dropping, its share: QoS 1 and 2 work now goes only to connected members, through a backlog in
   the offline queue [MQTT-4.5.0-1], [MQTT-4.1.0-2]. An unacknowledged QoS 1 message stays in the

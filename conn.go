@@ -201,6 +201,15 @@ type conn struct {
 	closeOnce  sync.Once
 	behindOnce sync.Once
 
+	// sendMu and sealed keep a QoS 1 or 2 message from being queued on a connection that has
+	// finished, when there is no offline queue: finish seals the connection under sendMu after
+	// moving what was waiting to the session (see session.routeAway), and enqueue checks sealed
+	// under the same lock.
+	sendMu sync.Mutex
+	sealed atomic.Bool
+	// unsent are deliveries the delivery goroutine took and did not prepare before the connection ended.
+	unsent []*delivery
+
 	// authMethod is the Authentication Method the CONNECT was accepted with, or
 	// empty when it used none; authIdentity is what the Auther named. reauth and
 	// reauthTimer are an open re-authentication (enhauth.go). Only the reader
@@ -431,12 +440,17 @@ func (c *conn) finish(cause error) {
 	if c.broker.queue.Load() != nil && c.sess.expiry() > 0 {
 		floor := c.awayFloor()
 		a = &floor
-	} else if c.loopStarted.Load() {
-		// No replay position to record, but a successor still resends what the
-		// session holds, and that is only settled once this connection's
-		// delivery goroutine has stopped tracking messages.
-		c.close()
-		<-c.loopDone
+	} else {
+		if c.loopStarted.Load() {
+			// No replay position to record, but a successor still resends what the
+			// session holds, and that is only settled once this connection's
+			// delivery goroutine has stopped tracking messages.
+			c.close()
+			<-c.loopDone
+		}
+		if c.broker.holdsAway() && c.sess.expiry() > 0 {
+			c.sealAndHold()
+		}
 	}
 	c.sess.detach(c, a)
 	c.markEnded()

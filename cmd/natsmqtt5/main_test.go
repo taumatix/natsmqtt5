@@ -184,6 +184,20 @@ func TestCloseBehindClientsFlag(t *testing.T) {
 	assert.False(t, cfg.broker.CloseBehindClients, "off unless asked for")
 }
 
+func TestAwayBufferMessagesFlag(t *testing.T) {
+	cfg, err := parseConfig([]string{"-away-buffer-messages", "50"}, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.Equal(t, 50, cfg.broker.AwayBufferMessages)
+
+	cfg, err = parseConfig(nil, env(map[string]string{"NATSMQTT5_AWAY_BUFFER_MESSAGES": "-1"}), io.Discard)
+	require.NoError(t, err)
+	assert.Equal(t, -1, cfg.broker.AwayBufferMessages)
+
+	cfg, err = parseConfig(nil, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.Zero(t, cfg.broker.AwayBufferMessages, "0 is the default of 1000")
+}
+
 func TestDurablePublishFlag(t *testing.T) {
 	cfg, err := parseConfig([]string{"-durable-publish"}, env(nil), io.Discard)
 	require.NoError(t, err)

@@ -365,6 +365,12 @@ type session struct {
 	disconnectedAt time.Time
 	// discarded marks a session that must not be resumed.
 	discarded bool
+	// away holds the QoS 1 and 2 messages that arrived between connections when the broker has no
+	// offline queue, in arrival order; attach hands them to the next connection. awayLost is set
+	// when one did not fit (or could not be held): the session then cannot be resumed with its
+	// promise kept, so claimForResume refuses it and the client gets Session Present 0.
+	away     []*delivery
+	awayLost bool
 
 	// rec is the durable record backing this session, nil when the broker does
 	// not persist sessions. rev is the JetStream revision this broker's
@@ -421,6 +427,13 @@ func (s *session) attach(c *conn) *conn {
 	}
 	s.conn = c
 	s.disconnectedAt = time.Time{}
+	// What arrived between connections goes ahead of anything the new connection is sent live: it
+	// is queued here, under the lock routeAway takes, before routeAway can name c. The queue is
+	// empty and at least as deep as the buffer is allowed to be.
+	for _, d := range s.away {
+		c.deliveries <- d
+	}
+	s.away = nil
 	// A resumption cancels a delayed Will [MQTT-3.1.3-9]; clearing it here
 	// keeps it cancelled even if this connection ends before the delay does.
 	s.pendingWill = nil
@@ -535,7 +548,7 @@ func (s *session) expiredLocked() bool {
 func (s *session) claimForResume() (resumable bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.expiredLocked() {
+	if s.expiredLocked() || s.awayLost {
 		return false
 	}
 	if s.conn == nil {
