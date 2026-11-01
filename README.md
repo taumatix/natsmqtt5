@@ -533,20 +533,19 @@ What it costs and what it does not cover:
   it is not part of MQTT v5, and a client that does not read it still sees `SessionPresent: true`
   and finds out by not receiving. It is left out when the CONNACK would exceed the client's Maximum
   Packet Size. The unacknowledged messages a dropped filter earned go with the filter.
-- **Clients may use `$` topics unless you restrict them.** MQTT 5.0 §4.7.2 says
+- **Clients may not use `$` topics, unless you allow them (since v1.0.0).** MQTT 5.0 §4.7.2 says
   a server SHOULD prevent clients exchanging messages on topics starting with
-  `$`. By default only `$retained` and `$queue`, where the broker keeps its own
-  data, are refused, so applications using `$app/...` keep working. Set
-  `Options.RestrictDollarTopics`, or `-restrict-dollar-topics` /
-  `NATSMQTT5_RESTRICT_DOLLAR_TOPICS=true`, and a PUBLISH or Will on a `$` topic
-  is refused with Topic Name invalid (0x90) and a subscription to one with Topic
-  Filter invalid (0x8F). `$share/...` stays allowed unless the filter inside it
-  starts with `$`. A subscription a persistent session stored earlier is still
-  resumed.
-- **The Will Message of a killed broker is published only with `-durable-wills`.**
-  Without it a Will belongs to the connection in memory, as before: a broker
-  that shuts down cleanly publishes its clients' Wills, one killed outright does
-  not. See [Durable Will Messages](#durable-will-messages).
+  `$`. A PUBLISH or Will on a `$` topic is refused with Topic Name invalid (0x90)
+  and a subscription to one with Topic Filter invalid (0x8F); `$share/...` stays
+  allowed unless the filter inside it starts with `$`. Applications using
+  `$app/...` keep working with `Options.PinRestrictDollarTopics: natsmqtt5.Ptr(false)`
+  or `-restrict-dollar-topics=false` / `NATSMQTT5_RESTRICT_DOLLAR_TOPICS=false`
+  (`$retained` and `$queue`, where the broker keeps its own data, are refused either way).
+  A subscription a persistent session stored earlier is still resumed.
+- **The Will Message of a killed broker is published by a survivor whenever JetStream is in use
+  (since v1.0.0).** With `-durable-wills=false` (`Options.PinDurableWills: natsmqtt5.Ptr(false)`) a
+  Will belongs to the connection in memory: a broker that shuts down cleanly publishes its
+  clients' Wills, one killed outright does not. See [Durable Will Messages](#durable-will-messages).
 - **A session whose broker was killed outright is resumed whenever its client
   comes back**, however long that takes. Expiry is measured from the moment a
   session is released, and a `kill -9` records no release. A background sweep
@@ -557,8 +556,9 @@ What it costs and what it does not cover:
 
 A Will Message is published by the broker holding the connection, so a broker
 that is killed outright (`kill -9`, a lost machine) takes its clients' Wills
-with it. Set `Options.DurableWills`, or `-durable-wills` /
-`NATSMQTT5_DURABLE_WILLS=true` for the binary, and every connection's Will is
+with it. Since v1.0.0 this is on whenever JetStream is in use (retained messages,
+`PersistentSessions` or `OfflineQueue`); `Options.PinDurableWills` or `-durable-wills[=false]`
+(`NATSMQTT5_DURABLE_WILLS`) chooses either way. Every connection's Will is
 also written to the `<StreamPrefix>_wills` key-value bucket, keyed by connection
 so a reconnect never overwrites its predecessor's record.
 
@@ -600,12 +600,12 @@ outlasted that and the time the owner takes to notice (about 5 times
 only after its client's connection is closed [MQTT-3.1.2-8]. The price is that
 the Will of a broker that really died waits that long longer than it did.
 
-## Deprecated: three defaults that flip in the next major version
+## Three defaults that changed in v1.0.0
 
-Three behaviours are off by default today and will be on by default in the next major version.
-Nothing changes in v0.x; each can be pinned now, either way, with an option that beats the plain
-one. [MIGRATION.md](MIGRATION.md) (a draft) says per flip what changes, who is affected and the
-one setting that keeps the old behaviour.
+Three behaviours are on by default since v1.0.0. Each can be pinned either way with an option that
+beats the plain one, and a pin is the only way to keep the old behaviour (a plain `false` cannot
+turn off what is on by default). [MIGRATION.md](MIGRATION.md) says per change what differs, who is
+affected and the one setting that keeps the old behaviour.
 
 | Behaviour | Pin it with | Binary |
 |---|---|---|
@@ -613,7 +613,6 @@ one setting that keeps the old behaviour.
 | Restricting `$` topics | `Options.PinRestrictDollarTopics` | `-restrict-dollar-topics[=false]` |
 | Outbound topic aliases | `Options.PinOutboundTopicAliases` | `-outbound-topic-aliases[=false]` |
 
-A broker with any of the three neither pinned nor on logs one INFO line per process naming them.
 
 ## What it does not do
 
@@ -679,7 +678,7 @@ one with fewer features:
   CONNECT; the `Authorizer` sees the identity the exchange returns. The `scram` sub-package
   is a ready SCRAM-SHA-256 method (RFC 7677, no channel binding) over a credential lookup
   you supply: `Options.Auther = &scram.Auther{Lookup: ..., OwnsClientID: ...}`.
-- **The broker sends topic aliases only if asked to.** It accepts them from clients always; `Options.OutboundTopicAliases` makes it send them to a client that offered a Topic Alias Maximum (off by default).
+- **The broker sends topic aliases only if asked to.** It accepts them from clients always; Since v1.0.0 it sends them to a client that offered a Topic Alias Maximum; `Options.PinOutboundTopicAliases: natsmqtt5.Ptr(false)` (`-outbound-topic-aliases=false`) sends none.
 - **`Message Expiry Interval` counts whole seconds.** A message is deleted once it
   has waited its whole interval, and one still live goes out with the interval less
   the whole seconds it waited (2 s with 1.3 s waited leaves 1), on every delivery

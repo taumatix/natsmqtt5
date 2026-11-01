@@ -67,7 +67,7 @@ func TestAWillCannotTargetTheBrokersInternalSubjects(t *testing.T) {
 // Other "$" topics are left alone: applications that use them are outside the
 // spec's advice (MQTT-5.0 §4.7.2) but not this fix's business.
 func TestOtherDollarTopicsStillWork(t *testing.T) {
-	addr := startBroker(t, startNATS(t))
+	addr := startBroker(t, startNATS(t), allowDollarTopics)
 	sub := dialRaw(t, addr)
 	sub.connect(rawConnect("dollar-sub", 0))
 	sub.subscribe("$app/x", packet.QoS1)

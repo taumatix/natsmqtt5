@@ -70,7 +70,7 @@ func TestARepeatedTopicIsSentAsAnAliasAndTheLeastRecentlyUsedIsReplaced(t *testi
 
 func TestNoAliasIsSentUnlessTheOptionIsOnAndTheClientOfferedAMaximum(t *testing.T) {
 	t.Run("option off", func(t *testing.T) {
-		addr := startBroker(t, startNATS(t))
+		addr := startBroker(t, startNATS(t), func(o *natsmqtt5.Options) { o.PinOutboundTopicAliases = pin(false) })
 		sub := dialRaw(t, addr)
 		sub.connect(aliasConnect("off-sub", 5))
 		sub.subscribe("alias/#", packet.QoS1)

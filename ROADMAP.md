@@ -88,32 +88,6 @@ for this session" and sends nothing until the next resume, though the cursor did
 the client stays connected would close that. And each SUBSCRIBE now costs a
 stream info request and each 1024 deliveries a filtered read; neither is measured over a clustered, replicated stream.
 
-## Durable Wills on by default
-
-**Blocked by:** a major version (or a minor one behind an opt-in), and a decision to take it.
-
-**Done (v0.14.0, additive):** `Options.PinDurableWills` pins the choice either way (`-durable-wills[=false]`); relying on the implicit
-default is deprecated in the option's doc, the README, the CHANGELOG and the draft `MIGRATION.md`; one INFO line per
-process names the unpinned options. Defaults are unchanged; `pinned_defaults_test.go` proves both settings and the
-unchanged default. **Remaining, in the next major version only:**
-
-- [ ] flip the default: `DurableWills` on whenever JetStream is in use, with a CHANGELOG entry that says so;
-- [ ] delete the "Deprecation notice" paragraph on `Options.DurableWills`, its entry in `noteComingDefaults`
-  (`flipnotice.go`; delete the file with the last one) and the "default becomes true" text in the flag help;
-- [ ] turn this section of the draft `MIGRATION.md` into the real one, and add the CHANGELOG `Changed` line and fix the README;
-- [ ] change the tests that assert the unset default in `pinned_defaults_test.go` to the new default.
-
-**Today:** `DurableWills` is off. Turning it on by default is a behaviour change for every deployment that does not
-set it: the broker would create a bucket, need JetStream where it ran without, hold Will payloads in clear text on
-NATS, and delay the Will of a broker that really died by the survivors' wait (about 5 times `WillCheckInterval`).
-The preconditions this entry named are met: the partition work is tested against a real three-server cluster, and the
-payload's visibility has its answer, a documented requirement (the `Authorizer` cannot see the bucket, so the bucket
-needs the session bucket's NATS permissions; README, "Durable Will Messages").
-
-**Why it waits:** the flip is a major-version change (or a minor one behind an opt-in the deployment sets), not a pass's
-work. **Shape:** at the next major version make it default whenever JetStream is in use and the offline queue or
-sessions already need it, with a CHANGELOG entry that says so; `PinDurableWills` is the opt-out (v0.14.0).
-
 ## DurablePublish does not cover live delivery to subscribers on other brokers
 
 **Blocked by:** real deployments, for what is left: a copy lost while both brokers stay connected has no event
@@ -201,34 +175,6 @@ A shared subscription ends when its last session does (`sharedmembers.go`). What
   at the next message. Closing it would need a deletion that a joining member can veto; JetStream
   has no conditional consumer delete.
 
-## Restricting `$` topics by default
-
-**Blocked by:** a major version (and a `MIGRATION.md` written in that release).
-
-**Done (v0.14.0, additive):** `Options.PinRestrictDollarTopics` pins the choice either way (`-restrict-dollar-topics[=false]`); relying on the implicit
-default is deprecated in the option's doc, the README, the CHANGELOG and the draft `MIGRATION.md`; one INFO line per
-process names the unpinned options. Defaults are unchanged; `pinned_defaults_test.go` proves both settings and the
-unchanged default. **Remaining, in the next major version only:**
-
-- [ ] flip the default: `RestrictDollarTopics` on, and delete the once-per-broker `warnDollarUse` log in `dollar.go` with its test;
-- [ ] delete the "Deprecation notice" paragraph on `Options.RestrictDollarTopics`, its entry in `noteComingDefaults`
-  (`flipnotice.go`; delete the file with the last one) and the "default becomes true" text in the flag help;
-- [ ] turn this section of the draft `MIGRATION.md` into the real one, and add the CHANGELOG `Changed` line and fix the README;
-- [ ] change the tests that assert the unset default in `pinned_defaults_test.go` to the new default.
-
-`Options.RestrictDollarTopics` (opt in) refuses every `$` topic but
-`$share/...`, which is the spec's advice (MQTT-5.0 §4.7.2). Defaulting it on breaks anyone using
-`$app/...`, so it waits for the next major version. The release that logs a warning the first time a client uses a
-`$` topic is done (2026-10-30; once per broker, naming the client, the action and the topic), so what remains is
-the flip itself, with a `MIGRATION.md` written in that release: nothing in this roadmap plans a major version, so
-none is drafted now (a draft is `MIGRATION.md`, v0.14.0). Also still open:
-
-- A session held in a restricted broker's memory cannot hold a `$` filter, so the resume branch that drops one is
-  untested by construction. (The in-flight messages such a filter earned are withdrawn on resume, and a test drives
-  that, 2026-10-30.)
-- The broker publishes nothing of its own on `$SYS`; the option leaves that namespace unused
-  rather than serving it.
-
 ## A message's wait is counted from this broker's receipt, and in whole seconds
 
 **Done (opt-in):** `Options.PublisherClockExpiry` (`-publisher-clock-expiry`, off by default) makes the publishing
@@ -246,24 +192,10 @@ interval of 0 still survives a fraction of a second. Neither limits a deployment
 
 # Tier 4: features MQTT 5 defines that the broker does not offer
 
-## Outbound topic aliases: on by default, and measured
+## Outbound topic aliases thrash against a small client maximum
 
-**Blocked by:** a major version for the default, and real deployments for how clients in the field handle aliases.
-
-**Done (v0.14.0, additive):** `Options.PinOutboundTopicAliases` pins the choice either way (`-outbound-topic-aliases[=false]`); relying on the implicit
-default is deprecated in the option's doc, the README, the CHANGELOG and the draft `MIGRATION.md`; one INFO line per
-process names the unpinned options. Defaults are unchanged; `pinned_defaults_test.go` proves both settings and the
-unchanged default. **Remaining, in the next major version only:**
-
-- [ ] flip the default: `OutboundTopicAliases` on, deciding first the two measured findings below (a floor on the client's maximum, or admit on the second sighting);
-- [ ] delete the "Deprecation notice" paragraph on `Options.OutboundTopicAliases`, its entry in `noteComingDefaults`
-  (`flipnotice.go`; delete the file with the last one) and the "default becomes true" text in the flag help;
-- [ ] turn this section of the draft `MIGRATION.md` into the real one, and add the CHANGELOG `Changed` line and fix the README;
-- [ ] change the tests that assert the unset default in `pinned_defaults_test.go` to the new default.
-
-**Today:** `Options.OutboundTopicAliases` ships off (2026-10-23): a client that offers a Topic Alias Maximum is sent
-aliases when it is on. **Left:** the decision to default it on (a behaviour change for clients that advertise a
-maximum but handle aliases badly: a major version, with a CHANGELOG line).
+**Blocked by:** nothing; a decision and a measurement. Aliases became the default in v1.0.0 and the two findings below were
+not acted on first.
 
 **Measured (2026-10-30, `outalias_measure_internal_test.go`, 100,000 PUBLISHes of a skewed mix: 70% 40-byte telemetry
 names over 400 devices, 15% 21-byte command names, 15% names of 4-6 bytes; real codec, the broker's own table):**
@@ -282,8 +214,11 @@ set the LRU thrashes: a maximum of 1 sends more bytes than no aliases, and raisi
 did at tables of 8 and 32 (22.5% against 19.2%, 40.3% against 38.9%) because the 21-byte names stopped evicting the
 hot 40-byte ones. **Recommendation:** keep `minAliasedTopic` at 8; when it is on by default, send aliases only to a
 client whose maximum is at least 8 (below that the table does not hold a working set), or admit a name to the table on
-its second sighting instead of its first; neither is done. Not measured: CPU of the encode (aliasing encodes twice
-on a miss), and clients in the field that mishandle aliases, which only a trial tells.
+its second sighting instead of its first; neither is done. Not measured: CPU of the encode (aliasing encodes twice on a miss), and clients in the field that mishandle aliases, which only
+a trial tells; v1.0.0 users who see one pin `PinOutboundTopicAliases: Ptr(false)`.
+
+- [ ] send aliases only to a client whose maximum is at least 8, or admit a name to the table on its second sighting, and
+  measure it with the harness above.
 
 ## QoS 2 on shared subscriptions
 

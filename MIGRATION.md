@@ -1,25 +1,23 @@
-# Migrating to the next major version
+# Migrating from v0.x to v1.0.0
 
-**Draft for the next major version.** Nothing here has happened yet: v0.x keeps every default
-described below, and this file says what will change so that you can decide now. It becomes the
-real migration guide when the major version is released, and the deprecation notes in
-`options.go`, the README and the CHANGELOG are deleted in the same release.
+v1.0.0 flips the default of three options, all of which were deprecated in v0.14.0. The Go module
+path is unchanged (`github.com/taumatix/natsmqtt5`, no `/v2`), and no exported identifier was
+removed: the behaviour differs only for a deployment that left these options unset. A deployment
+that pinned all three on v0.14.0 changes nothing.
 
-The next major version flips the default of three options. Each can be pinned today, in any
-v0.14.0 or later release, with a `Pin…` option (or its flag), so a deployment can choose the old
-or the new behaviour before the flip and need not change anything on the day.
-
-| Option | Default today | Default in the next major | Pin it with |
+| Option | v0.x default | v1.0.0 default | Keep the old behaviour with |
 |---|---|---|---|
-| Durable Wills | off | on whenever JetStream is in use | `Options.PinDurableWills`, `-durable-wills[=false]` |
-| Restricting `$` topics | off | on | `Options.PinRestrictDollarTopics`, `-restrict-dollar-topics[=false]` |
-| Outbound topic aliases | off | on | `Options.PinOutboundTopicAliases`, `-outbound-topic-aliases[=false]` |
+| Durable Wills | off | on whenever JetStream is in use | `Options.PinDurableWills: natsmqtt5.Ptr(false)`, `-durable-wills=false` |
+| Restricting `$` topics | off | on | `Options.PinRestrictDollarTopics: natsmqtt5.Ptr(false)`, `-restrict-dollar-topics=false` |
+| Outbound topic aliases | off | on | `Options.PinOutboundTopicAliases: natsmqtt5.Ptr(false)`, `-outbound-topic-aliases=false` |
 
 A pin beats the plain option (`DurableWills`, `RestrictDollarTopics`, `OutboundTopicAliases`) when
-both are set. The binary takes the same settings from `NATSMQTT5_DURABLE_WILLS`,
-`NATSMQTT5_RESTRICT_DOLLAR_TOPICS` and `NATSMQTT5_OUTBOUND_TOPIC_ALIASES`; a variable set to
-`false` pins as well. While none of a deployment's flipping options is pinned or on, each process
-logs one INFO line naming the unpinned ones; pinning them silences it.
+both are set. Because the defaults are now on, the plain bools can no longer say "off": a Go
+program that wrote `DurableWills: false` (or left it out) to mean off must use the pin. The binary
+takes the same settings from `NATSMQTT5_DURABLE_WILLS`, `NATSMQTT5_RESTRICT_DOLLAR_TOPICS` and
+`NATSMQTT5_OUTBOUND_TOPIC_ALIASES`; a variable or flag set either way pins, and one left out leaves
+the v1.0.0 default. The INFO line v0.14.0 logged for unpinned options, and the WARN on the first `$`
+topic use, are gone.
 
 ## Durable Wills on by default
 
@@ -62,6 +60,8 @@ other broker that sends them). Clients that offer no maximum see no change.
 
 ## Checklist before you upgrade
 
-1. Pin all three options to what you run today, on the version you are on now (v0.14.0 or later).
-2. Upgrade to the next major version; nothing should change.
+1. On v0.14.0 or later, pin all three options to what you run today.
+2. Upgrade to v1.0.0; nothing should change.
 3. Unpin one option at a time when you want the new behaviour.
+
+Without step 1, the pins above restore the old behaviour in one line each after the upgrade.

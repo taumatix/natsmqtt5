@@ -3,19 +3,12 @@ package natsmqtt5
 import (
 	"context"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
 )
 
 // Seams for the external tests. They exist only in the test binary.
-
-// ResetFlipNotice makes the once-per-process default-flip notice fire again.
-func ResetFlipNotice(t interface{ Cleanup(func()) }) {
-	flipNotice = sync.Once{}
-	t.Cleanup(func() { flipNotice = sync.Once{} })
-}
 
 // SetSharedFetchHook makes every batch pull of a shared subscription's backlog
 // call f(asked, got) until the test ends. Set it before the broker starts.

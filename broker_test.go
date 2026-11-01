@@ -104,7 +104,7 @@ func TestWildcardSubscriptions(t *testing.T) {
 // "The Server MUST NOT match Topic Filters starting with a wildcard character
 // (# or +) with Topic Names beginning with a $ character" [MQTT-4.7.2-1].
 func TestWildcardDoesNotMatchDollarTopics(t *testing.T) {
-	addr := startBroker(t, startNATS(t))
+	addr := startBroker(t, startNATS(t), allowDollarTopics)
 
 	sub, _ := connectClient(t, addr, connectOpts("sub"))
 	pub, _ := connectClient(t, addr, connectOpts("pub"))

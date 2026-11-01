@@ -158,16 +158,18 @@ func TestBinaryVersion(t *testing.T) {
 func TestDurableWillsFlags(t *testing.T) {
 	cfg, err := parseConfig([]string{"-durable-wills", "-will-check-interval", "2s"}, env(nil), io.Discard)
 	require.NoError(t, err)
-	assert.True(t, cfg.broker.DurableWills)
+	require.NotNil(t, cfg.broker.PinDurableWills)
+	assert.True(t, *cfg.broker.PinDurableWills)
 	assert.Equal(t, 2*time.Second, cfg.broker.WillCheckInterval)
 
 	cfg, err = parseConfig(nil, env(map[string]string{"NATSMQTT5_DURABLE_WILLS": "true"}), io.Discard)
 	require.NoError(t, err)
-	assert.True(t, cfg.broker.DurableWills)
+	require.NotNil(t, cfg.broker.PinDurableWills)
+	assert.True(t, *cfg.broker.PinDurableWills)
 
 	cfg, err = parseConfig(nil, env(nil), io.Discard)
 	require.NoError(t, err)
-	assert.False(t, cfg.broker.DurableWills)
+	assert.Nil(t, cfg.broker.PinDurableWills, "left out: the v1 default (on with JetStream) applies")
 }
 
 func TestCloseBehindClientsFlag(t *testing.T) {
@@ -264,7 +266,7 @@ func TestReconnectCatchUpFlag(t *testing.T) {
 	assert.False(t, cfg.broker.ReconnectCatchUp, "off unless asked for")
 }
 
-// The three defaults that flip in the next major version (MIGRATION.md): a flag or its
+// The three defaults that flipped in v1.0.0 (MIGRATION.md): a flag or its
 // environment variable, given either way, pins the option; left out, it pins nothing.
 func TestFlippingDefaultsCanBePinnedEitherWay(t *testing.T) {
 	for _, tc := range []struct {
@@ -296,26 +298,6 @@ func TestFlippingDefaultsCanBePinnedEitherWay(t *testing.T) {
 			assert.False(t, *tc.pin(cfg), "the environment pins too")
 		})
 	}
-}
-
-func TestOutboundTopicAliasesFlagSetsTheOption(t *testing.T) {
-	cfg, err := parseConfig([]string{"-outbound-topic-aliases"}, env(nil), io.Discard)
-	require.NoError(t, err)
-	assert.True(t, cfg.broker.OutboundTopicAliases)
-}
-
-func TestRestrictDollarTopicsFlag(t *testing.T) {
-	cfg, err := parseConfig([]string{"-restrict-dollar-topics"}, env(nil), io.Discard)
-	require.NoError(t, err)
-	assert.True(t, cfg.broker.RestrictDollarTopics)
-
-	cfg, err = parseConfig(nil, env(map[string]string{"NATSMQTT5_RESTRICT_DOLLAR_TOPICS": "true"}), io.Discard)
-	require.NoError(t, err)
-	assert.True(t, cfg.broker.RestrictDollarTopics)
-
-	cfg, err = parseConfig(nil, env(nil), io.Discard)
-	require.NoError(t, err)
-	assert.False(t, cfg.broker.RestrictDollarTopics)
 }
 
 func TestEscapeNATSWildcardsFlag(t *testing.T) {

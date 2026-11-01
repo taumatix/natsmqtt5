@@ -141,7 +141,7 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 		natsPass        = fs.String("nats-password", "", "NATS password")
 		noRetained      = fs.Bool("no-retained", false, "disable retained messages, so JetStream is not required")
 		persistSess     = fs.Bool("persistent-sessions", false, "keep session state in JetStream, so it survives a restart and moves between brokers")
-		durableWills    = fs.Bool("durable-wills", false, "keep Will Messages in JetStream so the Will of a killed broker is published by a surviving one; the default becomes true in the next major version, so give =false to keep it off")
+		durableWills    = fs.Bool("durable-wills", true, "keep Will Messages in JetStream so the Will of a killed broker is published by a surviving one; on whenever JetStream is in use, give =false to keep Wills in memory")
 		willCheck       = fs.Duration("will-check-interval", 0, "how often to look for Wills whose broker has died, with -durable-wills; 0 means 5s")
 		retainVerify    = fs.Duration("retained-verify-interval", 0, "check every retained message against its stream at least this often, to find a stale entry a short NATS partition left behind; 0 turns it off")
 		checkpoint      = fs.Duration("session-checkpoint-interval", 0, "with -persistent-sessions, how often a connected client's replay position is written to its session record, so a broker that is killed costs a client that long of repeats and not the whole queue; 0 means 1s, negative turns it off")
@@ -155,8 +155,8 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 		natsIngest      = fs.Bool("nats-ingest", false, "take messages plain NATS clients publish on <subject-prefix>.$ingest.<subject> and publish them as an MQTT client's, queue copy included")
 		reconnectCatch  = fs.Bool("reconnect-catch-up", false, "after the broker's NATS connection comes back, send each connected session the QoS 1 and 2 messages published while it was down, from the offline queue")
 		escapeWildcards = fs.Bool("escape-nats-wildcards", false, "accept topics containing *, >, spaces and other whitespace by escaping them in the NATS subject (not readable by nats-server's own MQTT listener; choose before you have data)")
-		restrictDollar  = fs.Bool("restrict-dollar-topics", false, "refuse publishes and subscriptions on topics starting with $ (MQTT 5.0 section 4.7.2), except $share/ subscriptions; the default becomes true in the next major version, so give =false to keep it off")
-		outboundAliases = fs.Bool("outbound-topic-aliases", false, "send Topic Aliases to a client that offers a Topic Alias Maximum; the default becomes true in the next major version, so give =false to keep it off")
+		restrictDollar  = fs.Bool("restrict-dollar-topics", true, "refuse publishes and subscriptions on topics starting with $ (MQTT 5.0 section 4.7.2), except $share/ subscriptions; give =false to allow them")
+		outboundAliases = fs.Bool("outbound-topic-aliases", true, "send Topic Aliases to a client that offers a Topic Alias Maximum; give =false to send none")
 		maxQoS          = fs.Int("max-qos", 2, "highest QoS the broker accepts (0, 1 or 2)")
 		sharedQoS2      = fs.Bool("shared-qos2", false, "grant QoS 2 on shared subscriptions (default grants QoS 1; the guarantee is incomplete, see ROADMAP.md)")
 		pubClock        = fs.Bool("publisher-clock-expiry", false, "count a message's expiry from when the publishing broker received it (trusts synchronised clocks and that only brokers publish on the subjects)")
@@ -240,9 +240,6 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 			StreamPrefix:              *streamPrefix,
 			DisableRetained:           *noRetained,
 			PersistentSessions:        *persistSess,
-			DurableWills:              *durableWills,
-			RestrictDollarTopics:      *restrictDollar,
-			OutboundTopicAliases:      *outboundAliases,
 			PinDurableWills:           pinned("durable-wills", *durableWills),
 			PinRestrictDollarTopics:   pinned("restrict-dollar-topics", *restrictDollar),
 			PinOutboundTopicAliases:   pinned("outbound-topic-aliases", *outboundAliases),

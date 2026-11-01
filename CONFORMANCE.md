@@ -68,8 +68,9 @@ shows the broker refusing or not advertising it the way the specification requir
 - **QoS 2 on shared subscriptions.** A QoS 2 request on a `$share/` filter is granted QoS 1,
   reported in the SUBACK, which [MQTT-3.8.4-7] permits. `Options.SharedQoS2` (off) grants QoS 2 and
   is tested (`shared_qos2_test.go`) but not complete (ROADMAP.md), so the default stays.
-- **Server-to-client Topic Aliases** are off unless `Options.OutboundTopicAliases` is set; the
-  Client's Topic Alias Maximum is what permits them and a Server may use none.
+- **Server-to-client Topic Aliases** are sent since v1.0.0 to a Client that offered a Topic Alias
+  Maximum, which is what permits them; `PinOutboundTopicAliases: Ptr(false)` sends none, which a
+  Server may do.
 - **Statements whose wording a request cannot violate** (for example, "the Server MUST NOT send X
   unless the Client asked for it" when the broker never sends X), which the table also marks
   NOT-APPLICABLE with the reason and the test that shows the premise.
@@ -182,11 +183,11 @@ arrives after a resend carries the same Packet Identifier as the resend's own, s
 it as the copy's; and under 5 bytes no CONNACK fits a Maximum Packet Size, so it is discarded
 [MQTT-3.1.2-25].
 
-One deviation from a SHOULD remains by default. MQTT 5.0 §4.7.2: "The Server SHOULD prevent Clients
-from using such Topic Names to exchange messages with other Clients" (no statement id). The broker
-refuses only the two levels its own data lives under (`$retained`, `$queue`) unless
-`RestrictDollarTopics` is set, because refusing every `$` topic would break applications using
-`$app/...` today; proven by `dollar_topics_test.go`. It is on the roadmap.
+No deviation from a SHOULD remains by default. MQTT 5.0 §4.7.2: "The Server SHOULD prevent Clients
+from using such Topic Names to exchange messages with other Clients" (no statement id). Since v1.0.0
+the broker refuses every `$` topic except `$share/...`; `PinRestrictDollarTopics: Ptr(false)` narrows
+that to the two levels its own data lives under (`$retained`, `$queue`) for applications using
+`$app/...`. Proven by `dollar_topics_test.go` and `pinned_defaults_test.go`.
 
 ## Keeping it current
 
