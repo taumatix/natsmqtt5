@@ -286,6 +286,26 @@ func SetBeforeGroupDelete(t interface {
 	t.Cleanup(func() { beforeGroupDelete.Store(nil) })
 }
 
+// SetShareLockStale changes how old a shared group's lock must be before another
+// broker takes it over, for the rest of the test.
+func SetShareLockStale(t interface {
+	Cleanup(func())
+}, d time.Duration) {
+	was := shareLockStale
+	shareLockStale = d
+	t.Cleanup(func() { shareLockStale = was })
+}
+
+// SetAfterGroupLock makes a leaving session call fn while it holds the group's
+// lock, having found the group empty and before it deletes the consumer, until
+// the test ends.
+func SetAfterGroupLock(t interface {
+	Cleanup(func())
+}, fn func()) {
+	afterGroupLock.Store(&fn)
+	t.Cleanup(func() { afterGroupLock.Store(nil) })
+}
+
 // SetEmptyQueueFetches makes the next n fetches of b's offline-queue reads come
 // back empty, as a loaded server's can.
 func SetEmptyQueueFetches(b *Broker, n int) { b.queue.Load().emptyFetches.Store(int64(n)) }

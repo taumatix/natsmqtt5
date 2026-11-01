@@ -79,6 +79,12 @@ func (q *offlineQueue) joinGroup(ctx context.Context, opts *resolved, s *session
 		if err := q.members.join(ctx, group, s.clientID, s.instance); err != nil {
 			return nil, fmt.Errorf("recording the member of a shared subscription: %w", err)
 		}
+		// Under the group's lock, so that a last leaver either finds the entry just
+		// written or deletes the consumer before this one makes it (endGroup). A lock
+		// that cannot be taken leaves the race as it was; the puller makes the
+		// consumer again if it is deleted.
+		unlock, _ := q.members.lock(ctx, group)
+		defer unlock()
 	}
 	return q.sharedConsumerRetrying(ctx, opts, sub)
 }
@@ -142,8 +148,15 @@ func (q *offlineQueue) sharedConsumer(ctx context.Context, opts *resolved, sub *
 	// An update replaces the metadata, so the start the consumer already
 	// carries is passed back.
 	if existing, err := q.stream.Consumer(ctx, name); err == nil {
-		if v, ok := existing.CachedInfo().Config.Metadata[metaStartSeq]; ok {
+		info := existing.CachedInfo()
+		if v, ok := info.Config.Metadata[metaStartSeq]; ok {
 			cfg.Metadata = map[string]string{metaStartSeq: v}
+		} else if q.members != nil {
+			// A broker of an earlier release updated the consumer and dropped its
+			// start: the copy kept beside it (putStart) puts it back.
+			if v, ok := q.members.start(ctx, name, info.Created); ok {
+				cfg.Metadata = map[string]string{metaStartSeq: v}
+			}
 		}
 	}
 	cons, err := q.stream.CreateOrUpdateConsumer(ctx, cfg)
@@ -173,8 +186,12 @@ func (q *offlineQueue) noteStart(ctx context.Context, cons jetstream.Consumer, c
 		info.Delivered.Consumer != 0 || info.AckFloor.Consumer != 0 || info.NumAckPending != 0 {
 		return cons
 	}
-	cfg.Metadata = map[string]string{metaStartSeq: strconv.FormatUint(info.Delivered.Stream, 10)}
+	start := strconv.FormatUint(info.Delivered.Stream, 10)
+	cfg.Metadata = map[string]string{metaStartSeq: start}
 	if updated, err := q.stream.UpdateConsumer(ctx, cfg); err == nil {
+		if q.members != nil {
+			q.members.putStart(ctx, cfg.Durable, info.Created, start)
+		}
 		return updated
 	}
 	return cons

@@ -2,6 +2,7 @@ package natsmqtt5_test
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -30,7 +31,14 @@ func memberEntries(t *testing.T, natsURL string) int {
 		require.ErrorIs(t, err, jetstream.ErrNoKeysFound)
 		return 0
 	}
-	return len(keys)
+	// Member entries only: the bucket also holds a group's lock and consumer start.
+	members := 0
+	for _, k := range keys {
+		if !strings.HasPrefix(k, "lock.") && !strings.HasPrefix(k, "start.") {
+			members++
+		}
+	}
+	return members
 }
 
 // A refresh that read a subscription before its UNSUBSCRIBE and writes after it
