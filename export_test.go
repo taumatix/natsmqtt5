@@ -414,6 +414,13 @@ func SetMaxReplayHoles(t interface{ Cleanup(func()) }, n int) {
 	t.Cleanup(func() { maxReplayHoles.Store(was) })
 }
 
+// SetCursorIDBound changes how many delivered ids may sit above a session's replay
+// cursor before it is dropped, for the rest of the test.
+func SetCursorIDBound(t interface{ Cleanup(func()) }, n int) {
+	was := cursorIDBound.Swap(int64(n))
+	t.Cleanup(func() { cursorIDBound.Store(was) })
+}
+
 // ReplayCursor is the replay cursor of a session this broker holds and its
 // holes' sequences; 0 when it has none.
 func ReplayCursor(b *Broker, clientID string) (next uint64, holes []uint64) {

@@ -191,8 +191,8 @@ func (s *session) setCursorLocked(next uint64) {
 // again. A late copy noted under the cursor's rule, which the ids kept without
 // it cannot make safe, is forgotten as the rule without it would have done.
 // s.mu is held; next changes without s.cursorMu, which is safe in this
-// direction: a live copy that reads the old next only notes a hole that the
-// cleared map no longer holds.
+// direction: a live copy reads next under s.mu, so it sees the cursor, and
+// its hole is cleared with it, or sees none.
 func (s *session) dropCursorLocked() {
 	s.cur.next = 0
 	s.cur.holes, s.cur.holeAt = nil, nil
@@ -246,12 +246,11 @@ func (s *session) noteLiveCopy(seq uint64, id string) {
 	if s == nil || seq == 0 {
 		return
 	}
+	// cursorMu orders this against a scan's move, as applyScan does (cursorMu,
+	// then mu). next is read under mu too: dropCursorLocked changes it holding
+	// mu alone, and reading it under cursorMu only was a data race with it.
 	s.cursorMu.Lock()
-	next := s.cur.next
-	s.cursorMu.Unlock()
-	if next == 0 || seq >= next {
-		return
-	}
+	defer s.cursorMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.cur.next != 0 && seq < s.cur.next {

@@ -491,14 +491,21 @@ most of them; these remain, each with why:
   drops: the highest-sequence ones, which are the newest and the likeliest to be redelivered. Keeping
   the newest instead would trade one repeat for another. The chunks moved the cap from 4096 to 69632 ids; a session
   without a cursor that delivers more within the rewind still repeats.
-- **The replay cursor's bounds and its race with a live copy.** That a cursor is dropped past 16384 ids above it,
-  that a record which left ids out carries none, and that a live copy arriving below the cursor while a scan moves it
-  becomes a hole (`noteLiveCopy` under `cursorMu`) are unit tests (`cursor_internal_test.go`). The hole bound, the
-  restart after it and a live copy below a restarted cursor's base are driven over a socket (`replay_cursor_test.go`,
-  the bound lowered by a hook); the restart's other refusals (a message held below base, a scan longer than the
-  rewind, a subscription made while it read) are unit tests and the randomized model
-  (`cursor_model_internal_test.go`), which drives the session's code with scans applied after other events, not the
-  broker's goroutines.
+- **The replay cursor's bounds and its race with a live copy: driven end to end since 2026-11-01 except one instant**
+  (`cursor_bounds_test.go`, bounds lowered by `SetCursorIDBound` and `SetStoredDeliveredBound`). A cursor dropped past
+  its bound of ids above it (16384 in production, 5 in the test) leaves the connected session without one, and a
+  message whose live copy never came and is older than the rewind is then not replayed, where with the bound at its
+  default it is [MQTT-4.4.0-1]; a record that left ids out carries no cursor, logs the warning, and the broker that
+  restores it replays from the time rewind. That the bound is 16384 is `TestTooManyIDsAboveTheCursorDropIt`'s alone.
+  The hole bound, the restart after it and a live copy below a restarted cursor's base were driven already
+  (`replay_cursor_test.go`). Still unit tests: a live copy arriving below the cursor in the instant a scan moves it
+  (`noteLiveCopy` under `cursorMu`, `cursor_internal_test.go`), which needs a hook in `scanOnce` to hold a scan between
+  its read and its apply; a live copy after the apply is a hole already and is driven; add the hook when a bug is
+  suspected there. The restart's other refusals (a message held below base, a scan longer than the rewind, a
+  subscription made while it read) are unit tests and the randomized model (`cursor_model_internal_test.go`), which
+  drives the session's code with scans applied after other events, not the broker's goroutines. The new test found a
+  data race in `noteLiveCopy` (it read the cursor under `cursorMu` while `dropCursorLocked` wrote it under `mu`), fixed
+  with it.
 - **Driven end to end since 2026-11-01: the offline queue on a broker without JetStream.** A QoS 1 message
   published while a session is away is held in memory, bounded by `AwayBufferMessages`, and delivered on resume;
   an overflowing session is ended and answered with Session Present 0 [MQTT-3.1.2-23], [MQTT-4.5.0-1]
