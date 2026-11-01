@@ -11,8 +11,16 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-01
+
+Minor release: two duplicate-delivery windows of shared QoS 2 closed, `Broker.Close` joins its shared pull goroutines, and a Paho interoperability record. No API change; no new option. `SharedQoS2` is unchanged and still off by default.
+
+Install: `go get github.com/taumatix/natsmqtt5@v1.1.0`.
+
 - **Fixed:** with `SharedQoS2` on, a client that stays away longer than the group's AckWait (30 s) after its broker was killed no longer finds its QoS 2 message given to another member and then resent to itself [MQTT-4.8.2-4], [MQTT-4.8.2-5]. The surviving brokers keep saying the message is being worked on while the dead broker's attached session record stands (every AckWait/3 they read the session records, so this costs a scan of the bucket per interval, and runs only with `SharedQoS2` and `PersistentSessions`); `SharedHoldLimit` bounds it. Off by default; no new option.
 - **Fixed:** a shared subscription on a broker whose default queue came up late no longer delivers a QoS 2 message a second time from its live copy when the group had already acknowledged it from the backlog [MQTT-4.3.3-2]. A group consumer now records the stream sequence it started after in its metadata (`natsmqtt5-start-seq`), and the late backlog uses it instead of the acknowledgement floor. The consumer's configuration is otherwise unchanged, so brokers of earlier releases in the same fleet keep working; one of them updating the consumer drops the record, and the old check applies again. No new option.
+- **Fixed:** `Broker.Close` now waits for every shared-subscription pull goroutine to finish; one could outlive `Close` and keep reading after it returned. The fetch test hook is now per broker, not a package-level variable. No API change.
+- **Docs:** `conformance/PAHO.md` records an Eclipse Paho MQTT 5 interoperability run against v1.0.1: 22 of 27 client tests pass, and the other five are the suite's assumptions about its reference broker, not broker bugs.
 - `SharedQoS2` stays off by default: granting QoS 2 on `$share/` changes what a v1 client is granted, so turning it on is a decision for a major release (ROADMAP.md, "QoS 2 on shared subscriptions"). No MIGRATION.md change.
 
 ## [1.0.1] - 2026-11-01
