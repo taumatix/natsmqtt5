@@ -13,7 +13,6 @@ honestly be reconstructed now.
 
 - **Tests:** shared QoS 2 over a real three-server NATS cluster with replicated streams and buckets: a message whose session record cannot be written goes to a member on another server and is not sent twice, a PUBREL whose record cannot be written is completed after the client reconnects to another server, and a message held for a killed broker's client is completed by it on another server. No product change, no API change.
 
-||||||| parent of 911fe31 (test: drive the restart scan's three refusals over a socket; close the unit-only entry)
 - **Tests:** the last statements covered only by unit tests are driven over real sockets against a real NATS server: the three cases in which the scan that restarts a dropped replay cursor throws its result away (it outlived the rewind, a subscription was made while it read, the connection holds a message below its base) [MQTT-4.4.0-1] (`cursor_restart_refusals_test.go`). `SetScanGate` (test-only) now also holds a restart scan. No API change.
 
 ## [1.2.0] - 2026-11-01
