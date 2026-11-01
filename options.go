@@ -351,6 +351,34 @@ type Options struct {
 	// permissions on the ingest subject decide who may use it. Off by default,
 	// and then nothing listens on the subject.
 	NATSIngest bool
+	// QueuePlainPublishes queues a message a plain NATS client publishes straight
+	// on a live subject, <SubjectPrefix>.<subject>, when its Mqtt5-Qos header is 1
+	// or 2. Off by default. Such a message otherwise reaches the sessions
+	// subscribed to it and no queue: a session that was away never gets it, and a
+	// shared subscription gets it only through its NATS queue group, which can pick
+	// a member whose client is away. With the option on, every subscription ignores
+	// it as a live copy, and one broker (a NATS queue group on <SubjectPrefix>.>)
+	// takes it and does what NATSIngest does: checks the topic and QoS as a
+	// PUBLISH's, stores a retained message, keeps the queue copy and publishes the
+	// live copy again with Mqtt5-Msg-Id and Mqtt5-Queue-Seq. Only a broker with an
+	// offline queue acts on it. A plain NATS subscriber therefore sees such a
+	// message twice, the original and the broker's copy, which carries the
+	// Mqtt5-Msg-Id header to tell them apart. A message with no Mqtt5-Qos header,
+	// or QoS 0, a subject starting with $ and a message that already has an id are
+	// not touched. Nothing answers the publisher: use NATSIngest to be told the
+	// outcome.
+	//
+	// Three more effects, all only with the option on. The broker liveness subject
+	// moves from <SubjectPrefix>.$broker.<id>.ping to <SubjectPrefix>$broker.<id>.ping,
+	// out of reach of the subscription on <SubjectPrefix>.> (which would turn a dead
+	// broker's immediate "no responders" into a timeout); restricted NATS permissions
+	// must allow the new subject, and brokers sharing a bucket must agree on the
+	// option, so do not mix on and off brokers when DurableWills or
+	// PersistentSessions is on. A JetStream publish to a missing offline-queue
+	// stream, which fails at once with "no responders" otherwise, waits for its
+	// timeout (a durable publish is refused up to 5 s later). And brokers sharing a
+	// SubjectPrefix must all agree on it.
+	QueuePlainPublishes bool
 	// ReconnectCatchUp makes a connected session get the QoS 1 and 2 messages
 	// published while this broker's NATS connection was down. Live delivery is
 	// core NATS: a broker that has lost its connection has no interest on the

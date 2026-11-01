@@ -135,11 +135,11 @@ type willLease struct {
 // safe to act on — the failure the roadmap warned about was announcing a live
 // client as dead.
 type willStore struct {
-	kv            jetstream.KeyValue
-	nc            *nats.Conn
-	logger        *slog.Logger
-	subjectPrefix string
-	checkEvery    time.Duration
+	kv         jetstream.KeyValue
+	nc         *nats.Conn
+	logger     *slog.Logger
+	pingBase   string
+	checkEvery time.Duration
 
 	owner string
 	ping  *nats.Subscription
@@ -209,17 +209,17 @@ func newWillStore(ctx context.Context, js jetstream.JetStream, nc *nats.Conn, op
 		every = defaultWillCheckInterval
 	}
 	w := &willStore{
-		kv:            kv,
-		nc:            nc,
-		logger:        logger.With("will_bucket", bucket, "will_instance", owner),
-		subjectPrefix: opts.SubjectPrefix,
-		checkEvery:    every,
-		owner:         owner,
-		publish:       publish,
-		fence:         fence,
-		closing:       closing,
-		silentSince:   map[string]time.Time{},
-		index:         map[string]willRef{},
+		kv:          kv,
+		nc:          nc,
+		logger:      logger.With("will_bucket", bucket, "will_instance", owner),
+		pingBase:    livenessBase(opts.SubjectPrefix, opts.QueuePlainPublishes),
+		checkEvery:  every,
+		owner:       owner,
+		publish:     publish,
+		fence:       fence,
+		closing:     closing,
+		silentSince: map[string]time.Time{},
+		index:       map[string]willRef{},
 	}
 	w.sweepAfter.Store(int64(defaultWillSweepAfter))
 	w.selfEvery = every / 2
@@ -236,7 +236,7 @@ func newWillStore(ctx context.Context, js jetstream.JetStream, nc *nats.Conn, op
 	w.selfTimeout = min(ownerPingTimeout, max(every, minProbeTimeout))
 	w.waitOut = w.fenceAfter + w.selfEvery + 2*w.selfTimeout
 	w.retryFor = 2*w.waitOut + willOpTimeout
-	if w.ping, err = nc.Subscribe(brokerPingSubject(opts.SubjectPrefix, owner), replyEmpty); err != nil {
+	if w.ping, err = nc.Subscribe(brokerPingSubject(livenessBase(opts.SubjectPrefix, opts.QueuePlainPublishes), owner), replyEmpty); err != nil {
 		return nil, fmt.Errorf("subscribing to the Will liveness subject: %w", err)
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
@@ -608,7 +608,7 @@ func (w *willStore) reachable(ctx context.Context) bool {
 	}
 	ctx, cancel := context.WithTimeout(ctx, w.selfTimeout)
 	defer cancel()
-	if _, err := w.nc.RequestWithContext(ctx, brokerPingSubject(w.subjectPrefix, w.owner), nil); err != nil {
+	if _, err := w.nc.RequestWithContext(ctx, brokerPingSubject(w.pingBase, w.owner), nil); err != nil {
 		return false
 	}
 	// A write, not a read. Every replica of the bucket answers a read, so a broker whose NATS
@@ -654,7 +654,7 @@ func (w *willStore) adoptOrphans(ctx context.Context) {
 		if !known {
 			// One request, not two: silence has to last waitOut across checks
 			// before anything is adopted, which is the confirmation.
-			up = brokerAnswers(listCtx, w.nc, w.subjectPrefix, l.owner)
+			up = brokerAnswers(listCtx, w.nc, w.pingBase, l.owner)
 			alive[l.owner] = up
 		}
 		seen[l.owner] = true
@@ -769,7 +769,7 @@ func (w *willStore) ownerAlive(ctx context.Context, owner string) bool {
 				return true
 			}
 		}
-		if brokerAnswers(ctx, w.nc, w.subjectPrefix, owner) {
+		if brokerAnswers(ctx, w.nc, w.pingBase, owner) {
 			return true
 		}
 	}
@@ -777,10 +777,10 @@ func (w *willStore) ownerAlive(ctx context.Context, owner string) bool {
 }
 
 // brokerAnswers sends one liveness request to a broker instance.
-func brokerAnswers(ctx context.Context, nc *nats.Conn, prefix, owner string) bool {
+func brokerAnswers(ctx context.Context, nc *nats.Conn, base, owner string) bool {
 	ctx, cancel := context.WithTimeout(ctx, ownerPingTimeout)
 	defer cancel()
-	_, err := nc.RequestWithContext(ctx, brokerPingSubject(prefix, owner), nil)
+	_, err := nc.RequestWithContext(ctx, brokerPingSubject(base, owner), nil)
 	return err == nil
 }
 

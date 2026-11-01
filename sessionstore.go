@@ -333,7 +333,7 @@ type sessionStore struct {
 	// maxSessionExpiry is how long a record owned by an unreachable broker is
 	// kept before the sweep may reclaim it.
 	maxSessionExpiry time.Duration
-	subjectPrefix    string
+	pingBase         string
 	// queueMaxAge is how far back the offline queue reaches, which is how far a
 	// session left attached by a dead broker has to be replayed from.
 	queueMaxAge time.Duration
@@ -383,13 +383,13 @@ func newSessionStore(ctx context.Context, js jetstream.JetStream, nc *nats.Conn,
 		nc:               nc,
 		logger:           logger.With("session_bucket", bucket, "broker_instance", owner),
 		maxSessionExpiry: opts.maxSessionExpiry,
-		subjectPrefix:    opts.SubjectPrefix,
+		pingBase:         livenessBase(opts.SubjectPrefix, opts.QueuePlainPublishes),
 		queueMaxAge:      opts.OfflineQueueMaxAge,
 		owner:            owner,
 		onLost:           onLost,
 	}
 
-	if s.ping, err = nc.Subscribe(brokerPingSubject(opts.SubjectPrefix, owner), replyEmpty); err != nil {
+	if s.ping, err = nc.Subscribe(brokerPingSubject(livenessBase(opts.SubjectPrefix, opts.QueuePlainPublishes), owner), replyEmpty); err != nil {
 		return nil, fmt.Errorf("subscribing to the broker liveness subject: %w", err)
 	}
 
@@ -406,11 +406,24 @@ func newSessionStore(ctx context.Context, js jetstream.JetStream, nc *nats.Conn,
 
 func replyEmpty(m *nats.Msg) { _ = m.Respond(nil) }
 
-// brokerPingSubject is where a broker instance answers liveness checks. It sits
-// under the shared subject prefix, so it is reachable from every broker sharing
-// the bucket and nowhere near MQTT traffic.
-func brokerPingSubject(prefix, owner string) string {
-	return prefix + ".$broker." + owner + ".ping"
+// livenessBase is the subject, up to the instance id, where brokers answer liveness
+// checks. It is "<prefix>.$broker." as in v1.1.0, so a mixed v1.1/v1.2 fleet agrees.
+// With Options.QueuePlainPublishes it is "<prefix>$broker.", a sibling of the prefix
+// ("mqtt$broker.<id>.ping" for "mqtt"): the queue group that takes plain NATS
+// publishes (plainpublish.go) subscribes to everything under the prefix, and a
+// subscription that matched the ping subject would turn the immediate "no
+// responders" a dead broker gives into a timeout, slowing every Will adoption and
+// session takeover. Brokers sharing a bucket must agree on the option.
+func livenessBase(prefix string, moved bool) string {
+	if moved {
+		return prefix + "$broker."
+	}
+	return prefix + ".$broker."
+}
+
+// brokerPingSubject is where a broker instance answers liveness checks.
+func brokerPingSubject(base, owner string) string {
+	return base + owner + ".ping"
 }
 
 // sessionKey encodes a Client Identifier into a key-value key. A Client
@@ -1469,7 +1482,7 @@ func (s *sessionStore) reclaimable(ctx context.Context, rec *sessionRecord, entr
 
 // ownerAlive reports whether the named broker instance answers.
 func (s *sessionStore) ownerAlive(ctx context.Context, owner string) bool {
-	return brokerAnswers(ctx, s.nc, s.subjectPrefix, owner)
+	return brokerAnswers(ctx, s.nc, s.pingBase, owner)
 }
 
 func (s *sessionStore) close() {

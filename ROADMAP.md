@@ -152,6 +152,27 @@ client that does not set DUP is still queued twice, and the live copy is sent ag
 subscriber can see it twice (QoS 1 allows both). A client-chosen User Property id is still the only way to cover
 those, and is not built.
 
+# Decisions for a major version
+
+## Enable SharedQoS2 and QueuePlainPublishes by default (a v2 decision, to be discussed)
+
+**Blocked by:** a decision, and a major version.
+
+Both options ship opt-in in v1.2.0. Flipping them to on by default changes what existing deployments see, so it
+needs a v2.0.0 (module path `/v2`) and a `MIGRATION.md` "v1 to v2" section. The finished preparation (module path,
+both defaults flipped with `PinSharedQoS2` / `PinQueuePlainPublishes` to turn them back off, tests, docs) lives on
+the branch `release/v2-prep` (PR #240); keep that branch.
+
+What flipping would change for users:
+
+- **`SharedQoS2` on:** a QoS 2 request on a `$share/` filter is granted QoS 2 in the SUBACK, not QoS 1, and members are
+  sent QoS 2 through the four-step exchange. A shared QoS 1 message held for a dead session stays held until
+  `SharedHoldLimit` instead of going back to the group after the AckWait. With `PersistentSessions` the brokers read
+  the session records every AckWait/3.
+- **`QueuePlainPublishes` on:** a plain NATS subscriber sees a queued message twice (the original without
+  `Mqtt5-Msg-Id`, then the broker's copy with one); the liveness subject would move for everyone, so v1.x and v2
+  brokers could not share a fleet with `DurableWills` or `PersistentSessions`, and NATS ACLs must allow the new subject.
+
 # Tier 3: SHOULD statements
 
 ## A held shared message: the killed-broker window and the packet identifier

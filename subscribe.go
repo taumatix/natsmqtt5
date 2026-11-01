@@ -295,6 +295,12 @@ func (c *conn) bindNATS(sub *subscription) error {
 	sub.cell = cell
 	handler := func(msg *nats.Msg) {
 		defer c.broker.liveSeen.Add(1)
+		if c.broker.heldForQueue(msg) {
+			// A plain publish that asked for a queue copy (Options.QueuePlainPublishes): a
+			// broker publishes it again with its id and sequence, and that copy is the one
+			// delivered.
+			return
+		}
 		// The newest subscription for the filter delivers: a client that
 		// subscribed again has replaced this one, and the message must reach it
 		// anyway [MQTT-3.8.4-4].

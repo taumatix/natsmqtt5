@@ -152,6 +152,7 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 		offlineMaxAge   = fs.Duration("offline-queue-max-age", 24*time.Hour, "how long a queued message is kept for a disconnected session")
 		durableDedupe   = fs.Bool("durable-publish-dedupe", false, "with -durable-publish, let the queue stream drop the copy a client's retry of a refused publish would add (inside its duplicate window)")
 		durablePub      = fs.Bool("durable-publish", false, "acknowledge QoS 1 and 2 publishes only once the offline queue has stored them and NATS has confirmed the live copy (implies -offline-queue)")
+		queuePlain      = fs.Bool("queue-plain-publishes", false, "queue a message a plain NATS client publishes on a live subject with an Mqtt5-Qos header of 1 or 2, by having a broker publish it again with an id; plain subscribers see it twice, the broker liveness subject moves to <subject-prefix>$broker.<id>.ping (allow it in NATS permissions), and every broker must agree on this setting")
 		natsIngest      = fs.Bool("nats-ingest", false, "take messages plain NATS clients publish on <subject-prefix>.$ingest.<subject> and publish them as an MQTT client's, queue copy included")
 		reconnectCatch  = fs.Bool("reconnect-catch-up", false, "after the broker's NATS connection comes back, send each connected session the QoS 1 and 2 messages published while it was down, from the offline queue")
 		escapeWildcards = fs.Bool("escape-nats-wildcards", false, "accept topics containing *, >, spaces and other whitespace by escaping them in the NATS subject (not readable by nats-server's own MQTT listener; choose before you have data)")
@@ -258,6 +259,7 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 			OfflineQueueMaxAge:        *offlineMaxAge,
 			MaximumQoS:                natsmqtt5.Ptr(uint8(*maxQoS)),
 			SharedQoS2:                *sharedQoS2,
+			QueuePlainPublishes:       *queuePlain,
 			PublisherClockExpiry:      *pubClock,
 			ServerKeepAlive:           uint16(*keepAlive),
 		},
