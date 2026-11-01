@@ -6,14 +6,14 @@ MQTT-1.5.5-1	1.5.5 Variable Byte Integer	CS	TESTED	met		TestConformance_MQTT_4_1
 MQTT-1.5.7-1	1.5.7 UTF-8 String Pair	CS	TESTED	met		TestUTF8StringPair_MQTT_1_5_7_1
 MQTT-2.1.3-1	2.1.3 Flags	CS	TESTED	met		TestFixedHeaderFlags_MQTT_2_1_3_1 TestFixedHeaderReservedFlags
 MQTT-2.2.1-2	2.2.1 Packet Identifier	CS	TESTED	met		TestPacketIdentifier_MQTT_2_2_1_2
-MQTT-2.2.1-3	2.2.1 Packet Identifier	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-2.2.1-3	2.2.1 Packet Identifier	C	TESTED	met		TestPacketIdentifier_MQTT_2_2_1_3_APacketIdentifierOfZeroClosesTheConnection
 MQTT-2.2.1-4	2.2.1 Packet Identifier	S	TESTED	met		TestAWithdrawnIdentifierSurvivesABrokerRestart_MQTT_4_4_0_1_MQTT_2_2_1_4 TestAWithdrawnPacketIdentifierIsReusableAfterTheSecondResumption_MQTT_2_2_1_4 TestPacketIdentifier_MQTT_2_2_1_4
 MQTT-2.2.1-5	2.2.1 Packet Identifier	CS	TESTED	met		TestPacketIdentifier_MQTT_2_2_1_5
 MQTT-2.2.1-6	2.2.1 Packet Identifier	S	TESTED	met		TestPacketIdentifier_MQTT_2_2_1_6
 MQTT-2.2.2-1	2.2.2.1 Property Length	CS	TESTED	met		TestPacketIdentifier_MQTT_2_2_1_6 TestPropertyLength_MQTT_2_2_2_1
-MQTT-3.1.0-1	3.1 CONNECT – Connection Request	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.0-1	3.1 CONNECT – Connection Request	C	TESTED	met		TestConnect_MQTT_3_1_0_1_AFirstPacketThatIsNotConnectClosesTheConnection
 MQTT-3.1.0-2	3.1 CONNECT – Connection Request	S	TESTED	met		TestConformance_MQTT_4_13_1_1_MalformedPacketsAndProtocolErrorsCloseTheConnection TestConnect_MQTT_3_1_0_2
-MQTT-3.1.2-1	3.1.2.1 Protocol Name	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.2-1	3.1.2.1 Protocol Name	C	TESTED	met		TestConnect_MQTT_3_1_2_1_AWrongProtocolNameIsRefusedAndTheConnectionClosed
 MQTT-3.1.2-2	3.1.2.2 Protocol Version	S	TESTED	met		TestConnect_MQTT_3_1_2_2 TestConnectWrongProtocolVersion
 MQTT-3.1.2-3	3.1.2.3 Connect Flags	S	TESTED	met		TestConnect_MQTT_3_1_2_3
 MQTT-3.1.2-4	3.1.2.4 Clean Start	CS	TESTED	met		TestCleanStartDiscardsTheStoredSession TestPersistentSessionIsDiscardedByCleanStart
@@ -23,16 +23,16 @@ MQTT-3.1.2-7	3.1.2.5 Will Flag	S	TESTED	met		TestMQTT_3_1_2_8_KillNineOfTheBroke
 MQTT-3.1.2-8	3.1.2.5 Will Flag	S	TESTED	met		TestMQTT_3_1_2_8_ABrokerCutOffFromNATSClosesItsClientsBeforeTheirWillIsPublished TestMQTT_3_1_2_8_ACleanStartTakeoverPublishesTheOldWillOnly TestMQTT_3_1_2_8_ANewConnectionWithoutAWillCancelsTheOldOne TestMQTT_3_1_2_8_CleanStartAfterAKillEndsTheSessionAndPublishes TestMQTT_3_1_2_8_KillNineOfTheBrokerBinaryPublishesItsWill (+5 more)
 MQTT-3.1.2-9	3.1.2.5 Will Flag	C	TESTED	met		TestMQTT_3_1_2_10_NormalDisconnectLeavesNothingForASurvivor
 MQTT-3.1.2-10	3.1.2.5 Will Flag	S	TESTED	met		TestMQTT_3_1_2_10_AReplacedWillLeavesNoStoredRecordBehind TestMQTT_3_1_2_10_NormalDisconnectLeavesNothingForASurvivor TestMQTT_3_1_2_10_WillIsPublishedOnceAcrossBrokers
-MQTT-3.1.2-11	3.1.2.6 Will QoS	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-3.1.2-12	3.1.2.6 Will QoS	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-3.1.2-13	3.1.2.7 Will Retain	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.2-11	3.1.2.6 Will QoS	C	TESTED	met		TestConnect_MQTT_3_1_2_11_12_13_WillQoSAndRetainFollowTheWillFlag
+MQTT-3.1.2-12	3.1.2.6 Will QoS	C	TESTED	met		TestConnect_MQTT_3_1_2_11_12_13_WillQoSAndRetainFollowTheWillFlag
+MQTT-3.1.2-13	3.1.2.7 Will Retain	C	TESTED	met		TestConnect_MQTT_3_1_2_11_12_13_WillQoSAndRetainFollowTheWillFlag
 MQTT-3.1.2-14	3.1.2.7 Will Retain	S	TESTED	met		TestWillRetain_MQTT_3_1_2_14
 MQTT-3.1.2-15	3.1.2.7 Will Retain	S	TESTED	met		TestWillRetain_MQTT_3_1_2_15
-MQTT-3.1.2-16	3.1.2.8 User Name Flag	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-3.1.2-17	3.1.2.8 User Name Flag	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-3.1.2-18	3.1.2.9 Password Flag	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-3.1.2-19	3.1.2.9 Password Flag	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-3.1.2-20	3.1.2.10 Keep Alive	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.2-16	3.1.2.8 User Name Flag	C	TESTED	met		TestConnect_MQTT_3_1_2_16_17_18_19_UserNameAndPasswordPresenceFollowTheirFlags
+MQTT-3.1.2-17	3.1.2.8 User Name Flag	C	TESTED	met		TestConnect_MQTT_3_1_2_16_17_18_19_UserNameAndPasswordPresenceFollowTheirFlags
+MQTT-3.1.2-18	3.1.2.9 Password Flag	C	TESTED	met		TestConnect_MQTT_3_1_2_16_17_18_19_UserNameAndPasswordPresenceFollowTheirFlags
+MQTT-3.1.2-19	3.1.2.9 Password Flag	C	TESTED	met		TestConnect_MQTT_3_1_2_16_17_18_19_UserNameAndPasswordPresenceFollowTheirFlags
+MQTT-3.1.2-20	3.1.2.10 Keep Alive	C	TESTED	met		TestConnect_MQTT_3_1_2_20_AClientThatNeverSendsAPingreqIsDisconnected
 MQTT-3.1.2-21	3.1.2.10 Keep Alive	C	TESTED	met		TestKeepAliveTimeoutDisconnectsASilentClient
 MQTT-3.1.2-22	3.1.2.10 Keep Alive	S	TESTED	met		TestConnack_MQTT_3_2_2_22 TestKeepAliveTimeoutDisconnectsASilentClient
 MQTT-3.1.2-23	3.1.2.11.2 Session Expiry Interval	CS	TESTED	met		TestAResumedSessionSurvivesTheSweepAndItsClockRestarts_MQTT_3_1_2_23 TestAnExpiredDetachedSessionLosesItsNATSSubscriptions_MQTT_3_1_2_23 TestAnExpiredSessionIsNotDeliveredToAfterTheSweep_MQTT_3_1_2_23 TestTheSweepDoesNotTouchAConnectedSessionOrAZeroIntervalOne_MQTT_3_1_2_23 TestTheSweepExpiresAtTheCappedIntervalNotTheRequestedOne_MQTT_3_1_2_23 (+6 more)
@@ -42,19 +42,19 @@ MQTT-3.1.2-26	3.1.2.11.5 Topic Alias Maximum	S	TESTED	met		TestARetainedMessageS
 MQTT-3.1.2-27	3.1.2.11.5 Topic Alias Maximum	S	TESTED	met		TestARetainedMessageServedToASubscriberCarriesNoTopicAlias
 MQTT-3.1.2-28	3.1.2.11.6 Request Response Information	S	TESTED	met		TestRequestResponseInformation_MQTT_3_1_2_28
 MQTT-3.1.2-29	3.1.2.11.7 Request Problem Information	S	TESTED	met		TestRequestProblemInformation_MQTT_3_1_2_29
-MQTT-3.1.2-30	3.1.2.11.9 Authentication Method	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-3.1.3-1	3.1.3 CONNECT Payload	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.2-30	3.1.2.11.9 Authentication Method	C	TESTED	met		TestEnhancedAuth_MQTT_3_1_2_30_APacketOtherThanAuthBeforeTheConnackIsRefused
+MQTT-3.1.3-1	3.1.3 CONNECT Payload	C	TESTED	met		TestConnect_MQTT_3_1_3_1_AReorderedConnectPayloadIsMalformed
 MQTT-3.1.3-2	3.1.3.1 Client Identifier (ClientID)	CS	TESTED	met		TestClientID_MQTT_3_1_3_2
-MQTT-3.1.3-3	3.1.3.1 Client Identifier (ClientID)	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-3.1.3-4	3.1.3.1 Client Identifier (ClientID)	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.3-3	3.1.3.1 Client Identifier (ClientID)	C	TESTED	met		TestConnect_MQTT_3_1_3_3_ACONNECTWithoutAClientIdentifierFieldIsMalformed
+MQTT-3.1.3-4	3.1.3.1 Client Identifier (ClientID)	C	TESTED	met		TestConnect_MQTT_3_1_3_4_11_12_TheStringsOfTheConnectPayloadMustBeUTF8
 MQTT-3.1.3-5	3.1.3.1 Client Identifier (ClientID)	S	TESTED	met		TestClientID_MQTT_3_1_3_5
 MQTT-3.1.3-6	3.1.3.1 Client Identifier (ClientID)	S	TESTED	met		TestAssignedClientIdentifier
 MQTT-3.1.3-7	3.1.3.1 Client Identifier (ClientID)	S	TESTED	met		TestAssignedClientIdentifier
 MQTT-3.1.3-8	3.1.3.1 Client Identifier (ClientID)	S	TESTED	met		TestClientID_MQTT_3_1_3_8
 MQTT-3.1.3-9	3.1.3.2.2 Will Delay Interval	S	TESTED	met		TestMQTT_3_1_2_8_TheOldConnectionsEndLeavesTheNewConnectionsWill TestMQTT_3_1_3_9_ABriefPauseOfNATSClosesNothingAndPublishesNothing TestMQTT_3_1_3_9_ReconnectCancelsTheWillOfAKilledBroker
 MQTT-3.1.3-10	3.1.3.2.8 User Property	S	TESTED	met		TestWillProperties_MQTT_3_1_3_10
-MQTT-3.1.3-11	3.1.3.3 Will Topic	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-3.1.3-12	3.1.3.5 User Name	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.1.3-11	3.1.3.3 Will Topic	C	TESTED	met		TestConnect_MQTT_3_1_3_4_11_12_TheStringsOfTheConnectPayloadMustBeUTF8
+MQTT-3.1.3-12	3.1.3.5 User Name	C	TESTED	met		TestConnect_MQTT_3_1_3_4_11_12_TheStringsOfTheConnectPayloadMustBeUTF8
 MQTT-3.1.4-1	3.1.4 CONNECT Actions	S	TESTED	met		TestConnectActions_MQTT_3_1_4_1
 MQTT-3.1.4-2	3.1.4 CONNECT Actions	S	TESTED	met		TestConnectActions_MQTT_3_1_4_2
 MQTT-3.1.4-3	3.1.4 CONNECT Actions	S	TESTED	met		TestAStaleWriteOfTheSessionRecordIsNotATakeover TestATakeoverInTheMiddleOfAStoredRecordResumeKeepsTheSessionsSubscriptions TestArrearsFollowASessionTakenOverByALiveConnection TestPersistentCleanStartOnAnotherBrokerDisplacesTheOldConnection TestPersistentSessionMovesToAnotherLiveBroker (+2 more)
@@ -66,24 +66,24 @@ MQTT-3.2.0-2	3.2 CONNACK – Connect acknowledgement	S	TESTED	met		TestConnack_M
 MQTT-3.2.2-1	3.2.2.1 Connect Acknowledge Flags	S	TESTED	met		TestConnackAcknowledgeFlagsReservedBitsAreZero_MQTT_3_2_2_1
 MQTT-3.2.2-2	3.2.2.1.1 Session Present	S	TESTED	met		TestConnectActions_MQTT_3_1_4_4 TestWithoutJetStreamSessionPresentIsTruthful
 MQTT-3.2.2-3	3.2.2.1.1 Session Present	S	TESTED	met		TestAResumedSessionSurvivesTheSweepAndItsClockRestarts_MQTT_3_1_2_23 TestAnExpiredDetachedSessionLosesItsNATSSubscriptions_MQTT_3_1_2_23 TestASessionRecordWithoutTheReplayPositionIsResumedFromItsReleaseTime TestATakeoverInTheMiddleOfAStoredRecordResumeKeepsTheSessionsSubscriptions TestAnExpiredSharedMemberComesBackWithoutASession (+3 more)
-MQTT-3.2.2-4	3.2.2.1.1 Session Present	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-3.2.2-5	3.2.2.1.1 Session Present	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.2.2-4	3.2.2.1.1 Session Present	C	CLIENT-ONLY	n/a		no Server behaviour to observe: the Client alone closes on a Session Present it did not expect
+MQTT-3.2.2-5	3.2.2.1.1 Session Present	C	CLIENT-ONLY	n/a		no Server behaviour to observe: the Client alone discards its own Session State
 MQTT-3.2.2-6	3.2.2.1.1 Session Present	S	TESTED	met		TestConformance_MQTT_4_12_0_1_AnUnsupportedAuthenticationMethodIsRefusedAndClosed TestConnackAcknowledgeFlagsReservedBitsAreZero_MQTT_3_2_2_1 TestConnack_MQTT_3_2_2_6
 MQTT-3.2.2-7	3.2.2.2 Connect Reason Code	S	TESTED	met		TestMQTT_3_2_2_16_AnAssignedClientIdentifierIsNeverDroppedToFit TestAnAuthenticatorCodeOutsideTable31IsSentAsUnspecifiedError TestAnOversizeConnackLosesItsReasonStringAndIsStillSent
 MQTT-3.2.2-8	§3.2.2 (label appears only in Appendix B)	S	TESTED	met		TestRestrictedBrokerRefusesAWillOnADollarTopic_MQTT_5_0_4_7_2
 MQTT-3.2.2-9	3.2.2.3.4 Maximum QoS	S	TESTED	met		TestConnack_MQTT_3_2_2_9
 MQTT-3.2.2-10	3.2.2.3.4 Maximum QoS	S	TESTED	met		TestMaximumQoSIsAdvertisedAndEnforced
-MQTT-3.2.2-11	3.2.2.3.4 Maximum QoS	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.2.2-11	3.2.2.3.4 Maximum QoS	C	TESTED	met		TestConnack_MQTT_3_2_2_11_APublishAboveTheMaximumQoSClosesTheConnection
 MQTT-3.2.2-12	3.2.2.3.4 Maximum QoS	S	TESTED	met		TestConnack_MQTT_3_2_2_12
 MQTT-3.2.2-13	3.2.2.3.5 Retain Available	S	TESTED	met		TestConnack_MQTT_3_2_2_13 TestRetainedMessagesCanBeDisabled
-MQTT-3.2.2-14	3.2.2.3.5 Retain Available	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-3.2.2-15	3.2.2.3.6 Maximum Packet Size	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.2.2-14	3.2.2.3.5 Retain Available	C	TESTED	met		TestConnack_MQTT_3_2_2_14_ARetainedPublishToABrokerWithoutRetainClosesTheConnection
+MQTT-3.2.2-15	3.2.2.3.6 Maximum Packet Size	C	TESTED	met		TestConnack_MQTT_3_2_2_15_APacketBeyondTheMaximumPacketSizeClosesTheConnection
 MQTT-3.2.2-16	3.2.2.3.7 Assigned Client Identifier	S	TESTED	met		TestConnack_MQTT_3_2_2_16 TestMQTT_3_1_2_24_ASuccessConnackFitsASmallMaximumPacketSize TestMQTT_3_2_2_16_AnAssignedClientIdentifierIsNeverDroppedToFit
-MQTT-3.2.2-17	3.2.2.3.8 Topic Alias Maximum	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-3.2.2-18	3.2.2.3.8 Topic Alias Maximum	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.2.2-17	3.2.2.3.8 Topic Alias Maximum	C	TESTED	met		TestPublish_MQTT_3_3_2_9_3_2_2_17_18_ATopicAliasBeyondTheMaximumClosesTheConnection
+MQTT-3.2.2-18	3.2.2.3.8 Topic Alias Maximum	C	TESTED	met		TestPublish_MQTT_3_3_2_9_3_2_2_17_18_ATopicAliasBeyondTheMaximumClosesTheConnection
 MQTT-3.2.2-19	3.2.2.3.9 Reason String	S	TESTED	met		TestAnOversizeConnackLosesItsReasonStringAndIsStillSent
 MQTT-3.2.2-20	3.2.2.3.10 User Property	S	TESTED	met		TestAConnackNeverCarriesUserProperties_MQTT_3_2_2_20
-MQTT-3.2.2-21	3.2.2.3.14 Server Keep Alive	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.2.2-21	3.2.2.3.14 Server Keep Alive	C	TESTED	met		TestKeepAliveTimeoutDisconnectsASilentClient
 MQTT-3.2.2-22	3.2.2.3.14 Server Keep Alive	S	TESTED	met		TestConnack_MQTT_3_2_2_22
 MQTT-3.3.1-1	3.3.1.1 DUP	CS	TESTED	met		TestAnAckThatLandsWhileAResendIsBeingWrittenDoesNotDisconnectTheClient_MQTT_4_4_0_1 TestMQTT_3_3_4_9_AnAckThatOvertookAResendDoesNotFreeTheCopysSlot TestPublish_MQTT_3_3_1_1 TestAConnectionDroppedDuringTheResumeReplayStillGetsTheRest TestAKilledBrokersQoS2PublishSentJustBeforeTheKillIsResentNotRepeated (+8 more)
 MQTT-3.3.1-2	3.3.1.1 DUP	CS	TESTED	met		TestConformance_MQTT_4_13_1_1_MalformedPacketsAndProtocolErrorsCloseTheConnection TestPublish_MQTT_3_3_1_2
@@ -106,8 +106,8 @@ MQTT-3.3.2-5	3.3.2.3.3 Message Expiry Interval`	S	TESTED	met		TestExpiryCatchUpD
 MQTT-3.3.2-6	3.3.2.3.3 Message Expiry Interval`	S	TESTED	met		TestExpiryCatchUpDecrementsAndDeletes TestExpiryLivePathDecrementsAndDeletesWhileWaitingForSendQuota TestExpiryOfflineQueueReplayDecrementsAndDeletes TestExpiryResendCarriesTheRemainingIntervalAndDropsAnExpiredQoS1 TestExpiryRetainedMessagesCountFromStorage (+2 more)
 MQTT-3.3.2-7	3.3.2.3.4 Topic Alias	CS	TESTED	met		TestPublish_MQTT_3_3_2_7
 MQTT-3.3.2-8	3.3.2.3.4 Topic Alias	CS	TESTED	met		TestPublish_MQTT_3_3_2_8
-MQTT-3.3.2-9	3.3.2.3.4 Topic Alias	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-3.3.2-10	3.3.2.3.4 Topic Alias	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.3.2-9	3.3.2.3.4 Topic Alias	C	TESTED	met		TestPublish_MQTT_3_3_2_9_3_2_2_17_18_ATopicAliasBeyondTheMaximumClosesTheConnection
+MQTT-3.3.2-10	3.3.2.3.4 Topic Alias	C	TESTED	met		TestPublish_MQTT_3_3_2_10_TheBrokerNeverAssignsAnAliasAboveTheClientsMaximum
 MQTT-3.3.2-11	3.3.2.3.4 Topic Alias	S	TESTED	met		TestARetainedMessageServedToASubscriberCarriesNoTopicAlias
 MQTT-3.3.2-12	3.3.2.3.4 Topic Alias	S	TESTED	met		TestMQTT_3_1_2_24_ASuccessConnackFitsASmallMaximumPacketSize TestMQTT_3_3_2_12_ATopicAliasMaximumLeftOutOfTheConnackIsZero TestPublish_MQTT_3_3_2_12
 MQTT-3.3.2-13	3.3.2.3.5 Response Topic	CS	TESTED	met		TestPublish_MQTT_3_3_2_13_and_19
@@ -125,7 +125,7 @@ MQTT-3.3.4-4	3.3.4 PUBLISH Actions	S	NOT-APPLICABLE	n/a		vacuous: the broker nev
 MQTT-3.3.4-5	3.3.4 PUBLISH Actions	S	TESTED	met		TestPublish_MQTT_3_3_4_3_and_5
 MQTT-3.3.4-6	3.3.4 PUBLISH Actions	CS	TESTED	met		TestAClientPublishWithASubscriptionIdentifierIsAProtocolError
 MQTT-3.3.4-7	3.3.4 PUBLISH Actions	CS	TESTED	met		TestMQTT_3_3_4_ReceiveMaximumExceededIsDisconnected0x93 TestMQTT_3_3_4_ExactlyReceiveMaximumUnacknowledgedIsAllowed TestMQTT_4_9_APubcompFreesTheSlot TestMQTT_4_9_APubrecWithAnErrorFreesTheSlot TestMQTT_3_3_4_QoS1InARowIsNeverOverTheLimit TestMQTT_3_2_2_3_3_QoS0IsNeverCounted TestMQTT_3_3_4_AResentQoS2PublishTakesNoSlot
-MQTT-3.3.4-8	3.3.4 PUBLISH Actions	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.3.4-8	3.3.4 PUBLISH Actions	C	CLIENT-ONLY	n/a		no Server behaviour to observe: a Client that delays other packets only slows itself
 MQTT-3.3.4-9	3.3.4 PUBLISH Actions	S	TESTED	met		TestMQTT_3_3_4_9_AnAckThatOvertookAResendDoesNotFreeTheCopysSlot TestPublish_MQTT_3_3_4_9
 MQTT-3.3.4-10	3.3.4 PUBLISH Actions	S	TESTED	met		TestPublish_MQTT_3_3_4_10
 MQTT-3.4.2-1	3.4.2.1 PUBACK Reason Code	CS	TESTED	met		TestPuback_MQTT_3_4_2_1_and_Pubrec_MQTT_3_5_2_1
@@ -142,7 +142,7 @@ MQTT-3.7.2-1	3.7.2.1 PUBCOMP Reason Code	CS	TESTED	met		TestPubcomp_MQTT_3_7_2_1
 MQTT-3.7.2-2	3.7.2.2.2 Reason String	CS	TESTED	met		TestPubcomp_MQTT_3_7_2_2_and_3
 MQTT-3.7.2-3	3.7.2.2.3 User Property	CS	TESTED	met		TestPubcomp_MQTT_3_7_2_2_and_3
 MQTT-3.8.1-1	3.8.1 SUBSCRIBE Fixed Header	S	TESTED	met		TestConformance_MQTT_4_13_1_1_MalformedPacketsAndProtocolErrorsCloseTheConnection TestReservedFlags_MQTT_3_6_1_1_3_8_1_1_3_10_1_1 TestSubscribeMatchesSpecExample
-MQTT-3.8.3-1	3.8.3 SUBSCRIBE Payload	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.8.3-1	3.8.3 SUBSCRIBE Payload	C	TESTED	met		TestSubscribe_MQTT_3_8_3_1_3_10_3_1_AFilterThatIsNotUTF8IsMalformed
 MQTT-3.8.3-2	3.8.3 SUBSCRIBE Payload	C	TESTED	met		TestConformance_MQTT_4_13_1_1_MalformedPacketsAndProtocolErrorsCloseTheConnection
 MQTT-3.8.3-3	3.8.3.1 Subscription Options	S	TESTED	met		TestSubscribe_MQTT_3_8_3_3 TestNoLocal
 MQTT-3.8.3-4	3.8.3.1 Subscription Options	C	TESTED	met		TestNoLocalOnASharedSubscriptionIsAProtocolErrorThatClosesTheConnection
@@ -160,7 +160,7 @@ MQTT-3.9.2-2	3.9.2.1.3 User Property	S	TESTED	met		TestSuback_MQTT_3_9_2_1_and_2
 MQTT-3.9.3-1	3.9.3 SUBACK Payload	S	TESTED	met		TestSubscribe_MQTT_3_8_4_5_and_6_and_Suback_MQTT_3_9_3_1_and_2
 MQTT-3.9.3-2	3.9.3 SUBACK Payload	S	TESTED	met		TestSubscribe_MQTT_3_8_4_5_and_6_and_Suback_MQTT_3_9_3_1_and_2 TestNoLocalOnASharedSubscriptionIsAProtocolErrorThatClosesTheConnection
 MQTT-3.10.1-1	3.10.1 UNSUBSCRIBE Fixed Header	S	TESTED	met		TestConformance_MQTT_4_13_1_1_MalformedPacketsAndProtocolErrorsCloseTheConnection TestReservedFlags_MQTT_3_6_1_1_3_8_1_1_3_10_1_1
-MQTT-3.10.3-1	3.10.3 UNSUBSCRIBE Payload	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-3.10.3-1	3.10.3 UNSUBSCRIBE Payload	C	TESTED	met		TestSubscribe_MQTT_3_8_3_1_3_10_3_1_AFilterThatIsNotUTF8IsMalformed
 MQTT-3.10.3-2	3.10.3 UNSUBSCRIBE Payload	C	TESTED	met		TestConformance_MQTT_4_13_1_1_MalformedPacketsAndProtocolErrorsCloseTheConnection
 MQTT-3.10.4-1	3.10.4 UNSUBSCRIBE Actions	S	TESTED	met		TestUnsubscribe_MQTT_3_10_4_1
 MQTT-3.10.4-2	3.10.4 UNSUBSCRIBE Actions	S	TESTED	met		TestUnsubscribe_MQTT_3_10_4_2
@@ -212,11 +212,11 @@ MQTT-4.3.3-13	4.3.3 QoS 2: Exactly once delivery	CS	TESTED	met		TestConformance_
 MQTT-4.4.0-1	4.4 Message delivery retry	CS	TESTED	met		TestAWithdrawnIdentifierOnlyAcceptsTheAcknowledgementItIsOwed_MQTT_4_4_0_1 TestACopyWhoseLiveCopyNeverCameIsReplayedFromTheCursor_MQTT_4_4_0_1 TestALateCopyBelowMoreThan8192LaterSequencesIsStillReplayed_MQTT_4_4_0_1 TestAWithdrawnIdentifierSurvivesABrokerRestart_MQTT_4_4_0_1_MQTT_2_2_1_4 TestAnAckThatLandsWhileAResendIsBeingWrittenDoesNotDisconnectTheClient_MQTT_4_4_0_1 TestAConnectionDroppedDuringTheResumeReplayStillGetsTheRest TestADisplacedConnectionsAckOfAResentMessageDoesNotCostItsSuccessor (+43 more)
 MQTT-4.4.0-2	4.4 Message delivery retry	CS	TESTED	met		TestARefusedMessageIsNotResent
 MQTT-4.5.0-1	4.5 Message receipt	S	TESTED	met		TestADisconnectedSharedMemberStopsTakingWork TestAKilledBrokersBehindClientGetsWhatItHadNotAcknowledged TestAKilledBrokersClientIsNotSentWhatItAlreadyGotAgain TestASessionRecordWithoutTheReplayPositionIsResumedFromItsReleaseTime TestTheOfflineQueueIsOnByDefault
-MQTT-4.5.0-2	4.5 Message receipt	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-4.6.0-1	4.6 Message ordering	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-4.6.0-2	4.6 Message ordering	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-4.6.0-3	4.6 Message ordering	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-4.6.0-4	4.6 Message ordering	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-4.5.0-2	4.5 Message receipt	C	CLIENT-ONLY	n/a		no Server behaviour to observe: a Client that withholds an acknowledgement is the Receive Maximum case, tested under its own ids
+MQTT-4.6.0-1	4.6 Message ordering	C	CLIENT-ONLY	n/a		no Server behaviour to observe: the Server does not judge the order of a Client retransmissions
+MQTT-4.6.0-2	4.6 Message ordering	C	CLIENT-ONLY	n/a		the Server accepts acknowledgements in any order and the specification gives it no error to raise
+MQTT-4.6.0-3	4.6 Message ordering	C	CLIENT-ONLY	n/a		the Server accepts acknowledgements in any order and the specification gives it no error to raise
+MQTT-4.6.0-4	4.6 Message ordering	C	CLIENT-ONLY	n/a		the Server accepts acknowledgements in any order and the specification gives it no error to raise
 MQTT-4.6.0-5	4.6 Message ordering	S	TESTED	met		TestARecordTooLargeForAValueStillResendsEveryInflightMessage TestArrearsComeBeforeMessagesPublishedSince TestResendsKeepTheOriginalOrder TestUnacknowledgedReturnsTheOrderMessagesWereSentIn TestWithdrawnFilterTakesItsUnacknowledgedMessagesWithIt (+1 more)
 MQTT-4.6.0-6	4.6 Message ordering	S	TESTED	met		TestAClientThatFallsBehindLosesNothing TestCatchingUpWithSeveralPublishersDeliversEachOnce TestResendsKeepTheOriginalOrder
 MQTT-4.7.0-1	4.7.1 Topic wildcards	CS	TESTED	met		TestConformance_MQTT_4_7_0_1_WildcardsAreRefusedInATopicName
@@ -238,16 +238,16 @@ MQTT-4.9.0-2	4.9 Flow Control	CS	TESTED	met		TestResendsRespectASmallerReceiveMa
 MQTT-4.9.0-3	4.9 Flow Control	CS	TESTED	met		TestConformance_MQTT_4_9_0_3_PacketsAreStillProcessedWhileTheQuotaIsZero
 MQTT-4.12.0-1	4.12 Enhanced authentication	S	TESTED	met		TestConformance_MQTT_4_12_0_1_AnUnsupportedAuthenticationMethodIsRefusedAndClosed TestEnhancedAuth_MQTT_4_12_0_1_UnsupportedMethodStillRefusedWithAnAuther
 MQTT-4.12.0-2	4.12 Enhanced authentication	S	TESTED	met		TestEnhancedAuth_MQTT_4_12_0_2_and_5_ExchangeEndsInAConnackNamingTheMethod
-MQTT-4.12.0-3	4.12 Enhanced authentication	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-4.12.0-3	4.12 Enhanced authentication	C	TESTED	met		TestEnhancedAuth_MQTT_4_12_0_3_AReplyOtherThanContinueEndsTheExchange
 MQTT-4.12.0-4	4.12 Enhanced authentication	S	TESTED	met		TestEnhancedAuth_MQTT_4_12_0_4_RejectionAtAnyPointIsAConnackAndAClose TestConformance_MQTT_4_12_0_1_AnUnsupportedAuthenticationMethodIsRefusedAndClosed
 MQTT-4.12.0-5	4.12 Enhanced authentication	CS	TESTED	met		TestEnhancedAuth_MQTT_4_12_0_2_and_5_ExchangeEndsInAConnackNamingTheMethod TestEnhancedAuth_MQTT_4_12_1_Reauthentication
 MQTT-4.12.0-6	4.12 Enhanced authentication	S	TESTED	met		TestConformance_MQTT_4_12_0_6_NoAuthPacketOrMethodWithoutAnAuthenticationMethod TestEnhancedAuth_MQTT_4_12_0_7_AuthWithoutAMethodInTheConnectIsAProtocolError
-MQTT-4.12.0-7	4.12 Enhanced authentication	C	CLIENT-ONLY	n/a		binds only a Client
-MQTT-4.12.1-1	4.12.1 Re-authentication	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-4.12.0-7	4.12 Enhanced authentication	C	TESTED	met		TestEnhancedAuth_MQTT_4_12_0_7_AnAuthPacketWithoutAnAuthenticationMethodIsAProtocolError
+MQTT-4.12.1-1	4.12.1 Re-authentication	C	TESTED	met		TestEnhancedAuth_MQTT_4_12_1_1_AReauthenticationWithAnotherMethodIsRefused
 MQTT-4.12.1-2	4.12.1 Re-authentication	CS	TESTED	met		TestEnhancedAuth_MQTT_4_12_1_ReauthenticationFailureDisconnects TestEnhancedAuth_ReauthenticationAsAnotherIdentityRechecksTheSubscriptions TestEnhancedAuth_ReauthenticationAsAnotherIdentityFailsClosedWhenTheCheckCannotRun TestEnhancedAuth_AStalledReauthenticationIsDropped
 MQTT-4.13.1-1	4.13.1 Malformed Packet and Protocol Errors	S	TESTED	met		TestConformance_MQTT_4_13_1_1_MalformedPacketsAndProtocolErrorsCloseTheConnection TestAClientPublishWithASubscriptionIdentifierIsAProtocolError TestAResponseTopicWithWildcardsIsAProtocolError TestAWillWithAResponseTopicWithWildcardsIsRefusedAtConnect TestNoLocalOnASharedSubscriptionIsAProtocolErrorThatClosesTheConnection TestMQTT_3_3_4_ReceiveMaximumExceededIsDisconnected0x93
 MQTT-4.13.2-1	4.13.2 Other errors	CS	TESTED	met		TestConformance_MQTT_4_13_2_1_AnErrorReasonCodeAlwaysClosesTheConnection
 MQTT-6.0.0-1	6 Using WebSocket as a network transport	CS	TESTED	met		TestConformance_MQTT_6_0_0_1_ATextFrameClosesTheConnection TestAWebSocketClientAndATCPClientExchangeMessagesBothWays
 MQTT-6.0.0-2	6 Using WebSocket as a network transport	CS	TESTED	met		TestConformance_MQTT_6_0_0_2_PacketsNeedNotAlignWithFrames
-MQTT-6.0.0-3	6 Using WebSocket as a network transport	C	CLIENT-ONLY	n/a		binds only a Client
+MQTT-6.0.0-3	6 Using WebSocket as a network transport	C	TESTED	met		TestAWebSocketUpgradeWithoutTheMQTTSubprotocolIsRefused
 MQTT-6.0.0-4	6 Using WebSocket as a network transport	S	TESTED	met		TestAWebSocketUpgradeWithoutTheMQTTSubprotocolIsRefused TestAWebSocketClientAndATCPClientExchangeMessagesBothWays

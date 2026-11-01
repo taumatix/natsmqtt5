@@ -463,7 +463,10 @@ func TestKeepAliveZeroDoesNotExpireTheConnection(t *testing.T) {
 }
 
 // The broker closes a connection that goes quiet for longer than 1.5 times the
-// negotiated Keep Alive [MQTT-3.1.2-22].
+// negotiated Keep Alive [MQTT-3.1.2-22]. The Keep Alive it negotiates is its own
+// Server Keep Alive when it sends one, which "the Client MUST use ... instead of
+// the Keep Alive value the Client sent on CONNECT" [MQTT-3.2.2-21]: a Client that
+// keeps to its own 60 s instead is cut off after 1.5 s.
 func TestKeepAliveTimeoutDisconnectsASilentClient(t *testing.T) {
 	addr := startBroker(t, startNATS(t), func(o *natsmqtt5.Options) {
 		o.ServerKeepAlive = 1 // the broker overrides the client's request

@@ -29,14 +29,14 @@ from the table between the markers and checked against it
 
 | Class | Meaning | Count |
 |---|---|---|
-| TESTED | a test drives the broker (or the codec) and cites the statement | 209 |
+| TESTED | a test drives the broker (or the codec) and cites the statement | 240 |
 | NOT-APPLICABLE | behind a feature the broker does not offer, or cannot be violated by a request | 4 |
-| CLIENT-ONLY | binds only a Client, and no test of the broker cites it | 39 |
+| CLIENT-ONLY | binds only a Client, and no test of the broker cites it | 8 |
 
 | Verdict | Count |
 |---|---|
-| met | 209 |
-| n/a | 43 |
+| met | 240 |
+| n/a | 12 |
 | VIOLATED | 0 |
 | UNSURE | 0 |
 
@@ -66,7 +66,12 @@ shows the broker refusing or not advertising it the way the specification requir
 - **Statements whose wording a request cannot violate** (for example, "the Server MUST NOT send X
   unless the Client asked for it" when the broker never sends X), which the table also marks
   NOT-APPLICABLE with the reason and the test that shows the premise.
-- **Statements that bind only a Client** are CLIENT-ONLY: nothing a Server does can break them.
+- **Statements that bind only a Client** are CLIENT-ONLY when the Server has nothing to observe or
+  refuse: eight remain (a Client closing on an unexpected Session Present, a Client delaying its
+  own packets, a Client acknowledging or retransmitting in order), and each row says why. The other
+  31 that once sat here are TESTED: where a Client's violation reaches the Server as a Malformed
+  Packet or a Protocol Error, the test sends the bytes and holds the broker to the CONNACK or
+  DISCONNECT and the close that §4.13.1 [MQTT-4.13.1-1] and §3.1.4 require.
 
 The broker does not promise more than this list. Optional behaviour a SHOULD asks for and the
 broker lacks is on the roadmap (for example `$` topics by default, a client over its Receive
