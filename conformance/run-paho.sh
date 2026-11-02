@@ -17,6 +17,7 @@
 #   WORK_DIR   binaries, JetStream stores and the suite's output (default: a temporary directory)
 #   --write    print a fresh expectations table (reasons blank) instead of comparing
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
 PAHO_SHA=fdab9d2b1ce125385135e5d9f282a0ad315268cc
 root=$(cd "$(dirname "$0")/.." && pwd)
