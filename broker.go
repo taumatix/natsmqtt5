@@ -50,6 +50,11 @@ type Broker struct {
 	// pullWG counts the goroutines pulling a shared subscription's backlog, so
 	// Close can wait for them to stop.
 	pullWG sync.WaitGroup
+	// catchUpWG counts the catch-ups after a NATS reconnect (catchUpAfterReconnect), so Close
+	// can wait for them before it lets go of the queue and the connection they read.
+	catchUpWG sync.WaitGroup
+	// catchUpHook, when set, is called as a catch-up starts. A seam for tests.
+	catchUpHook atomic.Pointer[func()]
 	// pullers is how many of them are running, for tests.
 	pullers atomic.Int64
 	// publishFlushGate, when set, is called by a durable publish between the
@@ -371,6 +376,10 @@ func (b *Broker) Close() error {
 	// A pull blocked in JetStream returns once its connection is closed, or
 	// within sharedPullWait for a connection the caller keeps.
 	b.pullWG.Wait()
+	// A catch-up after a NATS reconnect can sit inside a JetStream read that retries while its
+	// connection is down (a killed server), which only closing the connection ends; so it is
+	// waited for here, after closeNATS, as the pulls are.
+	b.catchUpWG.Wait()
 	return nil
 }
 

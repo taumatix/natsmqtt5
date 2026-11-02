@@ -99,3 +99,23 @@ func TestARecordThatLeftIDsOutCarriesNoCursorAndTheRewindIsAllThatIsLeft_MQTT_4_
 	assert.True(t, strings.Contains(r.logs.String(), "the session record keeps only some of the delivered message ids"), "the release warned")
 	assert.Empty(t, r.resume(addrB), "[MQTT-4.4.0-1] replayed from the time rewind, which starts after the message")
 }
+
+// The wait before the drop is measured from the newest delivery too: when the
+// deliveries after the withheld message take longer than the rewind's reach, as
+// they do on a loaded machine, the last of them must not end up inside it.
+func TestARecordThatLeftIDsOutDoesNotReplayWhatWasDeliveredLateInTheRewindSpan_MQTT_4_4_0_1(t *testing.T) {
+	natsmqtt5.SetCursorScanAfter(t, math.MaxInt32)
+	natsmqtt5.SetStoredDeliveredBound(t, 5)
+	natsURL := startNATS(t)
+	r := newCursorRig(t, natsURL, "cur-late", packet.QoS2)
+	addrB := startBroker(t, natsURL, persistentWithQueue, rewindOf(cursorRewind))
+	awaitCursor(t, r)
+
+	r.sendWithheld("lost")
+	r.deliverMany(6)
+	time.Sleep(natsmqtt5.CheckpointSkew + 2*cursorRewind) // the slow part of a loaded run
+	r.deliverMany(6)
+	r.dropPastTheRewind()
+
+	assert.Empty(t, r.resume(addrB), "everything delivered is older than the rewind's reach when the session ends")
+}

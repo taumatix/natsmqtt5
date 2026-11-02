@@ -487,3 +487,28 @@ func ReplayCursor(b *Broker, clientID string) (next uint64, holes []uint64) {
 func PullingGoroutines(b *Broker) int {
 	return int(b.pullers.Load())
 }
+
+// SetCatchUpHook makes every catch-up after a NATS reconnect on b call f as it starts. nil removes it.
+func SetCatchUpHook(b *Broker, f func()) {
+	if f == nil {
+		b.catchUpHook.Store(nil)
+		return
+	}
+	b.catchUpHook.Store(&f)
+}
+
+// NATSLostAndBack runs what the broker does when its NATS connection drops and returns, without
+// dropping it.
+func NATSLostAndBack(b *Broker) {
+	b.natsLost()
+	b.natsBack()
+}
+
+// SetFenceProbeFault makes the Will store's fence probe fail while f returns an error. nil removes it.
+func SetFenceProbeFault(b *Broker, f func() error) {
+	if f == nil {
+		b.wills.probeFault.Store(nil)
+		return
+	}
+	b.wills.probeFault.Store(&f)
+}

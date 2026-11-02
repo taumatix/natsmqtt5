@@ -63,6 +63,9 @@ type cursorRig struct {
 	pub     *testClient
 	// withheldAt is when the latest sendWithheld returned, which is after its message was stored.
 	withheldAt time.Time
+	// lastSentAt is when the latest send returned: the broker stored that message, and its id is
+	// delivered, no later than this.
+	lastSentAt time.Time
 }
 
 func newCursorRig(t *testing.T, natsURL, id string, qos packet.QoS, customise ...func(*natsmqtt5.Options)) *cursorRig {
@@ -87,6 +90,7 @@ func (r *cursorRig) sendOn(topic, payload string) {
 	r.t.Helper()
 	r.pub.publish(&paho.Publish{Topic: topic, QoS: byte(r.qos), Payload: []byte(payload)})
 	completeOne(r.t, r.sub, payload)
+	r.lastSentAt = time.Now()
 }
 
 // sendWithheld publishes payload with its live copy left out, and returns the
@@ -128,7 +132,12 @@ func (r *cursorRig) sendWithheld(payload string) *nats.Msg {
 func (r *cursorRig) dropPastTheRewind() {
 	r.t.Helper()
 	time.Sleep(3 * cursorRewind)
-	time.Sleep(time.Until(r.withheldAt.Add(cursorRewind + natsmqtt5.CheckpointSkew + cursorRewind/2)))
+	// The same reach holds for the newest delivery: a record that left ids out drops the highest, and
+	// a slow run (a loaded CI machine) can take longer to deliver after the withheld message than the
+	// reach spans, which leaves the last of them inside the rewind and replayed.
+	for _, since := range []time.Time{r.withheldAt, r.lastSentAt} {
+		time.Sleep(time.Until(since.Add(cursorRewind + natsmqtt5.CheckpointSkew + cursorRewind/2)))
+	}
 	ended := detachedCount(r.logs, r.id)
 	r.sub.drop()
 	waitDetachedTimes(r.t, r.logs, r.id, ended+1)

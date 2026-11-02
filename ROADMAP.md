@@ -532,7 +532,15 @@ Regression test without a cluster: `TestCloseReturnsWhileAClientThatNeverReadsHa
 With the fix all three faults return (about 35 s for the test; the NATS drain's own timeout is 30 s). The shared pull
 goroutines (`pullWG`) did not hang with NATS frozen, killed or cut off while one was inside a fetch.
 
-**Left:** `Close` racing the `catchUpAfterReconnect` goroutine, which is not in `b.wg`; no hang seen.
+`Close` racing the `catchUpAfterReconnect` goroutine is closed: it is counted in `catchUpWG`, which `Close` waits on after the
+connections (a race that could read the queue after `closeNATS`; `TestCloseWaitsForACatchUpAfterAReconnectThatIsStillRunning`
+fails without the wait). No hang was ever seen from it.
+
+The Will fence margin from #220 (`fenceAfter = 2*every + selfEvery`): the mechanism is confirmed by
+`TestAWillBucketOutageShorterThanTwiceTheCheckIntervalClosesNoClientWhereverItFalls` (a fault on the probe write, 3.5 checks
+long at eight phases: it closes the client with the old margin and not with the new). What stays unconfirmed is that a
+leader election of 7.5 to 9 s was the cause of the CI flake: `TestClusterAKilledWillBucketLeaderClosesNoClientAtTheDefaultCheckInterval`
+passes with and without the fix (the election it gets is shorter than 7.5 s), so no real-NATS test fails without it.
 
 ## `Broker.Close` with NATS down while a catch-up read is held can hang
 
