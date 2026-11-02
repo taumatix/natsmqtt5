@@ -2,6 +2,7 @@ package natsmqtt5_test
 
 import (
 	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
@@ -40,7 +41,9 @@ func TestCloseReturnsWhileACatchUpReadIsHeldAndNATSIsDown(t *testing.T) {
 	case err := <-done:
 		require.NoError(t, err)
 	case <-time.After(20 * time.Second):
-		t.Fatal("Close did not return within 20s with a held catch-up read and NATS down")
+		buf := make([]byte, 1<<22)
+		buf = buf[:runtime.Stack(buf, true)]
+		t.Fatalf("Close did not return within 20s with a held catch-up read and NATS down; goroutines:\n%s", buf)
 	}
 }
 

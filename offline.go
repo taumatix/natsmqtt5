@@ -364,7 +364,7 @@ func (q *offlineQueue) replayFrom(ctx context.Context, start jetstream.OrderedCo
 		if err := ctx.Err(); err != nil {
 			return last, err
 		}
-		batch, err := q.fetch(cons)
+		batch, err := q.fetch(ctx, cons)
 		if err != nil {
 			return last, err
 		}
@@ -484,15 +484,33 @@ func consumerServer(info *jetstream.ConsumerInfo) string {
 // pending, a read of the queue stream takes before it gives up as failed.
 const maxEmptyFetches = 20
 
-// fetch is one fetch of a replay read.
-func (q *offlineQueue) fetch(cons jetstream.Consumer) (jetstream.MessageBatch, error) {
+// fetch is one fetch of a replay read. It returns when ctx ends even if the fetch has not:
+// an ordered consumer that lost its server re-creates itself inside Fetch, with a context
+// of its own (10 s a try, MaxResetAttempts tries) that nothing here can cancel, so a read
+// begun while NATS was down held its caller, and through it Broker.Close, for over 30 s.
+// The fetch is left to end on its own, which closing the NATS connection hastens.
+func (q *offlineQueue) fetch(ctx context.Context, cons jetstream.Consumer) (jetstream.MessageBatch, error) {
 	if q.emptyFetches.Load() > 0 && q.emptyFetches.Add(-1) >= 0 {
 		return emptyBatch{}, nil
 	}
 	if q.unansweredFetches.Load() > 0 && q.unansweredFetches.Add(-1) >= 0 {
 		return emptyBatch{err: nats.ErrNoResponders}, nil
 	}
-	return cons.Fetch(256, jetstream.FetchMaxWait(500*time.Millisecond))
+	type result struct {
+		batch jetstream.MessageBatch
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		batch, err := cons.Fetch(256, jetstream.FetchMaxWait(500*time.Millisecond))
+		done <- result{batch, err}
+	}()
+	select {
+	case r := <-done:
+		return r.batch, r.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // emptyBatch is a fetch that came back with nothing, and err.
