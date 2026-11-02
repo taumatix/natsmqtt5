@@ -15,6 +15,7 @@ honestly be reconstructed now.
 
 - **Tests:** the last statements covered only by unit tests are driven over real sockets against a real NATS server: the three cases in which the scan that restarts a dropped replay cursor throws its result away (it outlived the rewind, a subscription was made while it read, the connection holds a message below its base) [MQTT-4.4.0-1] (`cursor_restart_refusals_test.go`). `SetScanGate` (test-only) now also holds a restart scan. No API change.
 
+- **Fixed:** a read of the offline queue (a catch-up, a replay) begun while NATS went away no longer retries for ever: the client library's default of unlimited consumer-creation retries now stops after 3, and the caller reads again. It left a goroutine behind that outlived `Close` (found by making `Close` wait for it). No API change.
 - **Fixed:** `Broker.Close` now waits for a catch-up after a NATS reconnect (`ReconnectCatchUp`), which ran outside the broker's waitgroup and could read the offline queue after `Close` had let go of it. No API change.
 - **Tests:** a flaky test (`TestARecordThatLeftIDsOut...`) waited for the withheld message to leave the rewind but not for the messages delivered after it, which a loaded machine could leave inside the rewind and replay; and a test shows the Will fence's margin from #220 (an outage of 3.5 checks closes no client wherever it falls; it fails with the old margin). No broker change.
 

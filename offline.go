@@ -348,6 +348,12 @@ func (q *offlineQueue) replayFrom(ctx context.Context, start jetstream.OrderedCo
 		// stream's end is all the caller wanted.
 		return last, nil
 	}
+	if start.MaxResetAttempts == 0 {
+		// The client library retries creating the consumer for ever by default, with a
+		// context nothing here can cancel, so a read begun while NATS goes away never ends,
+		// even once the connection is closed. The callers retry a failed read themselves.
+		start.MaxResetAttempts = 3
+	}
 	cons, err := q.stream.OrderedConsumer(ctx, start)
 	if err != nil {
 		return last, err
