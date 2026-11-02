@@ -11,6 +11,12 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-02
+
+Patch release, no API change and no new option. `Broker.Close` now waits for the `ReconnectCatchUp` goroutine and returns promptly when NATS is down during a catch-up read (it could take over 30 s), and an offline-queue read begun while NATS goes away stops retrying after 3 consumer-creation attempts. `[MQTT-4.8.2-4]` and `[MQTT-4.8.2-5]` are now tested with `SharedQoS2` on, and the Eclipse Paho MQTT 5 suite runs in CI against a committed list of expected results. The rest is tests.
+
+Install: `go get github.com/taumatix/natsmqtt5@v1.2.1`.
+
 - **Tests:** two retained-view tests (`TestARetainedViewIsNotVerifiedOnATimerByDefault`, `...VerifiedOnATimerWhenAskedTo`) planted their stale entry before the view had applied the publishes, so on a loaded machine the counts differed and the sweep's full check removed it (macOS CI); they now wait for the view first. No broker change.
 
 - **Fixed:** `Broker.Close` could take over 30 s, past any sensible bound, when NATS was down while a session's catch-up read was in progress (`TestCloseReturnsWhileACatchUpReadIsHeldAndNATSIsDown` failed on a macOS runner after 33 s). The client library's ordered consumer re-creates itself inside `Fetch` with a context of its own (10 s a try, 3 tries) that nothing could cancel, and `Close` waits for the connection that read before it closes NATS; a replay read now gives up when its context ends and leaves that fetch to finish by itself. No API change.
