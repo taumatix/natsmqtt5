@@ -2,19 +2,18 @@
 """Compare the Paho MQTT 5 suite's per-test results with conformance/paho-expected.tsv.
 
 usage: paho-compare.py EXPECTED.tsv SUITE.py CONFIG=OUTPUT.txt [CONFIG=OUTPUT.txt ...]
-       paho-compare.py --unexpected-failures EXPECTED.tsv SUITE.py CONFIG=OUTPUT.txt
        paho-compare.py --write EXPECTED.tsv ...   (print a fresh table, reasons left blank)
 
 OUTPUT is the combined stdout and stderr of `python3 client_test5.py -v`. unittest prints the
 progress lines interleaved with the suite's own logging, so the progress lines are not parsed; a
 test failed if it is named in the `FAIL:` or `ERROR:` block at the end, passed if the run reached
 "Ran N tests" with N equal to the number of tests the suite defines and the test is not named
-there. A run that did not finish fails the comparison. A `RECOVERED: test_x` line, which
-run-paho.sh appends when it re-ran a test that failed unexpectedly on its own and it passed, turns
-that test back into a PASS (the suite has a race of its own, see PAHO.md); it is printed.
+there. A run that did not finish fails the comparison.
 
 EXPECTED.tsv: a header row `test<TAB>CONFIG<TAB>...<TAB>reason`, then one row per test with
-PASS or FAIL per configuration. Any difference, in either direction, exits non-zero.
+PASS or FAIL per configuration, or FLAKY for a test whose result the suite itself leaves to a
+race (either result is accepted, and the reason says why). Any other difference, in either
+direction, exits non-zero.
 """
 import re
 import sys
@@ -35,9 +34,6 @@ def results(output_path, tests):
     unknown = failed - set(tests)
     if unknown:
         raise SystemExit(f"{output_path}: failures named for unknown tests {sorted(unknown)}")
-    for t in sorted(set(re.findall(r"^RECOVERED: (test_\w+)$", text, re.M)) & failed):
-        print(f"{output_path}: {t} failed in the full run and passed when re-run on its own")
-        failed.discard(t)
     return {t: ("FAIL" if t in failed else "PASS") for t in tests}
 
 
@@ -53,15 +49,6 @@ def main(argv):
         name, _, out = run.partition("=")
         configs.append(name)
         actual[name] = results(out, tests)
-    if mode == "--unexpected-failures":
-        # The tests expected to PASS in the one configuration given that did not, for a re-run.
-        name = configs[0]
-        col = open(expected_path, encoding="utf-8").readline().rstrip("\n").split("\t").index(name)
-        for line in list(open(expected_path, encoding="utf-8"))[1:]:
-            f = line.rstrip("\n").split("\t")
-            if f[0] in actual[name] and f[col] == "PASS" and actual[name][f[0]] == "FAIL":
-                print(f[0])
-        return 0
     for name in configs:
         n = sum(1 for v in actual[name].values() if v == "PASS")
         print(f"{name}: {n} passed, {len(tests) - n} failed of {len(tests)}")
@@ -84,7 +71,7 @@ def main(argv):
             bad.append(f"{t}: in {expected_path}, not in the suite")
         else:
             for name in configs:
-                if expected[t][name] != actual[name][t]:
+                if expected[t][name] not in (actual[name][t], "FLAKY"):
                     hint = "a new failure" if actual[name][t] == "FAIL" else "now passes, update the file"
                     bad.append(f"{t} [{name}]: expected {expected[t][name]}, got {actual[name][t]} ({hint})")
     for b in bad:

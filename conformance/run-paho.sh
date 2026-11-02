@@ -8,14 +8,7 @@
 # -server-keep-alive 60, which test_server_keep_alive assumes). Needs go, git and python3; no
 # container runtime. About three minutes per run.
 #
-# One suite test, test_flow_control2, loses a race of its own about a run in three: the client
-# writes a PUBREL to the socket the broker has already closed after its DISCONNECT 0x93 and dies on
-# the broken pipe. A test expected to PASS that fails is therefore re-run on its own, up to four
-# times, and counts as passed if one of those passes; a test expected to FAIL is never re-run.
-#
-#   PAHO_DIR   where the suite is cloned (default: a directory under $TMPDIR)
-#   WORK_DIR   binaries, JetStream stores and the suite's output (default: a temporary directory)
-#   --write    print a fresh expectations table (reasons blank) instead of comparing
+# test_flow_control2 is FLAKY in the expectations: see conformance/PAHO.md.
 set -euo pipefail
 export PYTHONDONTWRITEBYTECODE=1
 
@@ -24,8 +17,6 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 work=${WORK_DIR:-$(mktemp -d)}
 paho=${PAHO_DIR:-$work/paho}
 mkdir -p "$work"
-write=
-[ "${1:-}" = "--write" ] && write=1
 pids=()
 trap 'kill "${pids[@]}" 2>/dev/null || true' EXIT
 
@@ -61,18 +52,6 @@ run() {
   # The suite is run unmodified, from its own directory. Its option parsing wants "--port N".
   # Its exit status says only that something failed; the comparison reads the per-test results.
   (cd "$paho/interoperability" && python3 client_test5.py --port "$mport" -v >"$work/paho-$name.txt" 2>&1) || true
-  local expected=$root/conformance/paho-expected.tsv suite=$paho/interoperability/client_test5.py
-  if [ -z "$write" ]; then
-    local t try
-    for t in $(python3 "$root/conformance/paho-compare.py" --unexpected-failures "$expected" "$suite" "$name=$work/paho-$name.txt"); do
-      for try in 1 2 3 4; do
-        if (cd "$paho/interoperability" && python3 client_test5.py --port "$mport" "Test.$t" >"$work/paho-$name-$t.txt" 2>&1); then
-          echo "RECOVERED: $t" >>"$work/paho-$name.txt"
-          break
-        fi
-      done
-    done
-  fi
   kill "$bpid" "$npid" 2>/dev/null || true
   wait "$bpid" "$npid" 2>/dev/null || true
 }
