@@ -28,6 +28,8 @@ func TestARetainedViewIsVerifiedOnATimerWhenAskedTo_MQTT_3_3_1_6(t *testing.T) {
 	pub.publish(&paho.Publish{Topic: "rvi/gone", QoS: 1, Retain: true, Payload: []byte("x")})
 	pub.publish(&paho.Publish{Topic: "rvi/gone", QoS: 1, Retain: true})
 	pub.publish(&paho.Publish{Topic: "rvi/fresh", QoS: 1, Retain: true, Payload: []byte("fresh")})
+	require.Eventually(t, func() bool { _, ok := natsmqtt5.RetainedPayload(broker, "rvi/fresh"); return ok }, 10*time.Second, 10*time.Millisecond,
+		"the view has applied all three publishes before the stale entry is planted, or the counts differ and the sweep checks")
 	natsmqtt5.RetainedPlant(broker, "rvi/ghost", "ghost", 9999)
 	natsmqtt5.RetainedForget(broker, "rvi/fresh")
 
@@ -48,6 +50,8 @@ func TestARetainedViewIsNotVerifiedOnATimerByDefault(t *testing.T) {
 	pub.publish(&paho.Publish{Topic: "rvd/gone", QoS: 1, Retain: true, Payload: []byte("x")})
 	pub.publish(&paho.Publish{Topic: "rvd/gone", QoS: 1, Retain: true})
 	pub.publish(&paho.Publish{Topic: "rvd/fresh", QoS: 1, Retain: true, Payload: []byte("fresh")})
+	require.Eventually(t, func() bool { _, ok := natsmqtt5.RetainedPayload(broker, "rvd/fresh"); return ok }, 10*time.Second, 10*time.Millisecond,
+		"the view has applied all three publishes before the stale entry is planted, or the counts differ and the sweep checks")
 	natsmqtt5.RetainedPlant(broker, "rvd/ghost", "ghost", 9999)
 	natsmqtt5.RetainedForget(broker, "rvd/fresh")
 

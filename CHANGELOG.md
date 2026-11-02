@@ -11,6 +11,8 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Tests:** two retained-view tests (`TestARetainedViewIsNotVerifiedOnATimerByDefault`, `...VerifiedOnATimerWhenAskedTo`) planted their stale entry before the view had applied the publishes, so on a loaded machine the counts differed and the sweep's full check removed it (macOS CI); they now wait for the view first. No broker change.
+
 - **Fixed:** `Broker.Close` could take over 30 s, past any sensible bound, when NATS was down while a session's catch-up read was in progress (`TestCloseReturnsWhileACatchUpReadIsHeldAndNATSIsDown` failed on a macOS runner after 33 s). The client library's ordered consumer re-creates itself inside `Fetch` with a context of its own (10 s a try, 3 tries) that nothing could cancel, and `Close` waits for the connection that read before it closes NATS; a replay read now gives up when its context ends and leaves that fetch to finish by itself. No API change.
 - **Tests:** a race detector failure in four parallel tests (`TestPublisherClockExpiry...`, `TestExpiryAcrossASlowNATSLeg...`) came from `TestAMessageHeldWithNoLimitStaysWithItsMember` being parallel while it set `sharedAckWait`, a package variable every broker reads. The test-only hooks that write such variables (`SetSharedAckWait`, `SetShareMemberSlack`, `SetShareMemberSweepGrace`, `SetShareLockStale`, `SetQueueRetryEvery`) now panic when called from a parallel test. No broker change.
 
