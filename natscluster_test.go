@@ -292,6 +292,31 @@ func (c *natsCluster) remove() {
 // LeadStream makes node i the Raft leader of the named stream (a key-value bucket "B" is the stream "KV_B"), by
 // asking whichever node leads to step down until the election picks node i, which takes a few tries since the
 // choice among the others is the cluster's. A test that isolates a node needs to say whether that node leads.
+// AwaitStreamLeader waits until the stream has a leader that answers. A server rejoining after a
+// partition has been calling elections, and its higher term unseats the leader of every group it is
+// in; NATS elects again only after its election timeout (several seconds), and a publish to the
+// stream meanwhile is answered with "no responders". That is the stream being down, not a message
+// lost, and a client that was refused (PUBACK 0x83) sends it again; a test that has no such retry
+// waits for the leader instead.
+func (c *natsCluster) AwaitStreamLeader(stream string) {
+	c.t.Helper()
+	nc, err := nats.Connect(c.URLs())
+	require.NoError(c.t, err)
+	defer nc.Close()
+	js, err := jetstream.New(nc)
+	require.NoError(c.t, err)
+	require.Eventually(c.t, func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		s, err := js.Stream(ctx, stream)
+		if err != nil {
+			return false
+		}
+		info, err := s.Info(ctx)
+		return err == nil && info.Cluster != nil && info.Cluster.Leader != ""
+	}, 30*time.Second, 200*time.Millisecond, "the stream %s has no leader", stream)
+}
+
 func (c *natsCluster) LeadStream(stream string, i int) {
 	c.t.Helper()
 	nc, err := nats.Connect(c.URLs())

@@ -330,10 +330,38 @@ func (q *offlineQueue) replaySeq(ctx context.Context, from uint64, filters []str
 	}, fn)
 }
 
+// streamLeaderWait bounds how long ledInfo waits for a replicated stream to elect a leader. NATS
+// waits 4 to 9 s before it starts an election.
+const streamLeaderWait = 12 * time.Second
+
+// ledInfo is the stream's info once it has a leader. A replicated stream without one still answers
+// from the replica that received the request, with the state that replica last saw: after a
+// partition that is the state from before it, and a replay that ends at that stream end never sends
+// what was published meanwhile (found on CI and the three-server cluster: a catch-up after a route
+// came back ended at the old last sequence, and the session never got the two messages in between).
+// A stream that is not replicated has no cluster section and is returned as it is.
+func (q *offlineQueue) ledInfo(ctx context.Context) (*jetstream.StreamInfo, error) {
+	deadline := time.Now().Add(streamLeaderWait)
+	for {
+		q.infoMu.Lock()
+		info, err := q.stream.Info(ctx)
+		q.infoMu.Unlock()
+		if err != nil || info.Cluster == nil || info.Cluster.Leader != "" {
+			return info, err
+		}
+		if time.Now().After(deadline) {
+			return nil, errors.New("the offline queue's stream has no leader")
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
 func (q *offlineQueue) replayFrom(ctx context.Context, start jetstream.OrderedConsumerConfig, fn func(*nats.Msg)) (uint64, error) {
-	q.infoMu.Lock()
-	info, err := q.stream.Info(ctx)
-	q.infoMu.Unlock()
+	info, err := q.ledInfo(ctx)
 	if err != nil {
 		return 0, err
 	}
