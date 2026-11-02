@@ -311,6 +311,12 @@ func (c *conn) readLoop(ctx context.Context, keepAlive time.Duration) error {
 				return err
 			}
 		}
+		select {
+		case <-c.done:
+			// Closed after the deadline that close set was replaced by the one above.
+			return errConnClosed
+		default:
+		}
 		pkt, err := packet.Read(c.r, c.broker.opts.maximumPacketSize)
 		if err != nil {
 			return c.readError(err)
@@ -757,10 +763,10 @@ func (c *conn) close() {
 		c.writeMu.Unlock()
 		if wc, ok := c.nc.(writeCloser); ok && lingers && wc.CloseWrite() == nil {
 			// Closing a socket that holds unread data makes the kernel send a reset, which discards the
-			// DISCONNECT the client has not read yet. Half-close, and let the deadline end a read that is
-			// still waiting; serve reads the rest out and closes (lingerThenClose).
+			// DISCONNECT the client has not read yet. Half-close, and wake a read that is still waiting so the
+			// connection ends now; serve reads the rest out and closes (lingerThenClose).
 			c.lingering.Store(true)
-			_ = c.nc.SetReadDeadline(time.Now().Add(lingerGrace))
+			_ = c.nc.SetReadDeadline(time.Now())
 			return
 		}
 		_ = c.nc.Close() // the connection is over; a close error has nothing to act on
@@ -773,6 +779,7 @@ func (c *conn) lingerThenClose() {
 	if !c.lingering.Load() {
 		return
 	}
+	_ = c.nc.SetReadDeadline(time.Now().Add(lingerGrace))
 	_, _ = io.Copy(io.Discard, c.nc)
 	_ = c.nc.Close()
 }
