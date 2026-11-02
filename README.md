@@ -33,7 +33,8 @@ MQTT v5 clients ──TCP/TLS──▶ natsmqtt5 ──▶ your existing NATS se
 ## What it does
 
 - **Speaks MQTT v5 to clients.** All fifteen control packets, all 27 properties.
-  Verified against the [Eclipse Paho v5][paho] client over a real socket.
+  Verified against the [Eclipse Paho v5][paho] client over a real socket, and by the Eclipse Paho
+  interoperability suite, run on every pull request ([conformance/PAHO.md](conformance/PAHO.md)).
 - **Uses NATS for everything underneath.** Topics become NATS subjects,
   subscriptions become NATS subscriptions, shared subscriptions become NATS
   queue groups, retained messages live in a JetStream stream.
