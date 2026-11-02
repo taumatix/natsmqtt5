@@ -233,7 +233,9 @@ func Reap(b *Broker) {
 // it before the broker starts.
 func SetSharedAckWait(t interface {
 	Cleanup(func())
+	Setenv(key, value string)
 }, d time.Duration) {
+	serialOnly(t)
 	was := sharedAckWait
 	sharedAckWait = d
 	t.Cleanup(func() { sharedAckWait = was })
@@ -244,7 +246,9 @@ func SetSharedAckWait(t interface {
 // Set it before the broker starts.
 func SetShareMemberSlack(t interface {
 	Cleanup(func())
+	Setenv(key, value string)
 }, d time.Duration) {
+	serialOnly(t)
 	was := shareMemberSlack
 	shareMemberSlack = d
 	t.Cleanup(func() { shareMemberSlack = was })
@@ -254,7 +258,9 @@ func SetShareMemberSlack(t interface {
 // sweep may remove it for want of a session record, for the rest of the test.
 func SetShareMemberSweepGrace(t interface {
 	Cleanup(func())
+	Setenv(key, value string)
 }, d time.Duration) {
+	serialOnly(t)
 	was := shareMemberSweepGrace
 	shareMemberSweepGrace = d
 	t.Cleanup(func() { shareMemberSweepGrace = was })
@@ -301,7 +307,9 @@ func SetBeforeGroupDelete(t interface {
 // broker takes it over, for the rest of the test.
 func SetShareLockStale(t interface {
 	Cleanup(func())
+	Setenv(key, value string)
 }, d time.Duration) {
+	serialOnly(t)
 	was := shareLockStale
 	shareLockStale = d
 	t.Cleanup(func() { shareLockStale = was })
@@ -335,7 +343,9 @@ func SetUnansweredQueueFetches(b *Broker, n int) { b.queue.Load().unansweredFetc
 // that failed at start-up, for the rest of the test. Set it before the broker starts.
 func SetQueueRetryEvery(t interface {
 	Cleanup(func())
+	Setenv(key, value string)
 }, first, max time.Duration) {
+	serialOnly(t)
 	wasFirst, wasMax := queueRetryEvery, queueRetryMax
 	queueRetryEvery, queueRetryMax = first, max
 	t.Cleanup(func() { queueRetryEvery, queueRetryMax = wasFirst, wasMax })
@@ -511,4 +521,14 @@ func SetFenceProbeFault(b *Broker, f func() error) {
 		return
 	}
 	b.wills.probeFault.Store(&f)
+}
+
+// serialOnly fails (by panic) a test that is parallel and changes a package-level
+// variable the brokers read without synchronisation. Such a variable is written
+// while no broker of any test runs: a parallel test is paused until every serial
+// one has finished, so a serial test is the only writer, and its cleanup restores
+// the value after the brokers it started have closed. t.Setenv panics when the
+// test is parallel, which is the check.
+func serialOnly(t interface{ Setenv(key, value string) }) {
+	t.Setenv("NATSMQTT5_SERIAL_HOOK", "1")
 }

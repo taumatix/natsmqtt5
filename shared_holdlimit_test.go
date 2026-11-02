@@ -79,8 +79,8 @@ func TestAMessageHeldPastTheLimitGoesToAnotherMember(t *testing.T) {
 	require.True(t, ok, "a late PUBACK must not end the connection")
 }
 
+// Not parallel: SetSharedAckWait changes a variable every broker reads.
 func TestAMessageHeldWithNoLimitStaysWithItsMember(t *testing.T) {
-	t.Parallel()
 	_, m2, _ := holdingMember(t, 0)
 	m2.expectNoPublishFor(holdLimit + 6*handBackAckWait)
 }

@@ -541,13 +541,3 @@ The Will fence margin from #220 (`fenceAfter = 2*every + selfEvery`): the mechan
 long at eight phases: it closes the client with the old margin and not with the new). What stays unconfirmed is that a
 leader election of 7.5 to 9 s was the cause of the CI flake: `TestClusterAKilledWillBucketLeaderClosesNoClientAtTheDefaultCheckInterval`
 passes with and without the fix (the election it gets is shorter than 7.5 s), so no real-NATS test fails without it.
-
-## `Broker.Close` with NATS down while a catch-up read is held can hang
-
-**Blocked by:** nothing; it needs a reproduction.
-
-`TestCloseReturnsWhileACatchUpReadIsHeldAndNATSIsDown` was seen not returning on a macOS runner (PR #246's CI, Go 1.26:
-the test sat 17 minutes until the 20 minute `go test` limit; the other three matrix jobs passed), and once before in a
-test cleanup. It is not a regression of #246 (the test and the code it drives are untouched). `Close` should return
-within the NATS drain's timeout whatever a catch-up read is waiting for; find the goroutine it waits on (the test's
-panic output on the failed job names the stacks) and fix it or bound it.

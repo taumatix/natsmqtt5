@@ -11,6 +11,9 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** `Broker.Close` could take over 30 s, past any sensible bound, when NATS was down while a session's catch-up read was in progress (`TestCloseReturnsWhileACatchUpReadIsHeldAndNATSIsDown` failed on a macOS runner after 33 s). The client library's ordered consumer re-creates itself inside `Fetch` with a context of its own (10 s a try, 3 tries) that nothing could cancel, and `Close` waits for the connection that read before it closes NATS; a replay read now gives up when its context ends and leaves that fetch to finish by itself. No API change.
+- **Tests:** a race detector failure in four parallel tests (`TestPublisherClockExpiry...`, `TestExpiryAcrossASlowNATSLeg...`) came from `TestAMessageHeldWithNoLimitStaysWithItsMember` being parallel while it set `sharedAckWait`, a package variable every broker reads. The test-only hooks that write such variables (`SetSharedAckWait`, `SetShareMemberSlack`, `SetShareMemberSweepGrace`, `SetShareLockStale`, `SetQueueRetryEvery`) now panic when called from a parallel test. No broker change.
+
 - **Tests:** a flaky cluster test (`TestClusterReplayCursorCostPerSubscribeAndPerDelivery`) counted chunk writes only from the connection's end, but a chunk is keyed by its content, so a checkpoint that wrote all of them during the deliveries left the release nothing to write (0 in 1 of 8 runs); it now counts both. No broker change.
 
 - **Tests:** shared QoS 2 over a real three-server NATS cluster with replicated streams and buckets: a message whose session record cannot be written goes to a member on another server and is not sent twice, a PUBREL whose record cannot be written is completed after the client reconnects to another server, and a message held for a killed broker's client is completed by it on another server. No product change, no API change.
