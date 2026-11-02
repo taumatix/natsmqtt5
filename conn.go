@@ -194,10 +194,15 @@ type conn struct {
 	pullMu  sync.Mutex
 	pulling map[*subscription]bool
 
+	// lingers is set, under writeMu, once the server has written a final packet (its DISCONNECT, or a CONNACK
+	// refusing the client): close then half-closes and lets serve read out what the client still sends, instead
+	// of closing a socket with unread data in it.
+	lingers bool
 	// disconnectSent is set, under writeMu, once the server's DISCONNECT has
 	// been written: nothing may follow it [MQTT-3.14.4-1].
 	disconnectSent bool
 
+	lingering  atomic.Bool
 	closeOnce  sync.Once
 	behindOnce sync.Once
 
@@ -243,6 +248,7 @@ func newConn(b *Broker, nc net.Conn) *conn {
 }
 
 func (c *conn) serve(ctx context.Context) {
+	defer c.lingerThenClose()
 	defer c.close()
 
 	parent := ctx
@@ -257,8 +263,8 @@ func (c *conn) serve(ctx context.Context) {
 			// Serve's context was cancelled: say why before the socket goes,
 			// as Broker.Close does, rather than racing it with a bare close.
 			c.sendDisconnect(packet.ServerShuttingDown, "broker shutting down")
+			c.close()
 		}
-		_ = c.nc.Close() // the connection is over; a close error has nothing to act on
 	}()
 
 	keepAlive, err := c.handshake(ctx)
@@ -335,6 +341,7 @@ func (c *conn) readError(err error) error {
 		return errClientGone
 	case errors.As(err, &ne) && ne.Timeout():
 		c.sendDisconnect(packet.KeepAliveTimeout, "no packet received within 1.5x the Keep Alive interval")
+		c.noLinger() // a silent client has nothing unread to lose
 		return fmt.Errorf("keep alive timeout: %w", err)
 	case errors.Is(err, packet.ErrPacketTooLarge):
 		c.sendDisconnect(packet.PacketTooLarge, "packet exceeds the advertised Maximum Packet Size")
@@ -636,6 +643,9 @@ func (c *conn) writePacket(p packet.Packet, final bool) (discarded bool, err err
 	if _, err := c.nc.Write(raw); err != nil {
 		return false, fmt.Errorf("writing %s: %w", p.Type(), err)
 	}
+	if ack, ok := p.(*packet.Connack); final || (ok && ack.ReasonCode != packet.Success) {
+		c.lingers = true
+	}
 	if ack, ok := p.(*packet.Connack); ok && ack.ReasonCode == packet.Success {
 		if fn := afterConnackWrite.Load(); fn != nil {
 			(*fn)()
@@ -726,11 +736,45 @@ func (c *conn) markEnded() {
 	c.endedOnce.Do(func() { close(c.ended) })
 }
 
+// lingerGrace bounds how long a connection that was sent a final packet is read from after the server has
+// stopped writing, and so how much later than the packet its socket closes.
+const lingerGrace = time.Second
+
+type writeCloser interface{ CloseWrite() error }
+
+// noLinger makes close a plain close, for a connection with no final packet worth keeping.
+func (c *conn) noLinger() {
+	c.writeMu.Lock()
+	c.lingers = false
+	c.writeMu.Unlock()
+}
+
 func (c *conn) close() {
 	c.closeOnce.Do(func() {
 		close(c.done)
+		c.writeMu.Lock()
+		lingers := c.lingers
+		c.writeMu.Unlock()
+		if wc, ok := c.nc.(writeCloser); ok && lingers && wc.CloseWrite() == nil {
+			// Closing a socket that holds unread data makes the kernel send a reset, which discards the
+			// DISCONNECT the client has not read yet. Half-close, and let the deadline end a read that is
+			// still waiting; serve reads the rest out and closes (lingerThenClose).
+			c.lingering.Store(true)
+			_ = c.nc.SetReadDeadline(time.Now().Add(lingerGrace))
+			return
+		}
 		_ = c.nc.Close() // the connection is over; a close error has nothing to act on
 	})
+}
+
+// lingerThenClose ends a connection close has half-closed: it discards what the client still sends until it
+// closes its end or lingerGrace passes, then closes the socket.
+func (c *conn) lingerThenClose() {
+	if !c.lingering.Load() {
+		return
+	}
+	_, _ = io.Copy(io.Discard, c.nc)
+	_ = c.nc.Close()
 }
 
 // tlsState returns the TLS handshake state, or nil on a plaintext connection.

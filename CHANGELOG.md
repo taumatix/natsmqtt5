@@ -11,6 +11,7 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** after the broker sent a DISCONNECT or a refusing CONNACK it closed the socket at once, and a client still writing (the Eclipse Paho suite's `test_flow_control2` after Receive Maximum was exceeded) could take a reset instead of the DISCONNECT and never learn the reason code. The broker now half-closes, reads and discards what the client still sends for at most one second, then closes; keep-alive timeouts and network errors close at once as before. No API change.
 - **Tests:** a flaky cluster test (`TestClusterReplayCursorCostPerSubscribeAndPerDelivery`) counted chunk writes only from the connection's end, but a chunk is keyed by its content, so a checkpoint that wrote all of them during the deliveries left the release nothing to write (0 in 1 of 8 runs); it now counts both. No broker change.
 
 - **Tests:** shared QoS 2 over a real three-server NATS cluster with replicated streams and buckets: a message whose session record cannot be written goes to a member on another server and is not sent twice, a PUBREL whose record cannot be written is completed after the client reconnects to another server, and a message held for a killed broker's client is completed by it on another server. No product change, no API change.
