@@ -126,12 +126,15 @@ func TestClusterReplayCursorCostPerSubscribeAndPerDelivery_MQTT_4_4_0_1(t *testi
 			t.Logf("%d deliveries behind a hole: %s (%s each); requests and writes:%s", delivered, took.Round(time.Millisecond),
 				(took / delivered).Round(time.Microsecond), tallyString(got))
 
-			// The record and its chunks are written at a checkpoint and when the connection ends.
+			// The record and its chunks are written at a checkpoint and when the connection ends. A
+			// chunk has the same key as its content, so one a checkpoint already wrote during the
+			// deliveries is not written again at the end: count both windows.
+			duringDeliveries := got["$KV."+natsmqtt5.DefaultStreamPrefix+"_inflight"]
 			r.dropPastTheRewind()
 			r.stop()
 			got = tally.since()
-			chunkWrites := got["$KV."+natsmqtt5.DefaultStreamPrefix+"_inflight"]
-			t.Logf("the connection ending: payload bucket writes (chunks): %d for %d ids; requests and writes:%s",
+			chunkWrites := duringDeliveries + got["$KV."+natsmqtt5.DefaultStreamPrefix+"_inflight"]
+			t.Logf("deliveries and the connection ending: payload bucket writes (chunks): %d for %d ids; requests and writes at the end:%s",
 				chunkWrites, delivered, tallyString(got))
 			if tc.chunks {
 				require.Positive(t, chunkWrites)
