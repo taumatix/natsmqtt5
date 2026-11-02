@@ -11,6 +11,12 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-02
+
+Patch release, no API change and no new option. `Broker.Close` now waits for the `ReconnectCatchUp` goroutine, and a read of the offline queue begun while NATS goes away gives up after 3 consumer-creation attempts instead of retrying for ever. The rest is tests.
+
+Install: `go get github.com/taumatix/natsmqtt5@v1.2.1`.
+
 - **Tests:** a flaky cluster test (`TestClusterReplayCursorCostPerSubscribeAndPerDelivery`) counted chunk writes only from the connection's end, but a chunk is keyed by its content, so a checkpoint that wrote all of them during the deliveries left the release nothing to write (0 in 1 of 8 runs); it now counts both. No broker change.
 
 - **Tests:** shared QoS 2 over a real three-server NATS cluster with replicated streams and buckets: a message whose session record cannot be written goes to a member on another server and is not sent twice, a PUBREL whose record cannot be written is completed after the client reconnects to another server, and a message held for a killed broker's client is completed by it on another server. No product change, no API change.
