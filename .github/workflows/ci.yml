@@ -141,6 +141,34 @@ jobs:
           left=$(docker ps -aq --filter name=natsmqtt5-ct-)
           if [ -n "$left" ]; then echo "containers left behind: $left" >&2; exit 1; fi
 
+  paho:
+    # The Eclipse Paho MQTT 5 interoperability suite (conformance/PAHO.md) against the broker over a
+    # real socket. conformance/paho-expected.tsv holds each test's expected result in three broker
+    # configurations; the job fails on any difference, a new failure or an expected failure that now
+    # passes. No container runtime: nats-server and the broker are built from this checkout.
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+          check-latest: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Run the suite and compare with conformance/paho-expected.tsv
+        run: conformance/run-paho.sh
+        env:
+          WORK_DIR: ${{ runner.temp }}/paho
+
+      - name: Suite output
+        if: failure()
+        run: tail -n 80 "$RUNNER_TEMP"/paho/paho-*.txt "$RUNNER_TEMP"/paho/broker-*.log
+
   docker:
     # Builds the image and runs the quickstart from the README against it, so
     # a broken Dockerfile or compose file fails the pull request rather than

@@ -5,7 +5,7 @@ specification's numbered conformance statements, and is what [ROADMAP.md](ROADMA
 from.
 
 - Specification: [MQTT Version 5.0, OASIS Standard, 7 March 2019](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)
-- Reviewed: 2026-10-09, against v0.11.3. Re-run when the code or the specification has moved a lot.
+- Reviewed: 2026-10-09, against v0.11.3; MQTT-4.8.2-4 and -5 re-checked 2026-11-02 against the tests of the current code (they apply with `Options.SharedQoS2` on). Re-run when the code or the specification has moved a lot.
 - Data: [`conformance/mqtt5-statements.tsv`](conformance/mqtt5-statements.tsv), one row per
   `[MQTT-x.y.z-n]` statement. The statement texts are in the specification; the file carries the
   ids, sections and findings.
@@ -24,7 +24,7 @@ from the table between the markers and checked against it
 (`TestTheCountsInConformanceMdAreTheTables`); after the rows change, run
 `UPDATE_CONFORMANCE=1 go test -run TestTheCountsInConformanceMdAreTheTables .`.
 
-An external run of the Eclipse Paho MQTT 5 client tests (22 of 27 pass; the 5 others are the suite's assumptions about its reference broker) is in [conformance/PAHO.md](conformance/PAHO.md).
+The Eclipse Paho MQTT 5 interoperability suite (27 tests; 22 pass by default, 24 across the three broker configurations it is run in, and the other 3 cannot run against any broker configured like this one) runs in CI on every pull request and fails on any difference from [conformance/paho-expected.tsv](conformance/paho-expected.tsv); see [conformance/PAHO.md](conformance/PAHO.md).
 
 [conformance/INDEX.md](conformance/INDEX.md) maps every statement id to the tests that cite it, with
 file:line. It is generated and checked (`TestTheConformanceIndexIsCurrent`; regenerate with
@@ -38,14 +38,14 @@ finds the tests.
 
 | Class | Meaning | Count |
 |---|---|---|
-| TESTED | a test drives the broker (or the codec) and cites the statement | 240 |
-| NOT-APPLICABLE | behind a feature the broker does not offer, or cannot be violated by a request | 4 |
+| TESTED | a test drives the broker (or the codec) and cites the statement | 242 |
+| NOT-APPLICABLE | behind a feature the broker does not offer, or cannot be violated by a request | 2 |
 | CLIENT-ONLY | binds only a Client, and no test of the broker cites it | 8 |
 
 | Verdict | Count |
 |---|---|
-| met | 240 |
-| n/a | 12 |
+| met | 242 |
+| n/a | 10 |
 | VIOLATED | 0 |
 | UNSURE | 0 |
 
