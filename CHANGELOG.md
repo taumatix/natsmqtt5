@@ -11,6 +11,8 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Tests:** a flaky cluster test (`TestClusterReplayCursorCostPerSubscribeAndPerDelivery`) counted chunk writes only from the connection's end, but a chunk is keyed by its content, so a checkpoint that wrote all of them during the deliveries left the release nothing to write (0 in 1 of 8 runs); it now counts both. No broker change.
+
 - **Tests:** shared QoS 2 over a real three-server NATS cluster with replicated streams and buckets: a message whose session record cannot be written goes to a member on another server and is not sent twice, a PUBREL whose record cannot be written is completed after the client reconnects to another server, and a message held for a killed broker's client is completed by it on another server. No product change, no API change.
 
 - **Tests:** the last statements covered only by unit tests are driven over real sockets against a real NATS server: the three cases in which the scan that restarts a dropped replay cursor throws its result away (it outlived the rewind, a subscription was made while it read, the connection holds a message below its base) [MQTT-4.4.0-1] (`cursor_restart_refusals_test.go`). `SetScanGate` (test-only) now also holds a restart scan. No API change.
