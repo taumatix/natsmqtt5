@@ -11,10 +11,16 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+
+## [1.2.2] - 2026-11-02
+
+Patch release, no API change and no new option. A final DISCONNECT is now delivered even to a client that keeps writing (found by the Eclipse Paho suite), a plain NATS publish right after `New` gets its queue copy under `QueuePlainPublishes`, and a `ReconnectCatchUp` that runs while a replicated queue has no leader no longer loses messages.
+
+Install: `go get github.com/taumatix/natsmqtt5@v1.2.2`.
+
 - **Fixed:** with `QueuePlainPublishes`, a plain NATS publish made right after `New` returned could get no queue copy: the broker's subscription to the live subjects was written to the server but not yet confirmed, so the publish reached the plain subscribers and no broker (`TestAPlainNATSSubscriberSeesTheOriginalAndTheBrokersCopyWithAnID` saw one copy of two on a macOS runner). `New` now returns once the server has the subscription. Reproduced by a regression test that delays the broker's uplink. No API change.
 - **Fixed:** with `ReconnectCatchUp` on a replicated queue, a catch-up that ran while the stream had no leader (a server rejoining after a partition unseats it, and NATS waits several seconds to elect another) could lose messages for a connected session: the stream's info was answered by a replica from the state it had before the partition, so the read ended at that stale last sequence and never sent what was published meanwhile (`TestClusterReconnectCatchUpSendsWhatARouteLostWhileBothBrokersStayConnected` got only the last message, about one run in fifteen). A replay now waits up to 12 s for the stream to have a leader before it reads where the stream ends. No API change.
 - **Tests:** the same test's final PUBLISH was refused with 0x83 in about one run in five because the stream was leaderless then; that refusal is right (the client sends again), so the test waits for the leader first, and prints both brokers' logs on failure. No broker change.
-
 - **Fixed:** after the broker sent a DISCONNECT or a refusing CONNACK it closed the socket at once, and a client still writing (the Eclipse Paho suite's `test_flow_control2` after Receive Maximum was exceeded) could take a reset instead of the DISCONNECT and never learn the reason code. The broker now half-closes, reads and discards what the client still sends for at most one second, then closes; keep-alive timeouts and network errors close at once as before. No API change.
 
 ## [1.2.1] - 2026-11-02
