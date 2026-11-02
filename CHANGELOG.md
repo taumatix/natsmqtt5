@@ -11,6 +11,8 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** after the broker sent a DISCONNECT or a refusing CONNACK it closed the socket at once, and a client still writing (the Eclipse Paho suite's `test_flow_control2` after Receive Maximum was exceeded) could take a reset instead of the DISCONNECT and never learn the reason code. The broker now half-closes, reads and discards what the client still sends for at most one second, then closes; keep-alive timeouts and network errors close at once as before. No API change.
+
 ## [1.2.1] - 2026-11-02
 
 Patch release, no API change and no new option. `Broker.Close` now waits for the `ReconnectCatchUp` goroutine and returns promptly when NATS is down during a catch-up read (it could take over 30 s), and an offline-queue read begun while NATS goes away stops retrying after 3 consumer-creation attempts. `[MQTT-4.8.2-4]` and `[MQTT-4.8.2-5]` are now tested with `SharedQoS2` on, and the Eclipse Paho MQTT 5 suite runs in CI against a committed list of expected results. The rest is tests.

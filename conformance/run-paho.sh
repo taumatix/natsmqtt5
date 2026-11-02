@@ -7,8 +7,6 @@
 # -restrict-dollar-topics=false, which test_dollar_topics assumes) and "keepalive" (started with
 # -server-keep-alive 60, which test_server_keep_alive assumes). Needs go, git and python3; no
 # container runtime. About three minutes per run.
-#
-# test_flow_control2 is FLAKY in the expectations: see conformance/PAHO.md.
 set -euo pipefail
 export PYTHONDONTWRITEBYTECODE=1
 

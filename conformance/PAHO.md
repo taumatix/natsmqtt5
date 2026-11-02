@@ -22,21 +22,20 @@ test that passes and is expected to fail means the file is stale, so update it (
 
 | Configuration | Broker started with | Passes |
 |---|---|---|
-| `default` | nothing extra | 21 of 27, 22 with `test_flow_control2` |
-| `dollar` | `-restrict-dollar-topics=false` | 22 of 27, 23 with it |
-| `keepalive` | `-server-keep-alive 60` | 20 of 27, 21 with it |
+| `default` | nothing extra | 22 of 27 |
+| `dollar` | `-restrict-dollar-topics=false` | 23 of 27 |
+| `keepalive` | `-server-keep-alive 60` | 21 of 27 |
 
-Across the three, 24 of 27 tests pass somewhere (`test_flow_control2` included). The only tests that fail in all three are the
+Across the three, 24 of 27 tests pass somewhere. The only tests that fail in all three are the
 three that cannot run against a broker configured like this one (below).
 
-One suite test, `test_flow_control2`, is marked `FLAKY` in the expectations and either result is
-accepted. It sends 65536 QoS 2 PUBLISHes and expects DISCONNECT 0x93 (Receive Maximum exceeded);
-the broker sends it and closes, but the suite's client keeps writing (a PUBREL) to the closed
-socket, and the reset can reach it before it reads the DISCONNECT (`BrokenPipeError` or
-`ConnectionResetError`). It passed about two runs in three on macOS and failed every time on the
-Linux CI runner. The broker does send the DISCONNECT; whether it should drain the connection before
-closing, so the reason code survives, is under "Left over". The counts below leave that test out
-of the passes, so they are the floor.
+`test_flow_control2` sends 65536 QoS 2 PUBLISHes and expects DISCONNECT 0x93 (Receive Maximum exceeded)
+while its client keeps writing. Before the lingering close the broker closed the socket at once, so the client's
+next write failed (`BrokenPipeError` or `ConnectionResetError`) before it read the DISCONNECT: it
+passed about five runs in six on macOS and failed every time on the Linux CI runner, and the test was
+marked `FLAKY`. The broker now closes lingeringly after any final DISCONNECT or refusing CONNACK
+(half-close, read and discard for at most one second, then close), the reason code survives, and the
+test is expected to `PASS`.
 
 ## Reproduce
 
@@ -69,7 +68,7 @@ Measured 2026-11-02. None of the failures is a broker bug.
 | test_dollar_topics | FAIL | PASS | FAIL | suite assumption | The broker refuses a publish to a `$` topic (PUBACK 0x90 with a Reason String, `-restrict-dollar-topics`, MQTT 5 section 4.7.2 SHOULD). The suite's client asserts a PUBACK has 2 to 4 bytes and cannot parse it; the test itself says it is to be omitted where such publishes are refused. |
 | test_server_keep_alive | FAIL | FAIL | PASS | suite assumption (config) | Expects Server Keep Alive 60 in the CONNACK, which the broker sends only when started with `-server-keep-alive`. |
 | test_will_message, test_keepalive | PASS | PASS | FAIL | consequence of the option | `-server-keep-alive 60` overrides the 2 second keep alive these tests rely on, so the broker waits 90 seconds for what they wait seconds for. This is why `-server-keep-alive` has a run of its own. |
-| test_flow_control2 | FLAKY | FLAKY | FLAKY | suite race | See above. |
+| test_flow_control2 | PASS | PASS | PASS | | Passes since the lingering close; see above. |
 | test_subscribe_failure | FAIL | FAIL | FAIL | unrunnable | Expects a SUBACK 0x80 for `test/nosubscribe`, a filter the reference broker is configured to refuse. natsmqtt5 grants it. The command line has no per-filter deny list (an `Authorizer` in the library could do it); the suite's `-n` option is parsed and never used. |
 | test_server_topic_alias | FAIL | FAIL | FAIL | unrunnable | The suite's topics are shorter than 8 bytes; the broker aliases only names of 8 bytes or more (`minAliasedTopic`, `outalias.go`), since a shorter name gains nothing. Aliases are optional for a server. The alias path itself works: with a 19-byte topic the broker sends the alias on the first PUBLISH and an empty name on the next. |
 | test_subscribe_identifiers | FAIL | FAIL | FAIL | unrunnable | Two overlapping subscriptions (`TopicA`, `TopicA/#`) get two PUBLISHes, one per subscription, each with its own identifier. MQTT 5 section 3.3.4 allows either one copy carrying every identifier or one copy per subscription, each carrying its own [MQTT-3.3.4-3]; the suite only accepts the first. `CONFORMANCE.md` records 3.3.4-4 as vacuous for this reason. |
@@ -82,5 +81,5 @@ shared subscriptions.
 
 ## Left over
 
-No `ROADMAP.md` entry: the run found no broker bug. The `test_flow_control2` race above is the suite's, but a broker that closes with unread packets in its receive buffer can turn a DISCONNECT into a reset the client never reads (a lingering close: shut down the write side, drain reads briefly, then close); whether to do that after every protocol-error DISCONNECT is open, and would let the test be expected to PASS. Not run: the MQTT 3.1.1 suite
+No `ROADMAP.md` entry: the run found no remaining broker bug; the one it did find, a close that turned the DISCONNECT into a reset, is fixed (a lingering close). Not run: the MQTT 3.1.1 suite
 (`client_test.py`), the bridge and TLS suites.

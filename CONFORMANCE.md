@@ -24,7 +24,7 @@ from the table between the markers and checked against it
 (`TestTheCountsInConformanceMdAreTheTables`); after the rows change, run
 `UPDATE_CONFORMANCE=1 go test -run TestTheCountsInConformanceMdAreTheTables .`.
 
-The Eclipse Paho MQTT 5 interoperability suite (27 tests, run in three broker configurations; 24 pass in at least one (one of them, `test_flow_control2`, only when a race of the suite's own goes its way), and 3 cannot run against any broker configured like this one) runs in CI on every pull request and fails on any difference from [conformance/paho-expected.tsv](conformance/paho-expected.tsv); see [conformance/PAHO.md](conformance/PAHO.md).
+The Eclipse Paho MQTT 5 interoperability suite (27 tests, run in three broker configurations; 24 pass in at least one, and 3 cannot run against any broker configured like this one) runs in CI on every pull request and fails on any difference from [conformance/paho-expected.tsv](conformance/paho-expected.tsv); see [conformance/PAHO.md](conformance/PAHO.md).
 
 [conformance/INDEX.md](conformance/INDEX.md) maps every statement id to the tests that cite it, with
 file:line. It is generated and checked (`TestTheConformanceIndexIsCurrent`; regenerate with

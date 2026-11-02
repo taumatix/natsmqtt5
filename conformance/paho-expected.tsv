@@ -23,6 +23,6 @@ test_server_topic_alias	FAIL	FAIL	FAIL	unrunnable: the suite uses topics shorter
 test_maximum_packet_size	PASS	PASS	PASS	
 test_server_keep_alive	FAIL	FAIL	PASS	suite assumption (config): expects Server Keep Alive 60 in the CONNACK, sent only when started with -server-keep-alive
 test_flow_control1	PASS	PASS	PASS	
-test_flow_control2	FLAKY	FLAKY	FLAKY	the suite races itself: it sends 65536 QoS 2 PUBLISHes and expects DISCONNECT 0x93, but its client keeps writing (a PUBREL) to the socket the broker has closed; the reset can reach it before the DISCONNECT is read. Always on Linux in CI, about one run in three on macOS
+test_flow_control2	PASS	PASS	PASS	
 test_will_delay	PASS	PASS	PASS	
 test_shared_subscriptions	PASS	PASS	PASS	
