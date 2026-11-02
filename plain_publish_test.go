@@ -1,6 +1,9 @@
 package natsmqtt5_test
 
 import (
+	"io"
+	"net"
+	"net/url"
 	"testing"
 	"time"
 
@@ -187,4 +190,87 @@ func TestAPlainNATSPublishHandsSharedWorkOnlyToConnectedMembers_MQTT_4_5_0_1(t *
 
 	assert.Equal(t, numbered(jobs), stays.collectPublishes(jobs), "every job reaches the connected member")
 	stays.expectNothing()
+}
+
+// slowUplink forwards TCP to a NATS server, holding each chunk the client writes for delay before
+// it goes on. Replies are not held. What a client sent is therefore registered with the server
+// late, which a loaded CI machine does by accident.
+type slowUplink struct{ ln net.Listener }
+
+func newSlowUplink(t *testing.T, natsURL string, delay time.Duration) *slowUplink {
+	t.Helper()
+	u, err := url.Parse(natsURL)
+	require.NoError(t, err)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			in, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			out, err := net.Dial("tcp", u.Host)
+			if err != nil {
+				_ = in.Close()
+				continue
+			}
+			t.Cleanup(func() { _ = in.Close(); _ = out.Close() })
+			type chunk struct {
+				at   time.Time
+				data []byte
+			}
+			chunks := make(chan chunk, 1024)
+			go func() {
+				defer close(chunks)
+				buf := make([]byte, 32<<10)
+				for {
+					n, err := in.Read(buf)
+					if n > 0 {
+						chunks <- chunk{time.Now().Add(delay), append([]byte(nil), buf[:n]...)}
+					}
+					if err != nil {
+						return
+					}
+				}
+			}()
+			go func() {
+				for c := range chunks {
+					time.Sleep(time.Until(c.at))
+					if _, err := out.Write(c.data); err != nil {
+						return
+					}
+				}
+				_ = out.Close()
+			}()
+			go func() { _, _ = io.Copy(in, out); _ = in.Close() }()
+		}
+	}()
+	return &slowUplink{ln: ln}
+}
+
+func (p *slowUplink) url() string { return "nats://" + p.ln.Addr().String() }
+
+// A publish made the moment a broker is up gets its queue copy: New returns only once the server
+// has the broker's subscription to the live subjects. Without that, a plain publish just after New
+// reached the plain subscriber and no broker (macOS CI saw one copy of two).
+func TestAPlainPublishRightAfterTheBrokerIsUpGetsItsQueueCopy(t *testing.T) {
+	natsURL := startNATS(t)
+	slow := newSlowUplink(t, natsURL, 400*time.Millisecond)
+	nc := plainNATS(t, natsURL)
+	got := make(chan *nats.Msg, 4)
+	_, err := nc.ChanSubscribe("mqtt.plain.rightaway", got)
+	require.NoError(t, err)
+	require.NoError(t, nc.Flush())
+
+	startBroker(t, slow.url(), queuePlain)
+	plainPublish(t, nc, "plain.rightaway", 1, "now")
+
+	for i := range 2 {
+		select {
+		case <-got:
+		case <-time.After(5 * time.Second):
+			require.Failf(t, "the broker's copy never came", "saw %d of 2", i)
+		}
+	}
 }

@@ -1,6 +1,7 @@
 package natsmqtt5_test
 
 import (
+	"log/slog"
 	"testing"
 	"time"
 
@@ -23,8 +24,15 @@ import (
 // clients that stay cut off longer.
 func TestClusterReconnectCatchUpSendsWhatARouteLostWhileBothBrokersStayConnected(t *testing.T) {
 	c := startNATSClusterWith(t, "ping_interval: \"2s\"\nping_max: 1")
-	subBroker, subAddr, _ := startBrokerHandle(t, c.URL(1), clusterReplicas, quickReconnect, withReconnectCatchUp)
-	pubAddr := startBroker(t, c.URL(0), clusterReplicas)
+	// The brokers' logs say why a PUBLISH was refused; a failure prints them.
+	var subLogs, pubLogs syncBuffer
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("subscriber's broker:\n%s\npublisher's broker:\n%s", subLogs.String(), pubLogs.String())
+		}
+	})
+	subBroker, subAddr, _ := startBrokerHandle(t, c.URL(1), clusterReplicas, quickReconnect, withReconnectCatchUp, debugLogging(&subLogs))
+	pubAddr := startBroker(t, c.URL(0), clusterReplicas, debugLogging(&pubLogs))
 	// The stream's leader is on the publisher's side of the cut, so its writes are acknowledged
 	// without an election.
 	c.LeadStream(natsmqtt5.DefaultStreamPrefix+"_queue", 0)
@@ -48,7 +56,18 @@ func TestClusterReconnectCatchUpSendsWhatARouteLostWhileBothBrokersStayConnected
 	require.Eventually(t, func() bool { return len(subBroker.NATS().DiscoveredServers()) >= servers }, 60*time.Second,
 		50*time.Millisecond, "the routes never came back")
 	time.Sleep(3 * time.Second) // the catch-up starts once the servers have stayed the same
+	// The rejoining server's elections can unseat the stream's leader, and the PUBLISH after the heal
+	// was refused (0x83, "no response from stream" in the broker's log) in about one run in five
+	// while there was none; it is the stream that is down for those seconds, not the broker.
+	c.AwaitStreamLeader(natsmqtt5.DefaultStreamPrefix + "_queue")
 	pub.publish(&paho.Publish{Topic: "rtc/one", QoS: 1, Payload: []byte("after")})
 
 	sub.expectPayloads("during-1", "during-2", "after")
+}
+
+// debugLogging is loggingBroker at debug level, for a test whose failure needs the broker's reasons.
+func debugLogging(logs *syncBuffer) func(*natsmqtt5.Options) {
+	return func(o *natsmqtt5.Options) {
+		o.Logger = slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	}
 }

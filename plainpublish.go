@@ -59,6 +59,13 @@ func (b *Broker) listenForPlain() error {
 		return fmt.Errorf("natsmqtt5: listening for plain publishes: %w", err)
 	}
 	b.plainSub = sub
+	// New returns when the server has the subscription: a plain publish made right after would
+	// otherwise reach the subscribers and no broker, and have no queue copy.
+	if err := b.nc.FlushTimeout(natsFlushTimeout); err != nil {
+		_ = sub.Unsubscribe()
+		b.plainSub = nil
+		return fmt.Errorf("natsmqtt5: listening for plain publishes: %w", err)
+	}
 	return nil
 }
 
