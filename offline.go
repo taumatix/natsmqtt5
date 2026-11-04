@@ -67,6 +67,9 @@ type offlineQueue struct {
 	// no responders, as a pull to a consumer just made on another server of a
 	// cluster can. A seam for tests.
 	unansweredFetches atomic.Int64
+	// failedFetches makes that many of the next replay fetches fail with an
+	// error the read does not retry itself. A seam for tests.
+	failedFetches atomic.Int64
 	// staleInfos makes that many of the next reads of a consumer's info say it
 	// is at the start with nothing pending, as a replica of the stream still
 	// catching up after a restart does. A seam for tests.
@@ -524,6 +527,9 @@ func (q *offlineQueue) fetch(ctx context.Context, cons jetstream.Consumer) (jets
 	if q.unansweredFetches.Load() > 0 && q.unansweredFetches.Add(-1) >= 0 {
 		return emptyBatch{err: nats.ErrNoResponders}, nil
 	}
+	if q.failedFetches.Load() > 0 && q.failedFetches.Add(-1) >= 0 {
+		return nil, errors.New("injected queue read failure")
+	}
 	type result struct {
 		batch jetstream.MessageBatch
 		err   error
@@ -608,6 +614,40 @@ func (c *conn) deliverQueuedOwed(id string, msg *nats.Msg, owedOnly bool) error 
 		c.replayed[id] = true
 	}
 	return nil
+}
+
+// A resume whose queue read fails is read again while the client stays
+// connected, from the first retry after readRetryFirst and doubling to
+// readRetryMax, for at most readRetryFor in all. Re-reading is safe: the ids
+// already sent are skipped, and the cursor or rewind a read starts from is not
+// moved by one that failed. Past the limit the read gives up as it always did, so
+// a queue that stays broken does not hold live messages back for ever.
+const (
+	readRetryFirst = 250 * time.Millisecond
+	readRetryMax   = 5 * time.Second
+	readRetryFor   = 30 * time.Second
+)
+
+// readUntilDone runs read until it succeeds, the connection ends, stop reports
+// a delivery error, or readRetryFor has passed. Cancellation and a closed
+// connection end it with the error read gave.
+func (c *conn) readUntilDone(ctx context.Context, stop func() bool, read func() (uint64, error)) (uint64, error) {
+	deadline := time.Now().Add(readRetryFor)
+	wait := readRetryFirst
+	for {
+		last, err := read()
+		if err == nil || errors.Is(err, context.Canceled) || stop() || c.isClosed() || time.Now().Add(wait).After(deadline) {
+			return last, err
+		}
+		c.logger.Warn("reading the offline queue for a resume failed; reading again",
+			"client_id", c.sess.clientID, "error", err, "in", wait)
+		select {
+		case <-ctx.Done():
+			return last, err
+		case <-time.After(wait):
+		}
+		wait = min(wait*2, readRetryMax)
+	}
 }
 
 // replayOffline delivers what the queue holds for this session since its last
@@ -701,6 +741,7 @@ func (c *conn) replayOffline() error {
 	} else {
 		c.sess.pinForReplay(fromSeq)
 	}
+	stop := func() bool { return deliverErr != nil }
 	if fromSeq != 0 && byTime {
 		// The sequence is the lowest message the connection knew it owed. A
 		// message stored before it, whose live copy was still on its way when
@@ -711,12 +752,12 @@ func (c *conn) replayOffline() error {
 		// long as this rewind reaches) stop it sending those again. Position is
 		// left unset until a message is handled, so a connection that ends
 		// first hands the same absence on (awayFloor).
-		last, err = q.replay(ctx, since, filters, handle)
+		last, err = c.readUntilDone(ctx, stop, func() (uint64, error) { return q.replay(ctx, since, filters, handle) })
 	} else if fromSeq != 0 {
 		c.streamNext.Store(fromSeq)
-		last, err = q.replaySeq(ctx, fromSeq, filters, handle)
+		last, err = c.readUntilDone(ctx, stop, func() (uint64, error) { return q.replaySeq(ctx, fromSeq, filters, handle) })
 	} else {
-		last, err = q.replay(ctx, since, filters, handle)
+		last, err = c.readUntilDone(ctx, stop, func() (uint64, error) { return q.replay(ctx, since, filters, handle) })
 	}
 	complete := err == nil && deliverErr == nil && !c.isClosed()
 	c.logger.Debug("read the offline queue for a resume", "client_id", c.sess.clientID,
@@ -779,12 +820,15 @@ func (c *conn) replayFromCursor(ctx context.Context, q *offlineQueue, cur cursor
 		}
 	}
 	c.streamNext.Store(start)
-	last, err := c.replayHoles(ctx, q, cur, handle)
-	if err == nil && deliverErr == nil && !c.isClosed() {
-		var to uint64
-		to, err = q.replaySeq(ctx, cur.next, q.replayRead(c.sess.subscriptions()), handle)
-		last = max(last, to)
-	}
+	last, err := c.readUntilDone(ctx, func() bool { return deliverErr != nil }, func() (uint64, error) {
+		last, err := c.replayHoles(ctx, q, cur, handle)
+		if err == nil && deliverErr == nil && !c.isClosed() {
+			var to uint64
+			to, err = q.replaySeq(ctx, cur.next, q.replayRead(c.sess.subscriptions()), handle)
+			last = max(last, to)
+		}
+		return last, err
+	})
 	complete := err == nil && deliverErr == nil && !c.isClosed()
 	c.logger.Debug("read the offline queue for a resume from its cursor", "client_id", c.sess.clientID,
 		"cursor", cur.next, "holes", len(cur.holes), "stream_last", last, "read", read,

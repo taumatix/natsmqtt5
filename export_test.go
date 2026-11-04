@@ -339,6 +339,10 @@ func SetStaleQueueConsumerInfos(b *Broker, n int) { b.queue.Load().staleInfos.St
 // has reached the broker's server.
 func SetUnansweredQueueFetches(b *Broker, n int) { b.queue.Load().unansweredFetches.Store(int64(n)) }
 
+// SetFailedQueueFetches makes the next n fetches of b's queue reads fail with an error the
+// read does not retry itself.
+func SetFailedQueueFetches(b *Broker, n int) { b.queue.Load().failedFetches.Store(int64(n)) }
+
 // SetQueueRetryEvery changes how soon the broker retries a default offline queue
 // that failed at start-up, for the rest of the test. Set it before the broker starts.
 func SetQueueRetryEvery(t interface {

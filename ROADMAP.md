@@ -87,10 +87,13 @@ chunk write is retried at the next change, not by itself.
 
 **Also:** a hole is sent only at the next resume. A message whose live copy never comes stays owed while the client is
 connected, which [MQTT-4.4.0-1] allows (it requires the resend on reconnect) but a client cannot tell from a lost one.
-A scan that finds a hole older than a few seconds could hand it to the catch-up path. A resume whose queue read fails
-(an error other than an empty or unanswered fetch, which are read again since 2026-10-31) logs "what it held is lost
-for this session" and sends nothing until the next resume, though the cursor did not move; retrying the read while
-the client stays connected would close that. Each SUBSCRIBE costs a
+A scan that finds a hole older than a few seconds could hand it to the catch-up path. **Done (2026-11-04):** a resume
+whose queue read fails (an error other than an empty or unanswered fetch, which are read again since 2026-10-31) is
+read again while the client stays connected, 250 ms doubling to 5 s for at most 30 s (`readUntilDone`, `offline.go`;
+`replay_read_retry_test.go`, which fails without it). **Left:** past 30 s it gives up and logs "what it held is lost
+for this session" as before, until the next resume; the retry holds live messages back while it runs
+([MQTT-4.6.0-5]), so a queue that is down for the whole 30 s delays a resumed client's live traffic by that much (not
+measured); the time-rewind path shares the helper but only the cursor path is tested. Each SUBSCRIBE costs a
 stream info request and each 1024 deliveries a filtered read; both measured above.
 
 ## DurablePublish does not cover live delivery to subscribers on other brokers
