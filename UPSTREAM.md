@@ -7,7 +7,7 @@ controls. This file says which versions it was built and checked against.
 - name: mqtt-specification
   kind: literal
   value: "MQTT Version 5.0, OASIS Standard, 2019-03-07"
-  checked: 2026-11-02
+  checked: 2026-11-05
   note: >-
     the normative reference; source clauses are cited inline as MQTT-5.0 §x.y.z.
     Re-read at docs.oasis-open.org on 2026-09-24: the document's own status line
@@ -19,7 +19,7 @@ controls. This file says which versions it was built and checked against.
 - name: scram-rfcs
   kind: literal
   value: "RFC 5802 (SCRAM), RFC 7677 (SCRAM-SHA-256)"
-  checked: 2026-11-02
+  checked: 2026-11-05
   note: >-
     the `scram` sub-package's contract. The RFC 7677 section 3 example exchange is
     asserted byte for byte in scram/scram_internal_test.go; RFC 5802 and 7677 are
@@ -30,7 +30,7 @@ controls. This file says which versions it was built and checked against.
   kind: github-release
   repo: nats-io/nats-server
   tag: v2.15.2
-  checked: 2026-11-02
+  checked: 2026-11-05
   note: >-
     test-only: the embedded server the end-to-end tests run against. Held at v2.14.5
     from 2026-09-21 until 2026-10-07 because v2.15.0 declares go 1.26.0; the floor
@@ -40,7 +40,7 @@ controls. This file says which versions it was built and checked against.
   kind: github-release
   repo: nats-io/nats.go
   tag: v1.55.0
-  checked: 2026-11-02
+  checked: 2026-11-05
   note: >-
     the NATS client the broker is built on; in the shipped build, not just the tests.
     Held at v1.53.1 from 2026-09-21 until 2026-10-07 because v1.54.0 declares
@@ -52,7 +52,7 @@ controls. This file says which versions it was built and checked against.
   kind: github-release
   repo: eclipse-paho/paho.golang
   tag: v0.23.0
-  checked: 2026-11-02
+  checked: 2026-11-05
   note: the third-party MQTT client the end-to-end tests drive the broker with
 ```
 
