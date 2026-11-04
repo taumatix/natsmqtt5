@@ -11,6 +11,7 @@ honestly be reconstructed now.
 
 ## [Unreleased]
 
+- **Fixed:** a resume whose read of the offline queue failed (JetStream erroring for a moment) logged "what it held is lost for this session" and sent the client nothing until its next resume, though the session's cursor had not moved. The read is now made again while the client stays connected (250 ms, doubling to 5 s, for at most 30 s; the ids already sent are skipped), and gives up as before after that. No API change and no option (`TestAResumeWhoseQueueReadFailsReadsAgainWhileTheClientStaysConnected_MQTT_4_4_0_1`, over a real socket and NATS, fails without the change).
 
 ## [1.2.2] - 2026-11-02
 
