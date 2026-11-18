@@ -7,7 +7,7 @@ controls. This file says which versions it was built and checked against.
 - name: mqtt-specification
   kind: literal
   value: "MQTT Version 5.0, OASIS Standard, 2019-03-07"
-  checked: 2026-11-16
+  checked: 2026-11-19
   note: >-
     the normative reference; source clauses are cited inline as MQTT-5.0 §x.y.z.
     Re-read at docs.oasis-open.org on 2026-09-24: the document's own status line
@@ -16,23 +16,27 @@ controls. This file says which versions it was built and checked against.
     Re-checked 2026-09-27 at oasis-open.org/standard/mqtt-v5-0-os: still the
     approved standard, with no successor listed. Re-checked 2026-11-02 and 2026-11-13: unchanged. 2026-11-16: fetched the spec HTML,
     still "OASIS Standard, 7 March 2019"; the committee page for successors was not fetched.
+    2026-11-19: fetched oasis-open.org/standard/mqtt-v5-0-os: still the current approved
+    standard (07 Mar 2019), no successor or errata mentioned; the TC home page redirected to
+    a community portal and was not fetched.
 
 - name: scram-rfcs
   kind: literal
   value: "RFC 5802 (SCRAM), RFC 7677 (SCRAM-SHA-256)"
-  checked: 2026-11-16
+  checked: 2026-11-19
   note: >-
     the `scram` sub-package's contract. The RFC 7677 section 3 example exchange is
     asserted byte for byte in scram/scram_internal_test.go; RFC 5802 and 7677 are
     Proposed Standards with no successor. 2026-11-02: RFC 7677 is now updated by RFC 9266
     (TLS 1.3 channel bindings, SCRAM-*-PLUS only), which does not touch the non-PLUS exchange asserted here.
-    2026-11-16: unverified (RFC pages not fetched this pass); date bumped only.
+    2026-11-19: fetched rfc-editor.org/info/rfc5802 and rfc7677: both still Standards Track,
+    5802 updated by 7677 and 9266, 7677 updated by 9266, neither obsoleted.
 
 - name: nats-server
   kind: github-release
   repo: nats-io/nats-server
   tag: v2.15.3
-  checked: 2026-11-16
+  checked: 2026-11-19
   note: >-
     test-only: the embedded server the end-to-end tests run against. Held at v2.14.5
     from 2026-09-21 until 2026-10-07 because v2.15.0 declares go 1.26.0; the floor
@@ -41,8 +45,8 @@ controls. This file says which versions it was built and checked against.
 - name: nats-go
   kind: github-release
   repo: nats-io/nats.go
-  tag: v1.55.0
-  checked: 2026-11-16
+  tag: v1.56.0
+  checked: 2026-11-19
   note: >-
     the NATS client the broker is built on; in the shipped build, not just the tests.
     Held at v1.53.1 from 2026-09-21 until 2026-10-07 because v1.54.0 declares
@@ -54,7 +58,7 @@ controls. This file says which versions it was built and checked against.
   kind: github-release
   repo: eclipse-paho/paho.golang
   tag: v0.23.0
-  checked: 2026-11-16
+  checked: 2026-11-19
   note: the third-party MQTT client the end-to-end tests drive the broker with
 ```
 
