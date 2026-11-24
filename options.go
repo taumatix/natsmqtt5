@@ -331,6 +331,17 @@ type Options struct {
 	// acknowledged is forgotten, so a later message that reuses the packet identifier is never mistaken
 	// for a duplicate. Requires DurablePublish; it is an error without it.
 	DurablePublishDedupe bool
+	// DurablePublishIDProperty names a User Property whose value a client chooses to identify a QoS 1 or 2
+	// PUBLISH. The broker gives the publish a Nats-Msg-Id made from the client identifier and that value,
+	// so the queue stream drops a second copy of it inside the stream's duplicate window whatever else
+	// differs: the packet identifier, the DUP flag, or a Clean Start session in between. That covers the
+	// retries DurablePublishDedupe cannot, those a client sends under a new packet identifier or after a
+	// reconnect that did not keep its session. The client must use one value per message and a different
+	// one for the next: a second message sent under a value still inside the window is dropped from the
+	// queue, and a session that was away is never offered it. A PUBLISH without the property (or with an
+	// empty value) is handled as without this option. The property is forwarded to subscribers like any
+	// other. Requires DurablePublish; it is an error without it.
+	DurablePublishIDProperty string
 	// NATSIngest lets a plain NATS client publish through a broker. A message
 	// published on a live subject straight onto NATS has no queue copy, so a
 	// session that was away never gets it and a shared subscription gets it
@@ -668,6 +679,9 @@ func (o Options) resolve() (*resolved, error) {
 	r.defaultQueue = !o.OfflineQueue && !o.DisableOfflineQueue && (!o.DisableRetained || o.PersistentSessions)
 	if o.DurablePublishDedupe && !o.DurablePublish {
 		return nil, fmt.Errorf("%w: DurablePublishDedupe needs DurablePublish", ErrInvalidOptions)
+	}
+	if o.DurablePublishIDProperty != "" && !o.DurablePublish {
+		return nil, fmt.Errorf("%w: DurablePublishIDProperty needs DurablePublish", ErrInvalidOptions)
 	}
 	if o.DurablePublish {
 		// The guarantee rests on the queue's stream, so the queue is required,

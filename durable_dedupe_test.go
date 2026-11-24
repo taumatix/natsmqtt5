@@ -18,18 +18,25 @@ import (
 // acknowledged. retry sends the PUBLISH again, under the packet identifier of the refused one.
 func refuseThenRetry(t *testing.T, clientID, topic string, retry func(pub *rawClient)) (jetstream.Stream, string) {
 	t.Helper()
+	return refuseThenRetryWith(t, clientID, topic, func(o *natsmqtt5.Options) { o.DurablePublishDedupe = true },
+		func(pub *rawClient) { rawPublishQoS(pub, packet.QoS1, 1, topic, "first") }, retry)
+}
+
+// refuseThenRetryWith is refuseThenRetry for a broker set up by opt and a first PUBLISH sent by first.
+func refuseThenRetryWith(t *testing.T, clientID, topic string, opt func(*natsmqtt5.Options), first, retry func(pub *rawClient)) (jetstream.Stream, string) {
+	t.Helper()
 	natsURL := startNATS(t)
 	proxy := newCutProxy(t, natsURL)
 	proxy.stayDown.Store(true)
 	durable := startBroker(t, proxy.url(), func(o *natsmqtt5.Options) {
 		o.DurablePublish = true
-		o.DurablePublishDedupe = true
+		opt(o)
 	})
 
 	pub := dialRaw(t, durable)
 	pub.connect(rawConnect(clientID, 0))
 	proxy.armed.Store(true)
-	rawPublishQoS(pub, packet.QoS1, 1, topic, "first")
+	first(pub)
 	ack, ok := pub.readWithin(20 * time.Second).(*packet.Puback)
 	require.True(t, ok)
 	require.Equal(t, packet.ImplementationSpecificError, ack.ReasonCode)

@@ -162,11 +162,13 @@ has the same topic and payload. So an acknowledged publish is never matched, and
 packet id is queued (`durable_dedupe_test.go`, over a socket with real NATS and the flush refused by `cutProxy`; the
 default-off behaviour stays pinned by `TestDurablePublishRetryAfterARefusedFlushLeavesASecondQueueCopy`).
 
-**Left:** off by default, so the duplicate stays for anyone who does not set it. A retry after the stream's duplicate
-window (2 minutes unless the operator raised `Duplicates`), after a Clean Start that dropped the session, or from a
-client that does not set DUP is still queued twice, and the live copy is sent again either way, so a connected
-subscriber can see it twice (QoS 1 allows both). A client-chosen User Property id is still the only way to cover
-those, and is not built.
+**Done (2026-11-24):** `Options.DurablePublishIDProperty`: a client-chosen User Property id, with the client identifier,
+becomes the `Nats-Msg-Id`, so a retry under a new packet identifier, without DUP, or after a Clean Start is dropped from
+the queue too (`durable_id_property_test.go`).
+
+**Left:** both options are off by default, so the duplicate stays for anyone who sets neither. A retry after the stream's
+duplicate window is still queued twice, and the live copy is sent again either way, so a connected subscriber can see it
+twice (QoS 1 allows both).
 
 # Decisions for a major version
 

@@ -387,7 +387,12 @@ where that path is its broker's NATS connection ([ROADMAP.md](ROADMAP.md)). A re
 a refusal can leave a second queue copy; `Options.DurablePublishDedupe` (`-durable-publish-dedupe`,
 `NATSMQTT5_DURABLE_PUBLISH_DEDUPE=true`, off by default) gives the publish a `Nats-Msg-Id` so the
 stream drops the retransmission (same packet identifier, DUP set, same topic and payload) inside its
-duplicate window, 2 minutes unless you changed the stream's. The live copy is still sent again. QoS 0 is not covered. Nor are Wills: a Will goes through
+duplicate window, 2 minutes unless you changed the stream's. The live copy is still sent again. QoS 0 is not covered.
+A client that cannot rely on that (it retries under a new packet identifier, without DUP, or after a Clean Start) can name
+its own id: `Options.DurablePublishIDProperty` (`-durable-publish-id-property`,
+`NATSMQTT5_DURABLE_PUBLISH_ID_PROPERTY`) is the name of a User Property whose value, together with the client
+identifier, becomes the `Nats-Msg-Id`. One value per message: a second message under a value still inside the window is
+dropped from the queue. Nor are Wills: a Will goes through
 the queue's keep like any other message but is not flushed, because there is no client to refuse to
 and nothing a refusal could ask it to retry; the record of a durable Will is already removed by the
 broker that publishes it ([ROADMAP.md](ROADMAP.md)).
