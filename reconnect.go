@@ -301,6 +301,9 @@ func (c *conn) releaseLive(from uint64) {
 	c.held = false
 	if from != 0 && c.broker.queue.Load() != nil {
 		c.behind = true
+		// The cursor passes what the drop lost without the session having it, as a hole
+		// below the catch-up's start, which the read from `from` never meets.
+		c.withHoles = true
 		c.noteOwedLocked(from)
 		// Read from before the drop: a message stored before one of the
 		// session's subscriptions was made is not owed to it.
