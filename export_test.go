@@ -548,3 +548,10 @@ func SetFenceProbeFault(b *Broker, f func() error) {
 func serialOnly(t interface{ Setenv(key, value string) }) {
 	t.Setenv("NATSMQTT5_SERIAL_HOOK", "1")
 }
+
+// SetHoleCheckEvery changes how often a connection sends its holes under ReconnectCatchUp, for the
+// rest of the test.
+func SetHoleCheckEvery(t interface{ Cleanup(func()) }, d time.Duration) {
+	was := holeCheckEvery.Swap(int64(d))
+	t.Cleanup(func() { holeCheckEvery.Store(was) })
+}

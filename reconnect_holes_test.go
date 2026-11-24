@@ -39,3 +39,27 @@ func TestReconnectCatchUpSendsAHoleTheCursorLeftBelowItsStart_MQTT_4_4_0_1(t *te
 	_, holes := natsmqtt5.ReplayCursor(r.b, r.id)
 	assert.Empty(t, holes, "sending it settled the hole")
 }
+
+// A live copy that never reached the broker, with no drop, flap or error to say so (a route that
+// flapped faster than the route watcher polls, or one the server has not noticed is dead, comes
+// to this), is found by the cursor's scan as a hole. Under ReconnectCatchUp the connection sends a
+// hole once it is old enough to be no live copy still on its way, while the client stays connected
+// [MQTT-4.4.0-1].
+func TestReconnectCatchUpSendsAHoleWhileTheClientStaysConnected_MQTT_4_4_0_1(t *testing.T) {
+	natsmqtt5.SetCursorScanAfter(t, 1)
+	natsmqtt5.SetHoleCheckEvery(t, 300*time.Millisecond)
+	natsURL := startNATS(t)
+	r := newCursorRig(t, natsURL, "cur-rc-live", packet.QoS1, withReconnectCatchUp)
+
+	r.send("before")
+	lost := seqOf(t, r.sendWithheld("lost"))
+	for i := range 5 {
+		r.send("after" + strconv.Itoa(i))
+	}
+	awaitHole(t, r.b, r.id, lost)
+
+	completeOne(t, r.sub, "lost")
+	assert.Empty(t, r.sub.completeFor(time.Second), "the hole is sent once, and nothing else with it")
+	_, holes := natsmqtt5.ReplayCursor(r.b, r.id)
+	assert.Empty(t, holes, "sending it settled the hole")
+}

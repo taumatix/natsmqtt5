@@ -397,10 +397,13 @@ type Options struct {
 	// broker. It covers a drop of this broker's own connection, which nats.go
 	// reports, and a change in the cluster's servers the connection learns of
 	// (a route that dropped while both brokers stayed connected), and a live copy
-	// nats.go dropped as a slow consumer; a route the
-	// server has not noticed is dead, or nats.IgnoreDiscoveredServers, hides
-	// that (ROADMAP.md). Costs one read of the
-	// queue stream per connected session after each reconnect. Off by default.
+	// nats.go dropped as a slow consumer. A route that flapped faster than it is
+	// watched, one the server has not noticed is dead, or
+	// nats.IgnoreDiscoveredServers, hide a loss from those; the replay cursor
+	// finds it instead, and each connection sends what it finds every 30 seconds
+	// or two, while its client stays connected. Costs one read of the queue
+	// stream per connected session after each reconnect, and one per session
+	// every 30 seconds. Off by default.
 	ReconnectCatchUp bool
 	// OfflineQueueMaxAge is how long a queued message is kept. Defaults to 24
 	// hours. A session away for longer loses what is older.
