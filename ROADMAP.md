@@ -24,151 +24,8 @@ in Tier 2.
 
 # Tier 2: MUST statements on rare or optional paths
 
-## The replay cursor: what falls back to the time rewind, and what waits for a resume
-
-**Blocked by:** nothing measured remains; what is left is design (the cursor in the record).
-
-**Measured (2026-11-01, `TestClusterReplayCursorCostPerSubscribeAndPerDelivery_MQTT_4_4_0_1`, three `nats:2-alpine`
-servers in Apple containers, an R3 queue):** a SUBSCRIBE costs one stream info request (3-7 ms). 4496 deliveries
-behind a hole take 2.5 s with the scans on (33 consumer creates, 25 deletes, 8 stream infos, about 8 creates per 1024
-deliveries) and 3.0 s with them off, so the scans are not visible in the delivery rate. The 400 ids past the record's
-bound are written as 2 chunks, at the checkpoint and the release. The cost is bounded and small; no change made.
-
-**Today:** a session whose record or memory has a replay cursor (`cursor.go`) is replayed from it; one without is
-replayed from `OfflineQueueRewind` before its release, as before, and keeps the rewind's limits: a message whose live
-copy never came and that is older than the rewind is lost, and a late copy more than `deliveredSeqWindow` (8192)
-sequences below what the session has delivered is not noted [MQTT-4.4.0-1]. A session is without a cursor when:
-
-1. it was restored from a record written before the cursor existed, until its first replay reads the queue to its
-   end (one absence, once, after the upgrade);
-2. it left more than 1024 holes (`maxReplayHoles`), or more than 16384 ids above the cursor (`cursorIDBound`);
-3. a SUBSCRIBE could not read the queue's last sequence, or its filter cannot be narrowed to queue subjects.
-
-**Recovered while connected (2026-10-31):** after 1024 deliveries without a cursor (`cursorScanAfter`), a restart scan
-(`restartCursor`) reads the session's subjects from where a rewind started now would (`OfflineQueueRewind` ago,
-the cursor's *base*) and sets the cursor with the holes it found. So (1), (2) and the unreadable-sequence half of (3)
-recover without a resume. It promises only what the rewind would, never more, because it cannot know what was owed
-before it. Three interleavings defeat a naive restart (the cursor at the stream's end, or from the scan with no base),
-and each has a guard. The randomized model in `cursor_model_internal_test.go` (400 seeds) fails with either of the
-first two removed; it keeps every id, so the third is a unit test:
-
-- *A live copy below base, late.* Message f, stored more than a rewind ago, has its live copy arrive after the
-  restart, and is unsent when the connection ends; the rewind starts at f (`away.fromSeq`) and sends h, f < h < base,
-  whose live copy never came. The restart never read h. Guard: a live or late copy below base drops the cursor
-  (`addHoleLocked`), and the rewind runs.
-- *The connection holds a message below base* when the restart applies: the same, with f already in hand. Guard: the
-  restart refuses.
-- *A scan longer than the rewind*: the ids delivered from base up are kept for twice the rewind, and are what tell a
-  hole from a delivered message; past that a completed QoS 2 message reads as a hole [MQTT-4.3.3-2]. Guard: refused.
-
-A subscription made or replaced while any scan reads (the plain scan included, since 2026-10-31) makes it throw its
-result away: the new filter may be owed what the scan read past without looking.
-
-**Left:** a restarted cursor stays in memory, not in the record, because a broker of an earlier version would read it
-without its base; a session restored elsewhere falls back to the rewind until its replay starts a cursor. Taking it
-into the record needs a field older brokers refuse, or a major version. The other half of (3), a filter that cannot be narrowed, still never scans. Each restart
-scan reads up to one rewind of the session's subjects per 1024 deliveries while it keeps being refused (a session
-with more than 1024 holes inside one rewind); not measured.
-
-**Recorded with the cursor (2026-10-31):** a record carries the delivered ids past `maxStoredDelivered` (4096) in
-chunks in the payload bucket (`DeliveredSpill`, `spillDelivered`), up to 65536 more, so a session with more ids than
-that above its cursor keeps the cursor in its record (`replay_cursor_spill_test.go`: 4396 ids, a restart, the message
-older than the rewind sent and none repeated). The chunks are cut where an id's hash says (`endsChunk`), so ids trimmed
-off the front or appended leave the others' keys alone and only the changed ones are written; they share one
-deadline (`sessionOpTimeout`); ids not written (the deadline, a failed put, over 1024 chunks) take the cursor out of
-the record as before, and a chunk that cannot be read on restore does the same (the replay uses the time rewind and
-may repeat). They go with the session: Clean Start and the sweep delete the owner's payloads, and a record that stops
-naming a chunk has it deleted. A record with 4096 ids or fewer is written as it was, so an older broker reads it, and
-an older broker reading one with chunks restores the ids in the value and ignores the key. Left from it: the
-checkpoint and late-copy writes are tested for the chunks (`spill_delivered_internal_test.go`) but only the release is
-driven over a socket and a killed broker's checkpoint with chunks is not; a restore reads the chunks one after the
-other (up to 128 gets at the cursor's bound), and a checkpoint sorts every id each time, neither measured; a failed
-chunk write is retried at the next change, not by itself.
-
-**Also:** a hole is sent only at the next resume. A message whose live copy never comes stays owed while the client is
-connected, which [MQTT-4.4.0-1] allows (it requires the resend on reconnect) but a client cannot tell from a lost one.
-A scan that finds a hole older than a few seconds could hand it to the catch-up path: **done (2026-11-24)** under `ReconnectCatchUp` (`holeLoop`, see DurablePublish item 1 below); without that option a hole still waits for the next resume. **Done (2026-11-04):** a resume
-whose queue read fails (an error other than an empty or unanswered fetch, which are read again since 2026-10-31) is
-read again while the client stays connected, 250 ms doubling to 5 s for at most 30 s (`readUntilDone`, `offline.go`;
-`replay_read_retry_test.go`, which fails without it). **Left:** past 30 s it gives up and logs "what it held is lost
-for this session" as before, until the next resume; the retry holds live messages back while it runs
-([MQTT-4.6.0-5]), so a queue that is down for the whole 30 s delays a resumed client's live traffic by that much (not
-measured); the time-rewind path shares the helper but only the cursor path is tested. Each SUBSCRIBE costs a
-stream info request and each 1024 deliveries a filtered read; both measured above.
-
-## DurablePublish does not cover live delivery to subscribers on other brokers
-
-**Blocked by:** real deployments, for what is left (items 2 and 3 below).
-
-**Reproduced and closed for routes (2026-11-01):** with the subscriber's server cut off from its peers (`Isolate`) and
-both brokers still connected to their own servers, a QoS 1 message published meanwhile was stored in the R3 queue and
-never reached the subscriber. The event exists after all: the server sends its clients an INFO with the cluster's
-client URLs when a route goes or comes, which nats.go keeps as `DiscoveredServers()`. `routewatch.go` polls that set
-(every 200 ms) under `ReconnectCatchUp`; a change is treated as a drop (live copies held), and once it has stayed the
-same for 1.5 s the sessions catch up from the queue as after a reconnect. Test:
-`TestClusterReconnectCatchUpSendsWhatARouteLostWhileBothBrokersStayConnected`. What it does not see: a flap shorter
-than the poll, a route the server has not noticed is dead (its pings take minutes unless `ping_interval` is set), and
-a broker that sets `nats.IgnoreDiscoveredServers`. An isolation longer than the broker's will-bucket check (about
-14.5 s) closes its clients regardless.
-
-**Design (2026-10-31).** No new stream and no subject change: the queue stream already holds a copy of every QoS 1
-and 2 message published through a broker, stored before its live copy goes out (`offlineQueue.keep`), and a
-connected session can already read it in order (the catch-up of `catchup.go`). So the smallest closure is to make a
-connected session catch up when its broker knows it missed live copies. The one event a broker sees is its own NATS
-connection dropping (nats.go's disconnect and reconnect handlers, chained onto any the caller set). A stream over
-the live subjects would overlap `$retained.>` (JetStream refuses it) and needs a subject layout change; per-session
-JetStream consumers cost a consumer per subscription. Neither is needed for the drop.
-
-**Done (2026-10-31):** `Options.ReconnectCatchUp` (`-reconnect-catch-up`), off by default, an error with
-`DisableOfflineQueue` (`reconnect.go`). On the drop every connected session holds its live QoS 1 and 2 copies back;
-on the reconnect each reads the queue from `OfflineQueueRewind` before the drop, or from just after the newest
-sequence the broker had seen if lower (a server dead behind an open socket is noticed only when the pings fail), no
-lower than it can read without sending a delivered id twice (`session.catchUpFloor`), and only what was stored after
-each subscription (`subscription.since`). A catch-up read cut by a second drop starts again after it rather than
-closing the client. Tests: `reconnect_catchup_test.go` (two brokers on one NATS, a proxy that drops or stalls one
-broker's connection: QoS 1 in order, QoS 2 once, repeated drops, a stall noticed past the rewind, a subscription
-made after the message) and `TestClusterReconnectCatchUpSendsWhatWasPublishedWhileTheSubscribersServerWasDown`
-(three servers, the subscriber's server killed and restarted).
-
-**Left:**
-
-1. **Done (2026-11-24):** route flaps and the losses no event reports. nats.go has no event for them
-   (`DiscoveredServersCB` fires only for a URL the connection has never seen, so a route that comes back after a
-   flap is silent, and `IgnoreDiscoveredServers` stops `DiscoveredServers` changing at all), so the broker no longer
-   waits for one: under `ReconnectCatchUp` each connection runs `holeLoop` (`holewatch.go`), which every 30 s scans
-   its session's cursor for holes and sends those at least that old while the client stays connected
-   (`TestReconnectCatchUpSendsAHoleWhileTheClientStaysConnected_MQTT_4_4_0_1`, a live copy withheld with no drop at
-   all; fails without the loop). A lost live copy is found and sent within one to two intervals whatever lost it.
-   **Left:** that is one stream read per connected session per interval (a scan reads from the cursor to the
-   stream's end; not measured), and a session without a cursor (see the replay-cursor entry) is not scanned.
-2. **Done (2026-11-24):** a live copy nats.go drops as a slow consumer is reported through the connection's error
-   handler; `slowConsumer` (`reconnect.go`) holds live copies and 1.5 s after the last report starts the same catch-up
-   as a reconnect, from `OfflineQueueRewind` before the report (`reconnect_slow_consumer_test.go`, which fails without
-   it: a held handler and a two-message pending cap make nats.go drop five of eight). Not measured: a slow consumer
-   that keeps reporting holds live copies back for as long as it does.
-3. **Done (2026-11-24):** a message the drop lost that a cursor scan had made a hole before the reconnect's catch-up
-   started (the catch-up starts at the cursor) is now sent by the catch-up, which reads the session's holes first, each
-   by its sequence, and skips them afterwards (`catchUpHoles`, `catchup.go`;
-   `TestReconnectCatchUpSendsAHoleTheCursorLeftBelowItsStart_MQTT_4_4_0_1`, which times out without it). A hole made by
-   anything other than a drop is still sent only at the next resume (the *Also* item above).
-
-## DurablePublish: a retry after a refused flush leaves a second queue copy
-
-**Done (2026-10-31):** `Options.DurablePublishDedupe` (off, needs `DurablePublish`). The 2026-10-30 decision rejected
-deriving the id from the packet id, because a packet id is reused after its PUBACK and a later message would be
-dropped, and asked for a client-chosen id. The broker can keep the packet id safe without the client: the id of a
-publish is held per session only until it is acknowledged, and a PUBLISH reuses it only when it is marked DUP and
-has the same topic and payload. So an acknowledged publish is never matched, and a different message under a refused
-packet id is queued (`durable_dedupe_test.go`, over a socket with real NATS and the flush refused by `cutProxy`; the
-default-off behaviour stays pinned by `TestDurablePublishRetryAfterARefusedFlushLeavesASecondQueueCopy`).
-
-**Done (2026-11-24):** `Options.DurablePublishIDProperty`: a client-chosen User Property id, with the client identifier,
-becomes the `Nats-Msg-Id`, so a retry under a new packet identifier, without DUP, or after a Clean Start is dropped from
-the queue too (`durable_id_property_test.go`).
-
-**Left:** both options are off by default, so the duplicate stays for anyone who sets neither. A retry after the stream's
-duplicate window is still queued twice, and the live copy is sent again either way, so a connected subscriber can see it
-twice (QoS 1 allows both).
+Nothing open. Every entry that was here is implemented; their records, with what each left behind, are under
+"Implemented, with what each left behind" below, and what still needs a decision is in "Decisions for a major version".
 
 # Decisions for a major version
 
@@ -190,6 +47,15 @@ What flipping would change for users:
 - **`QueuePlainPublishes` on:** a plain NATS subscriber sees a queued message twice (the original without
   `Mqtt5-Msg-Id`, then the broker's copy with one); the liveness subject would move for everyone, so v1.x and v2
   brokers could not share a fleet with `DurableWills` or `PersistentSessions`, and NATS ACLs must allow the new subject.
+
+## The restarted replay cursor lives only in memory (a v2 decision)
+
+**Blocked by:** a format change, and a major version.
+
+A cursor started by a restart scan (`restartCursor`) is kept in memory, not in the session record, because a broker of
+an earlier version would read it without its base and send what the rewind would not. A session restored on another
+broker falls back to the time rewind until its replay starts a cursor. Taking the cursor into the record needs a field
+older brokers refuse, or a v2.0.0 with a `MIGRATION.md` "v1 to v2" section.
 
 # Tier 3: SHOULD statements
 
@@ -378,7 +244,171 @@ names the SUBACK change, and document it in the README. The SUBACK test moves fr
 requested QoS ([MQTT-3.8.4-7]); with the switch off a QoS 2 request is still
 granted QoS 1.
 
+# Implemented, with what each left behind
+
+## The replay cursor: what falls back to the time rewind, and what waits for a resume
+
+**Done.** What is left is a design that needs a major version (see "Decisions for a major version") and costs not yet
+measured (see "Operations and robustness").
+
+**Measured (2026-11-01, `TestClusterReplayCursorCostPerSubscribeAndPerDelivery_MQTT_4_4_0_1`, three `nats:2-alpine`
+servers in Apple containers, an R3 queue):** a SUBSCRIBE costs one stream info request (3-7 ms). 4496 deliveries
+behind a hole take 2.5 s with the scans on (33 consumer creates, 25 deletes, 8 stream infos, about 8 creates per 1024
+deliveries) and 3.0 s with them off, so the scans are not visible in the delivery rate. The 400 ids past the record's
+bound are written as 2 chunks, at the checkpoint and the release. The cost is bounded and small; no change made.
+
+**Today:** a session whose record or memory has a replay cursor (`cursor.go`) is replayed from it; one without is
+replayed from `OfflineQueueRewind` before its release, as before, and keeps the rewind's limits: a message whose live
+copy never came and that is older than the rewind is lost, and a late copy more than `deliveredSeqWindow` (8192)
+sequences below what the session has delivered is not noted [MQTT-4.4.0-1]. A session is without a cursor when:
+
+1. it was restored from a record written before the cursor existed, until its first replay reads the queue to its
+   end (one absence, once, after the upgrade);
+2. it left more than 1024 holes (`maxReplayHoles`), or more than 16384 ids above the cursor (`cursorIDBound`);
+3. a SUBSCRIBE could not read the queue's last sequence, or its filter cannot be narrowed to queue subjects.
+
+**Recovered while connected (2026-10-31):** after 1024 deliveries without a cursor (`cursorScanAfter`), a restart scan
+(`restartCursor`) reads the session's subjects from where a rewind started now would (`OfflineQueueRewind` ago,
+the cursor's *base*) and sets the cursor with the holes it found. So (1), (2) and the unreadable-sequence half of (3)
+recover without a resume. It promises only what the rewind would, never more, because it cannot know what was owed
+before it. Three interleavings defeat a naive restart (the cursor at the stream's end, or from the scan with no base),
+and each has a guard. The randomized model in `cursor_model_internal_test.go` (400 seeds) fails with either of the
+first two removed; it keeps every id, so the third is a unit test:
+
+- *A live copy below base, late.* Message f, stored more than a rewind ago, has its live copy arrive after the
+  restart, and is unsent when the connection ends; the rewind starts at f (`away.fromSeq`) and sends h, f < h < base,
+  whose live copy never came. The restart never read h. Guard: a live or late copy below base drops the cursor
+  (`addHoleLocked`), and the rewind runs.
+- *The connection holds a message below base* when the restart applies: the same, with f already in hand. Guard: the
+  restart refuses.
+- *A scan longer than the rewind*: the ids delivered from base up are kept for twice the rewind, and are what tell a
+  hole from a delivered message; past that a completed QoS 2 message reads as a hole [MQTT-4.3.3-2]. Guard: refused.
+
+A subscription made or replaced while any scan reads (the plain scan included, since 2026-10-31) makes it throw its
+result away: the new filter may be owed what the scan read past without looking.
+
+**Left:** a restarted cursor stays in memory, not in the record, because a broker of an earlier version would read it
+without its base; a session restored elsewhere falls back to the rewind until its replay starts a cursor. Taking it
+into the record needs a field older brokers refuse, or a major version. The other half of (3), a filter that cannot be narrowed, still never scans. Each restart
+scan reads up to one rewind of the session's subjects per 1024 deliveries while it keeps being refused (a session
+with more than 1024 holes inside one rewind); not measured.
+
+**Recorded with the cursor (2026-10-31):** a record carries the delivered ids past `maxStoredDelivered` (4096) in
+chunks in the payload bucket (`DeliveredSpill`, `spillDelivered`), up to 65536 more, so a session with more ids than
+that above its cursor keeps the cursor in its record (`replay_cursor_spill_test.go`: 4396 ids, a restart, the message
+older than the rewind sent and none repeated). The chunks are cut where an id's hash says (`endsChunk`), so ids trimmed
+off the front or appended leave the others' keys alone and only the changed ones are written; they share one
+deadline (`sessionOpTimeout`); ids not written (the deadline, a failed put, over 1024 chunks) take the cursor out of
+the record as before, and a chunk that cannot be read on restore does the same (the replay uses the time rewind and
+may repeat). They go with the session: Clean Start and the sweep delete the owner's payloads, and a record that stops
+naming a chunk has it deleted. A record with 4096 ids or fewer is written as it was, so an older broker reads it, and
+an older broker reading one with chunks restores the ids in the value and ignores the key. Left from it: the
+checkpoint and late-copy writes are tested for the chunks (`spill_delivered_internal_test.go`) but only the release is
+driven over a socket and a killed broker's checkpoint with chunks is not; a restore reads the chunks one after the
+other (up to 128 gets at the cursor's bound), and a checkpoint sorts every id each time, neither measured; a failed
+chunk write is retried at the next change, not by itself.
+
+**Also:** a hole is sent only at the next resume. A message whose live copy never comes stays owed while the client is
+connected, which [MQTT-4.4.0-1] allows (it requires the resend on reconnect) but a client cannot tell from a lost one.
+A scan that finds a hole older than a few seconds could hand it to the catch-up path: **done (2026-11-24)** under `ReconnectCatchUp` (`holeLoop`, see DurablePublish item 1 below); without that option a hole still waits for the next resume. **Done (2026-11-04):** a resume
+whose queue read fails (an error other than an empty or unanswered fetch, which are read again since 2026-10-31) is
+read again while the client stays connected, 250 ms doubling to 5 s for at most 30 s (`readUntilDone`, `offline.go`;
+`replay_read_retry_test.go`, which fails without it). **Left:** past 30 s it gives up and logs "what it held is lost
+for this session" as before, until the next resume; the retry holds live messages back while it runs
+([MQTT-4.6.0-5]), so a queue that is down for the whole 30 s delays a resumed client's live traffic by that much (not
+measured); the time-rewind path shares the helper but only the cursor path is tested. Each SUBSCRIBE costs a
+stream info request and each 1024 deliveries a filtered read; both measured above.
+
+## DurablePublish does not cover live delivery to subscribers on other brokers
+
+**Done.** Items 1-3 below are implemented.
+
+**Reproduced and closed for routes (2026-11-01):** with the subscriber's server cut off from its peers (`Isolate`) and
+both brokers still connected to their own servers, a QoS 1 message published meanwhile was stored in the R3 queue and
+never reached the subscriber. The event exists after all: the server sends its clients an INFO with the cluster's
+client URLs when a route goes or comes, which nats.go keeps as `DiscoveredServers()`. `routewatch.go` polls that set
+(every 200 ms) under `ReconnectCatchUp`; a change is treated as a drop (live copies held), and once it has stayed the
+same for 1.5 s the sessions catch up from the queue as after a reconnect. Test:
+`TestClusterReconnectCatchUpSendsWhatARouteLostWhileBothBrokersStayConnected`. What it does not see: a flap shorter
+than the poll, a route the server has not noticed is dead (its pings take minutes unless `ping_interval` is set), and
+a broker that sets `nats.IgnoreDiscoveredServers`. An isolation longer than the broker's will-bucket check (about
+14.5 s) closes its clients regardless.
+
+**Design (2026-10-31).** No new stream and no subject change: the queue stream already holds a copy of every QoS 1
+and 2 message published through a broker, stored before its live copy goes out (`offlineQueue.keep`), and a
+connected session can already read it in order (the catch-up of `catchup.go`). So the smallest closure is to make a
+connected session catch up when its broker knows it missed live copies. The one event a broker sees is its own NATS
+connection dropping (nats.go's disconnect and reconnect handlers, chained onto any the caller set). A stream over
+the live subjects would overlap `$retained.>` (JetStream refuses it) and needs a subject layout change; per-session
+JetStream consumers cost a consumer per subscription. Neither is needed for the drop.
+
+**Done (2026-10-31):** `Options.ReconnectCatchUp` (`-reconnect-catch-up`), off by default, an error with
+`DisableOfflineQueue` (`reconnect.go`). On the drop every connected session holds its live QoS 1 and 2 copies back;
+on the reconnect each reads the queue from `OfflineQueueRewind` before the drop, or from just after the newest
+sequence the broker had seen if lower (a server dead behind an open socket is noticed only when the pings fail), no
+lower than it can read without sending a delivered id twice (`session.catchUpFloor`), and only what was stored after
+each subscription (`subscription.since`). A catch-up read cut by a second drop starts again after it rather than
+closing the client. Tests: `reconnect_catchup_test.go` (two brokers on one NATS, a proxy that drops or stalls one
+broker's connection: QoS 1 in order, QoS 2 once, repeated drops, a stall noticed past the rewind, a subscription
+made after the message) and `TestClusterReconnectCatchUpSendsWhatWasPublishedWhileTheSubscribersServerWasDown`
+(three servers, the subscriber's server killed and restarted).
+
+**Left:**
+
+1. **Done (2026-11-24):** route flaps and the losses no event reports. nats.go has no event for them
+   (`DiscoveredServersCB` fires only for a URL the connection has never seen, so a route that comes back after a
+   flap is silent, and `IgnoreDiscoveredServers` stops `DiscoveredServers` changing at all), so the broker no longer
+   waits for one: under `ReconnectCatchUp` each connection runs `holeLoop` (`holewatch.go`), which every 30 s scans
+   its session's cursor for holes and sends those at least that old while the client stays connected
+   (`TestReconnectCatchUpSendsAHoleWhileTheClientStaysConnected_MQTT_4_4_0_1`, a live copy withheld with no drop at
+   all; fails without the loop). A lost live copy is found and sent within one to two intervals whatever lost it.
+   **Left:** that is one stream read per connected session per interval (a scan reads from the cursor to the
+   stream's end; not measured), and a session without a cursor (see the replay-cursor entry) is not scanned.
+2. **Done (2026-11-24):** a live copy nats.go drops as a slow consumer is reported through the connection's error
+   handler; `slowConsumer` (`reconnect.go`) holds live copies and 1.5 s after the last report starts the same catch-up
+   as a reconnect, from `OfflineQueueRewind` before the report (`reconnect_slow_consumer_test.go`, which fails without
+   it: a held handler and a two-message pending cap make nats.go drop five of eight). Not measured: a slow consumer
+   that keeps reporting holds live copies back for as long as it does.
+3. **Done (2026-11-24):** a message the drop lost that a cursor scan had made a hole before the reconnect's catch-up
+   started (the catch-up starts at the cursor) is now sent by the catch-up, which reads the session's holes first, each
+   by its sequence, and skips them afterwards (`catchUpHoles`, `catchup.go`;
+   `TestReconnectCatchUpSendsAHoleTheCursorLeftBelowItsStart_MQTT_4_4_0_1`, which times out without it). A hole made by
+   anything other than a drop is still sent only at the next resume (the *Also* item above).
+
+## DurablePublish: a retry after a refused flush leaves a second queue copy
+
+**Done (2026-10-31):** `Options.DurablePublishDedupe` (off, needs `DurablePublish`). The 2026-10-30 decision rejected
+deriving the id from the packet id, because a packet id is reused after its PUBACK and a later message would be
+dropped, and asked for a client-chosen id. The broker can keep the packet id safe without the client: the id of a
+publish is held per session only until it is acknowledged, and a PUBLISH reuses it only when it is marked DUP and
+has the same topic and payload. So an acknowledged publish is never matched, and a different message under a refused
+packet id is queued (`durable_dedupe_test.go`, over a socket with real NATS and the flush refused by `cutProxy`; the
+default-off behaviour stays pinned by `TestDurablePublishRetryAfterARefusedFlushLeavesASecondQueueCopy`).
+
+**Done (2026-11-24):** `Options.DurablePublishIDProperty`: a client-chosen User Property id, with the client identifier,
+becomes the `Nats-Msg-Id`, so a retry under a new packet identifier, without DUP, or after a Clean Start is dropped from
+the queue too (`durable_id_property_test.go`).
+
+**Left:** both options are off by default, so the duplicate stays for anyone who sets neither. A retry after the stream's
+duplicate window is still queued twice, and the live copy is sent again either way, so a connected subscriber can see it
+twice (QoS 1 allows both).
+
 # Operations and robustness (not conformance)
+
+## The replay cursor and the hole loop: costs and paths not yet measured
+
+Not MUST statements; what the Tier 2 work left unmeasured or untested:
+
+- A filter that cannot be narrowed to queue subjects never scans, and a session without a cursor is not scanned by the
+  hole loop.
+- Each restart scan reads up to one rewind of the session's subjects per 1024 deliveries while it keeps being refused
+  (a session with more than 1024 holes inside one rewind).
+- The hole loop reads the stream once per session every 30 s; a slow consumer that keeps reporting holds live copies
+  back for as long as it does.
+- Spill chunks: a killed broker's checkpoint with chunks is not driven over a socket; a restore reads chunks one after
+  the other and a checkpoint sorts every id each time; a failed chunk write is retried at the next change.
+- A resume's queue read gives up after 30 s and holds live messages back while it retries; the time-rewind path shares
+  the helper but only the cursor path is tested.
 
 ## A lone QoS 2 message still waits for two record writes
 
