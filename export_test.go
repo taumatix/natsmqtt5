@@ -30,6 +30,18 @@ func SetSessionSaveFault(b *Broker, f func() error) {
 	b.store.saveFault.Store(&f)
 }
 
+// SetLiveSlowConsumer caps each live subscription made from now on at pending unhandled messages
+// and makes every live handler call gate first, so a test can hold the handler and have nats.go
+// drop the copies behind it as a slow consumer. A zero pending and nil gate remove both.
+func SetLiveSlowConsumer(b *Broker, pending int, gate func()) {
+	b.livePendingLimit.Store(int64(pending))
+	if gate == nil {
+		b.liveGate.Store(nil)
+		return
+	}
+	b.liveGate.Store(&gate)
+}
+
 // SetPubrecGate makes a connection call f(id) when it has read a PUBREC that
 // accepts the QoS 2 message id, before anything records that the PUBREL is
 // owed: the window in which a broker killed leaves a record that still names

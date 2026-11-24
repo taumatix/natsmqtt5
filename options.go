@@ -396,7 +396,8 @@ type Options struct {
 	// and covers only messages with a queue copy: those published through a
 	// broker. It covers a drop of this broker's own connection, which nats.go
 	// reports, and a change in the cluster's servers the connection learns of
-	// (a route that dropped while both brokers stayed connected); a route the
+	// (a route that dropped while both brokers stayed connected), and a live copy
+	// nats.go dropped as a slow consumer; a route the
 	// server has not noticed is dead, or nats.IgnoreDiscoveredServers, hides
 	// that (ROADMAP.md). Costs one read of the
 	// queue stream per connected session after each reconnect. Off by default.

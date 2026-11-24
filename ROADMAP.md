@@ -133,9 +133,11 @@ made after the message) and `TestClusterReconnectCatchUpSendsWhatWasPublishedWhi
 **Left:**
 
 1. Route flaps: see above for what is covered and not.
-2. A live copy nats.go drops on the broker's side as a slow consumer (its pending limits): reported through the
-   connection's error handler, not handled. The same catch-up from the stream would serve, started from the
-   subscription's last delivered sequence.
+2. **Done (2026-11-24):** a live copy nats.go drops as a slow consumer is reported through the connection's error
+   handler; `slowConsumer` (`reconnect.go`) holds live copies and 1.5 s after the last report starts the same catch-up
+   as a reconnect, from `OfflineQueueRewind` before the report (`reconnect_slow_consumer_test.go`, which fails without
+   it: a held handler and a two-message pending cap make nats.go drop five of eight). Not measured: a slow consumer
+   that keeps reporting holds live copies back for as long as it does.
 3. A message the drop lost that a cursor scan made a hole before the reconnect's catch-up started (the catch-up
    starts at the cursor): sent on the session's next resume, not at once.
 
