@@ -2,7 +2,10 @@ package natsmqtt5
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"sync"
+
+	"github.com/taumatix/natsmqtt5/packet"
 )
 
 // publishIDs gives a retransmitted publish the message id its refused first attempt had
@@ -53,4 +56,22 @@ func (p *publishIDs) done(packetID uint16) {
 	p.mu.Lock()
 	delete(p.pending, packetID)
 	p.mu.Unlock()
+}
+
+// clientChosenID is the message id for a publish that carries Options.DurablePublishIDProperty, or ""
+// when the option is off, the publish is QoS 0, or the property is absent or empty. The client
+// identifier is part of it, so two clients that pick the same value do not drop each other's messages;
+// it is hashed so that any value is a valid, bounded header and the id does not give away either part.
+func (c *conn) clientChosenID(p *packet.Publish) string {
+	name := c.broker.opts.DurablePublishIDProperty
+	if name == "" || p.QoS == packet.QoS0 || p.Properties == nil {
+		return ""
+	}
+	for _, u := range p.Properties.User {
+		if u.Key == name && u.Value != "" {
+			sum := sha256.Sum256([]byte(c.sess.clientID + "\x00" + u.Value))
+			return "c-" + hex.EncodeToString(sum[:16])
+		}
+	}
+	return ""
 }

@@ -119,7 +119,9 @@ func (c *conn) handlePublish(ctx context.Context, p *packet.Publish) error {
 	// wire but miss it in the retained set.
 	id := newMessageID()
 	dedupe := c.broker.opts.DurablePublishDedupe && p.QoS > packet.QoS0
-	if dedupe {
+	if chosen := c.clientChosenID(p); chosen != "" {
+		id, dedupe = chosen, true
+	} else if dedupe {
 		id = c.sess.publishIDs.idFor(p.PacketID, p.Dup, topicName, p.Payload, id)
 	}
 	if p.Retain {

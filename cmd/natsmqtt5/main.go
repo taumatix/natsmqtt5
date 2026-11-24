@@ -150,6 +150,7 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 		awayBuffer      = fs.Int("away-buffer-messages", 0, "with no offline queue, how many QoS 1 and 2 messages to hold in memory per session that is away (0 means 1000, negative holds none, at most 2048); a session that overflows is ended and its client told Session Present 0")
 		noOffline       = fs.Bool("no-offline-queue", false, "do not store QoS 1 and 2 messages for disconnected sessions in JetStream; they are held in memory instead, see -away-buffer-messages")
 		offlineMaxAge   = fs.Duration("offline-queue-max-age", 24*time.Hour, "how long a queued message is kept for a disconnected session")
+		durableIDProp   = fs.String("durable-publish-id-property", "", "with -durable-publish, the name of a User Property whose value a client chooses to identify a publish: the queue stream drops a second copy with the same value from the same client inside its duplicate window")
 		durableDedupe   = fs.Bool("durable-publish-dedupe", false, "with -durable-publish, let the queue stream drop the copy a client's retry of a refused publish would add (inside its duplicate window)")
 		durablePub      = fs.Bool("durable-publish", false, "acknowledge QoS 1 and 2 publishes only once the offline queue has stored them and NATS has confirmed the live copy (implies -offline-queue)")
 		queuePlain      = fs.Bool("queue-plain-publishes", false, "queue a message a plain NATS client publishes on a live subject with an Mqtt5-Qos header of 1 or 2, by having a broker publish it again with an id; plain subscribers see it twice, the broker liveness subject moves to <subject-prefix>$broker.<id>.ping (allow it in NATS permissions), and every broker must agree on this setting")
@@ -250,6 +251,7 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (*
 			RetainedVerifyInterval:    *retainVerify,
 			DurablePublish:            *durablePub,
 			DurablePublishDedupe:      *durableDedupe,
+			DurablePublishIDProperty:  *durableIDProp,
 			NATSIngest:                *natsIngest,
 			ReconnectCatchUp:          *reconnectCatch,
 			OfflineQueue:              *offlineQueue,

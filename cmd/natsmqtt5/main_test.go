@@ -228,6 +228,20 @@ func TestDurablePublishDedupeFlag(t *testing.T) {
 	assert.False(t, cfg.broker.DurablePublishDedupe, "off unless asked for")
 }
 
+func TestDurablePublishIDPropertyFlag(t *testing.T) {
+	cfg, err := parseConfig([]string{"-durable-publish", "-durable-publish-id-property", "msg-id"}, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.Equal(t, "msg-id", cfg.broker.DurablePublishIDProperty)
+
+	cfg, err = parseConfig(nil, env(map[string]string{"NATSMQTT5_DURABLE_PUBLISH_ID_PROPERTY": "msg-id"}), io.Discard)
+	require.NoError(t, err)
+	assert.Equal(t, "msg-id", cfg.broker.DurablePublishIDProperty)
+
+	cfg, err = parseConfig(nil, env(nil), io.Discard)
+	require.NoError(t, err)
+	assert.Empty(t, cfg.broker.DurablePublishIDProperty, "off unless asked for")
+}
+
 func TestRetainedVerifyIntervalFlag(t *testing.T) {
 	cfg, err := parseConfig([]string{"-retained-verify-interval", "10m"}, env(nil), io.Discard)
 	require.NoError(t, err)
