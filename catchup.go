@@ -126,6 +126,9 @@ func (c *conn) catchUp() error {
 		return err
 	}
 	c.replayedBefore, c.replayed = c.replayed, make(map[string]bool)
+	if err := c.catchUpHoles(q, sent); err != nil {
+		return err
+	}
 
 	for {
 		c.catchMu.Lock()
@@ -179,6 +182,47 @@ func (c *conn) catchUp() error {
 			c.streamNext.Store(0)
 		}
 	}
+}
+
+// catchUpHoles sends the session's replay-cursor holes, each read by its sequence and in order,
+// before the stream read: a hole is a message the session is owed that lies below the cursor, so
+// the read from the catch-up's start (which the cursor floors) never meets it. Without this it
+// waited for the next resume. A failed read leaves the holes for that resume.
+func (c *conn) catchUpHoles(q *offlineQueue, sent map[uint64]bool) error {
+	c.catchMu.Lock()
+	want := c.withHoles && !c.held
+	if want {
+		c.withHoles = false
+	}
+	c.catchMu.Unlock()
+	if !want {
+		return nil
+	}
+	cur, ok := c.sess.cursorForReplay()
+	if !ok || len(cur.holes) == 0 {
+		return nil
+	}
+	delivered := c.sess.deliveredIDs()
+	ctx, cancel := c.streamContext()
+	defer cancel()
+	var deliverErr error
+	_, err := c.replayHoles(ctx, q, cur, func(msg *nats.Msg) {
+		if deliverErr != nil || c.isClosed() {
+			return
+		}
+		seq, id := queueSeq(msg), messageID(msg)
+		if id != "" && !delivered[id] && !c.wasReplayed(id) && !sent[seq] {
+			deliverErr = c.deliverQueuedOwed(id, msg, false)
+		}
+	})
+	if deliverErr != nil {
+		return deliverErr
+	}
+	if err != nil && !errors.Is(err, context.Canceled) {
+		c.logger.Warn("could not send the replay cursor's holes while catching up; they wait for the next resume",
+			"client_id", c.sess.clientID, "error", err)
+	}
+	return nil
 }
 
 // natsReconnects is how many times the broker's NATS connection has

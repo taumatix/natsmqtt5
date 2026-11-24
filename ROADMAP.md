@@ -138,8 +138,11 @@ made after the message) and `TestClusterReconnectCatchUpSendsWhatWasPublishedWhi
    as a reconnect, from `OfflineQueueRewind` before the report (`reconnect_slow_consumer_test.go`, which fails without
    it: a held handler and a two-message pending cap make nats.go drop five of eight). Not measured: a slow consumer
    that keeps reporting holds live copies back for as long as it does.
-3. A message the drop lost that a cursor scan made a hole before the reconnect's catch-up started (the catch-up
-   starts at the cursor): sent on the session's next resume, not at once.
+3. **Done (2026-11-24):** a message the drop lost that a cursor scan had made a hole before the reconnect's catch-up
+   started (the catch-up starts at the cursor) is now sent by the catch-up, which reads the session's holes first, each
+   by its sequence, and skips them afterwards (`catchUpHoles`, `catchup.go`;
+   `TestReconnectCatchUpSendsAHoleTheCursorLeftBelowItsStart_MQTT_4_4_0_1`, which times out without it). A hole made by
+   anything other than a drop is still sent only at the next resume (the *Also* item above).
 
 ## DurablePublish: a retry after a refused flush leaves a second queue copy
 

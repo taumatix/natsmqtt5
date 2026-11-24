@@ -145,6 +145,9 @@ type conn struct {
 	// that follows has no start yet; owedOnly while a catch-up reads from
 	// before the drop (reconnect.go). Both are guarded by catchMu.
 	held, owedOnly bool
+	// withHoles asks the next catch-up to send the session's replay-cursor holes first
+	// (catchup.go); guarded by catchMu.
+	withHoles bool
 
 	// Where this connection stands in the queue stream, for the replay after
 	// it ends; see awayFloor. All but loopDone belong to the delivery
