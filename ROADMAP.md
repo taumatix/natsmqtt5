@@ -87,7 +87,7 @@ chunk write is retried at the next change, not by itself.
 
 **Also:** a hole is sent only at the next resume. A message whose live copy never comes stays owed while the client is
 connected, which [MQTT-4.4.0-1] allows (it requires the resend on reconnect) but a client cannot tell from a lost one.
-A scan that finds a hole older than a few seconds could hand it to the catch-up path. **Done (2026-11-04):** a resume
+A scan that finds a hole older than a few seconds could hand it to the catch-up path: **done (2026-11-24)** under `ReconnectCatchUp` (`holeLoop`, see DurablePublish item 1 below); without that option a hole still waits for the next resume. **Done (2026-11-04):** a resume
 whose queue read fails (an error other than an empty or unanswered fetch, which are read again since 2026-10-31) is
 read again while the client stays connected, 250 ms doubling to 5 s for at most 30 s (`readUntilDone`, `offline.go`;
 `replay_read_retry_test.go`, which fails without it). **Left:** past 30 s it gives up and logs "what it held is lost
@@ -132,7 +132,15 @@ made after the message) and `TestClusterReconnectCatchUpSendsWhatWasPublishedWhi
 
 **Left:**
 
-1. Route flaps: see above for what is covered and not.
+1. **Done (2026-11-24):** route flaps and the losses no event reports. nats.go has no event for them
+   (`DiscoveredServersCB` fires only for a URL the connection has never seen, so a route that comes back after a
+   flap is silent, and `IgnoreDiscoveredServers` stops `DiscoveredServers` changing at all), so the broker no longer
+   waits for one: under `ReconnectCatchUp` each connection runs `holeLoop` (`holewatch.go`), which every 30 s scans
+   its session's cursor for holes and sends those at least that old while the client stays connected
+   (`TestReconnectCatchUpSendsAHoleWhileTheClientStaysConnected_MQTT_4_4_0_1`, a live copy withheld with no drop at
+   all; fails without the loop). A lost live copy is found and sent within one to two intervals whatever lost it.
+   **Left:** that is one stream read per connected session per interval (a scan reads from the cursor to the
+   stream's end; not measured), and a session without a cursor (see the replay-cursor entry) is not scanned.
 2. **Done (2026-11-24):** a live copy nats.go drops as a slow consumer is reported through the connection's error
    handler; `slowConsumer` (`reconnect.go`) holds live copies and 1.5 s after the last report starts the same catch-up
    as a reconnect, from `OfflineQueueRewind` before the report (`reconnect_slow_consumer_test.go`, which fails without

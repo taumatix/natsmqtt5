@@ -106,6 +106,9 @@ type replayCursor struct {
 	// owed and has not been sent to its id; holeAt is the reverse.
 	holes  map[uint64]string
 	holeAt map[string]uint64
+	// holeSince is when each hole was recorded, so one that outlives a live copy still in
+	// flight can be told from it (conn.holeLoop).
+	holeSince map[uint64]time.Time
 	// gen changes whenever the cursor is set or dropped other than by a scan
 	// that started from it, so a scan that raced one throws its result away.
 	gen uint64
@@ -126,15 +129,20 @@ func (r *replayCursor) addHole(seq uint64, id string) {
 	if r.holes == nil {
 		r.holes = make(map[uint64]string)
 		r.holeAt = make(map[string]uint64)
+		r.holeSince = make(map[uint64]time.Time)
 	}
 	r.holes[seq] = id
 	r.holeAt[id] = seq
+	r.holeSince[seq] = time.Now()
 }
+
+func (r *replayCursor) clearHoles() { r.holes, r.holeAt, r.holeSince = nil, nil, nil }
 
 func (r *replayCursor) removeHole(id string) {
 	if seq, ok := r.holeAt[id]; ok {
 		delete(r.holeAt, id)
 		delete(r.holes, seq)
+		delete(r.holeSince, seq)
 	}
 }
 
@@ -180,7 +188,7 @@ func (s *session) cursorViewLocked() cursorView {
 // setCursorLocked replaces the cursor. s.mu and s.cursorMu are held.
 func (s *session) setCursorLocked(next uint64) {
 	s.cur.next = next
-	s.cur.holes, s.cur.holeAt = nil, nil
+	s.cur.clearHoles()
 	s.cur.gen++
 	s.cur.above = 0
 	s.cur.pin = 0
@@ -195,7 +203,7 @@ func (s *session) setCursorLocked(next uint64) {
 // its hole is cleared with it, or sees none.
 func (s *session) dropCursorLocked() {
 	s.cur.next = 0
-	s.cur.holes, s.cur.holeAt = nil, nil
+	s.cur.clearHoles()
 	s.cur.gen++
 	s.cur.above = 0
 	s.cur.pin = 0
@@ -749,7 +757,7 @@ func (s *session) restoreCursorLocked(next uint64, holes []storedDelivered) {
 		return
 	}
 	s.cur.next = next
-	s.cur.holes, s.cur.holeAt = nil, nil
+	s.cur.clearHoles()
 	s.cur.gen++
 	for _, h := range holes {
 		// A hole whose message the record also lists in flight was sent between

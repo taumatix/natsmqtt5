@@ -286,6 +286,9 @@ func (c *conn) serve(ctx context.Context) {
 
 	c.loopStarted.Store(true)
 	go c.deliverLoop()
+	if c.broker.opts.ReconnectCatchUp {
+		go c.holeLoop()
+	}
 	if iv := c.broker.opts.SessionCheckpointInterval; iv > 0 && c.broker.store != nil {
 		go c.checkpointLoop(iv)
 	}

@@ -20,9 +20,9 @@ import (
 // is one catch-up, started after the second flap.
 //
 // What it does not see: a flap shorter than routePollInterval, a route the server has not
-// noticed is dead (its own pings take minutes unless ping_interval is set), so what was lost
-// before OfflineQueueRewind is not found, and a broker that set nats.IgnoreDiscoveredServers,
-// which keeps the set from ever changing.
+// noticed is dead (its own pings take minutes unless ping_interval is set), and a broker that
+// set nats.IgnoreDiscoveredServers, which keeps the set from ever changing. nats.go has no event
+// for these, so the copies they lose are found by the hole loop instead (holewatch.go).
 
 const (
 	// routePollInterval is how often the discovered servers are read; a read takes a lock and
