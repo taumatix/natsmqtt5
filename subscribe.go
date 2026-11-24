@@ -294,6 +294,9 @@ func (c *conn) bindNATS(sub *subscription) error {
 	cell.Store(sub)
 	sub.cell = cell
 	handler := func(msg *nats.Msg) {
+		if g := c.broker.liveGate.Load(); g != nil {
+			(*g)()
+		}
 		defer c.broker.liveSeen.Add(1)
 		if c.broker.heldForQueue(msg) {
 			// A plain publish that asked for a queue copy (Options.QueuePlainPublishes): a
@@ -372,6 +375,9 @@ func (c *conn) bindNATS(sub *subscription) error {
 		if err != nil {
 			unsubscribeAll(sub)
 			return err
+		}
+		if n := c.broker.livePendingLimit.Load(); n > 0 {
+			_ = ns.SetPendingLimits(int(n), -1)
 		}
 		sub.natsSubs = append(sub.natsSubs, ns)
 	}

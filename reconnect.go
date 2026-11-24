@@ -2,6 +2,7 @@ package natsmqtt5
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -49,12 +50,28 @@ type natsWatch struct {
 	// on Close.
 	prevDisconnect nats.ConnErrHandler
 	prevReconnect  nats.ConnHandler
+	prevError      nats.ErrHandler
+	// slowTimer starts the catch-up once no slow-consumer error has come for slowSettle.
+	slowTimer *time.Timer
 }
+
+// slowSettle is how long after the last slow-consumer error the catch-up starts: nats.go reports
+// an overflow once per episode, when the first copy is dropped, and the handler is still behind.
+const slowSettle = 1500 * time.Millisecond
 
 // watchReconnects chains the broker's handlers onto its NATS connection's.
 func (b *Broker) watchReconnects() {
 	w := &b.natsWatch
 	w.prevDisconnect, w.prevReconnect = b.nc.Opts.DisconnectedErrCB, b.nc.Opts.ReconnectedCB
+	w.prevError = b.nc.Opts.AsyncErrorCB
+	b.nc.SetErrorHandler(func(nc *nats.Conn, sub *nats.Subscription, err error) {
+		if errors.Is(err, nats.ErrSlowConsumer) {
+			b.slowConsumer(sub)
+		}
+		if w.prevError != nil {
+			w.prevError(nc, sub, err)
+		}
+	})
 	b.nc.SetDisconnectErrHandler(func(nc *nats.Conn, err error) {
 		b.natsLost()
 		if w.prevDisconnect != nil {
@@ -77,6 +94,34 @@ func (b *Broker) unwatchReconnects() {
 	}
 	b.nc.SetDisconnectErrHandler(b.natsWatch.prevDisconnect)
 	b.nc.SetReconnectHandler(b.natsWatch.prevReconnect)
+	b.nc.SetErrorHandler(b.natsWatch.prevError)
+	b.natsWatch.mu.Lock()
+	defer b.natsWatch.mu.Unlock()
+	if b.natsWatch.slowTimer != nil {
+		b.natsWatch.slowTimer.Stop()
+	}
+}
+
+// slowConsumer runs when nats.go dropped a live copy because a subscription's handler fell
+// behind its pending limits. The queue holds the copy, so it is treated as a short drop: live
+// copies are held back, and once the errors stop the sessions catch up from the queue.
+func (b *Broker) slowConsumer(sub *nats.Subscription) {
+	if b.queue.Load() == nil {
+		return
+	}
+	subject := ""
+	if sub != nil {
+		subject = sub.Subject
+	}
+	b.logger.Warn("a live subscription fell behind and NATS dropped copies; connected sessions will catch up from the offline queue", "subject", subject)
+	b.natsLost()
+	w := &b.natsWatch
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.slowTimer != nil {
+		w.slowTimer.Stop()
+	}
+	w.slowTimer = time.AfterFunc(slowSettle, b.natsBack)
 }
 
 // connectedConns is every connection currently serving a session.

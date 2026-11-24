@@ -44,6 +44,11 @@ type Broker struct {
 	// accepted for a QoS 2 delivery, before the record naming its PUBREL is
 	// written. A seam for tests.
 	pubrecGate atomic.Pointer[func(id uint16)]
+	// livePendingLimit, when above zero, caps the messages a live NATS subscription may hold
+	// unhandled; liveGate, when set, runs first in each live handler. Seams for tests that
+	// make nats.go drop a live copy as a slow consumer.
+	livePendingLimit atomic.Int64
+	liveGate         atomic.Pointer[func()]
 	// sharedFetchHook, when set, sees the size asked of each batch pull of a
 	// shared subscription's backlog and the number it returned. A seam for tests.
 	sharedFetchHook atomic.Pointer[func(asked, got int)]
