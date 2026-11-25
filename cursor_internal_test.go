@@ -182,7 +182,7 @@ func TestARestoredCursorKeepsOnlyHolesBelowIt(t *testing.T) {
 	s := newSession("c")
 	s.noteDelivered("in-flight", 5) // restore.go notes the record's in-flight messages first
 	s.markAwayRestored(time.Now(), 0, 0, time.Time{}, nil, 10,
-		[]storedDelivered{{ID: "a", Seq: 3}, {ID: "b", Seq: 10}, {ID: "", Seq: 4}, {ID: "in-flight", Seq: 5}})
+		[]storedDelivered{{ID: "a", Seq: 3}, {ID: "b", Seq: 10}, {ID: "", Seq: 4}, {ID: "in-flight", Seq: 5}}, 0)
 
 	next, holes := cursorOf(s)
 	assert.Equal(t, uint64(10), next)

@@ -97,7 +97,7 @@ func TestTheStoredIDsAreBounded(t *testing.T) {
 // restored session knows the ids, so the replay that starts below them skips them.
 func TestARestoredSessionKnowsWhatItAlreadyDelivered(t *testing.T) {
 	s := newSession("c")
-	s.markAwayRestored(time.Now(), 5, 0, time.Time{}, []storedDelivered{{ID: "seen", Seq: 8}}, 0, nil)
+	s.markAwayRestored(time.Now(), 5, 0, time.Time{}, []storedDelivered{{ID: "seen", Seq: 8}}, 0, nil, 0)
 
 	a, ok := s.takeAway()
 	require.True(t, ok)

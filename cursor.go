@@ -70,9 +70,9 @@ import (
 // sequence names: the lowest message the connection holds (owedFloor), or a
 // late copy. A restart refuses while the connection holds one below base, and a
 // live or late copy below base drops the restarted cursor (addHoleLocked), so
-// the rewind, which would have started there, does. A restarted cursor is not
-// written to the session's record: a broker that restores the record replays
-// it from the time rewind, which an older broker ignoring base would not.
+// the rewind, which would have started there, does. A restarted cursor is
+// written to the session's record under its own keys (sessionRecord.RestartCursor),
+// which a broker that predates them ignores and replays from the time rewind.
 
 // sinceUnknown marks a subscription whose since has not been read yet.
 const sinceUnknown = math.MaxUint64
