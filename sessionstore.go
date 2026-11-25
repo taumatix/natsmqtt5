@@ -163,6 +163,18 @@ type sessionRecord struct {
 	ReplayCursor uint64            `json:",omitempty"`
 	ReplayHoles  []storedDelivered `json:",omitempty"`
 
+	// RestartCursor, RestartBase and RestartHoles are a restarted cursor
+	// (cursor.go restartCursor) in the record: the cursor, the lowest sequence it
+	// accounts for, and its holes. They are separate keys from ReplayCursor
+	// because a broker that predates them would read ReplayCursor as a cursor
+	// that accounts for everything below it, which a restarted one does not. Such
+	// a broker ignores these keys and replays from the time rewind, as it did
+	// before they existed. Written only when the session has a restarted cursor,
+	// never with ReplayCursor, and cleared wherever ReplayCursor is.
+	RestartCursor uint64            `json:",omitempty"`
+	RestartBase   uint64            `json:",omitempty"`
+	RestartHoles  []storedDelivered `json:",omitempty"`
+
 	// Inflight is the QoS 1 and QoS 2 messages sent to the client and not yet
 	// acknowledged when the session was released, in the order they were sent,
 	// and ReceivedQoS2 the Packet Identifiers of the client's QoS 2 PUBLISH
@@ -214,6 +226,7 @@ type sessionRecord struct {
 	deliveredSinceWas time.Time
 	deliveredWas      []storedDelivered
 	replayCursorWas   uint64
+	replayBaseWas     uint64
 	replayHolesWas    []storedDelivered
 	inflightWas       []storedInflight
 	receivedQoS2Was   []uint16
@@ -514,7 +527,7 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 		if attachedElsewhere && !ownerDead {
 			rec.AwayAt, rec.AwayFromSeq, rec.AwayLateSeq, rec.Delivered, rec.DeliveredSince = time.Time{}, 0, 0, nil, time.Time{}
 			rec.DeliveredSpill = nil
-			rec.ReplayCursor, rec.ReplayHoles = 0, nil
+			rec.clearCursor()
 		}
 		legacy := ownerDead && rec.AwayAt.IsZero() && s.queueMaxAge > 0
 		rec.Owner = s.owner
@@ -530,7 +543,7 @@ func (s *sessionStore) claim(ctx context.Context, clientID, identity, username s
 		rec.awayLateSeqWas = rec.AwayLateSeq
 		rec.deliveredSinceWas = rec.DeliveredSince
 		rec.deliveredWas, rec.deliveredSpillWas = rec.Delivered, rec.DeliveredSpill
-		rec.replayCursorWas, rec.replayHolesWas = rec.ReplayCursor, rec.ReplayHoles
+		rec.replayCursorWas, rec.replayHolesWas, rec.replayBaseWas = rec.cursorToRestore()
 		if legacy {
 			// Attached with no position at all: written by a broker that predates
 			// the checkpoint, or killed before its first write. Anything in the
@@ -874,7 +887,7 @@ func (s *sessionStore) spillRecordReusing(rec *sessionRecord, limit int, known m
 	rec.Spill = nil
 	if n := trimDelivered(rec, limit/2); n > 0 {
 		// The ids left out may be above the cursor, which promises them all.
-		rec.ReplayCursor, rec.ReplayHoles = 0, nil
+		rec.clearCursor()
 		s.logger.Warn("delivered ids dropped to keep the session record within a value; a replay may repeat a QoS 2 message",
 			"client", rec.ClientID, "dropped", n)
 	}
@@ -1062,7 +1075,7 @@ func (s *sessionStore) spillDelivered(rec *sessionRecord, limit int, known map[s
 	}
 	if lost > 0 {
 		// The ids left out may be above the cursor, which promises them all.
-		rec.ReplayCursor, rec.ReplayHoles = 0, nil
+		rec.clearCursor()
 		s.logger.Warn("delivered ids could not be kept beside the session record; a replay may repeat a QoS 2 message",
 			"client", rec.ClientID, "dropped", lost, "error", err)
 	}
@@ -1515,4 +1528,19 @@ func decodeRecord(b []byte) (*sessionRecord, error) {
 		return nil, fmt.Errorf("session record version %d, this broker writes %d", r.Version, sessionRecordVersion)
 	}
 	return &r, nil
+}
+
+// clearCursor removes the replay cursor, restarted or not, from the record.
+func (r *sessionRecord) clearCursor() {
+	r.ReplayCursor, r.ReplayHoles = 0, nil
+	r.RestartCursor, r.RestartBase, r.RestartHoles = 0, 0, nil
+}
+
+// cursorToRestore is the cursor a claim of this record resumes from, its holes
+// and its base (0 for one that accounts for everything below it).
+func (r *sessionRecord) cursorToRestore() (next uint64, holes []storedDelivered, base uint64) {
+	if r.ReplayCursor != 0 {
+		return r.ReplayCursor, r.ReplayHoles, 0
+	}
+	return r.RestartCursor, r.RestartHoles, r.RestartBase
 }

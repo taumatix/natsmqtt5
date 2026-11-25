@@ -245,7 +245,7 @@ func (c *conn) negotiate(ctx context.Context, cp *packet.Connect) error {
 		if !restoredAway.IsZero() {
 			c.broker.restoreDeliveredSpill(ctx, sess, rec)
 			sess.markAwayRestored(restoredAway, rec.awayFromSeqWas, rec.awayLateSeqWas, rec.deliveredSinceWas, rec.deliveredWas,
-				rec.replayCursorWas, rec.replayHolesWas)
+				rec.replayCursorWas, rec.replayHolesWas, rec.replayBaseWas)
 		}
 		sess.setUnrestored(stored)
 	} else if len(stored) == 0 {

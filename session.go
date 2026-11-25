@@ -1233,7 +1233,7 @@ func lowestSeq(seqs ...uint64) uint64 {
 // the session was released, and, if the record has them, the sequence the
 // replay starts at and the ids delivered at or above it.
 func (s *session) markAwayRestored(at time.Time, fromSeq, lateSeq uint64, rewoundTo time.Time, delivered []storedDelivered,
-	cursor uint64, holes []storedDelivered) {
+	cursor uint64, holes []storedDelivered, base uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.awayAt, s.awayRestored, s.awayFromSeq, s.awayLateSeq = at, true, fromSeq, lateSeq
@@ -1241,6 +1241,9 @@ func (s *session) markAwayRestored(at time.Time, fromSeq, lateSeq uint64, rewoun
 	// The record carried every id at or above its cursor, which is what lets it
 	// carry the cursor at all (cursorIntoLocked).
 	s.restoreCursorLocked(cursor, holes)
+	if s.cur.next != 0 {
+		s.cur.base = base
+	}
 	if len(delivered) == 0 {
 		return
 	}
@@ -1327,11 +1330,15 @@ func (s *session) awayStateInto(rec *sessionRecord) (dropped int) {
 // it: dropped ids, which may be above it, or a subscription whose since is not
 // known yet. A record without a cursor is replayed from the time rewind.
 func (s *session) cursorIntoLocked(rec *sessionRecord, dropped int) {
-	rec.ReplayCursor, rec.ReplayHoles = 0, nil
-	if s.cur.next == 0 || s.cur.base != 0 || dropped > 0 || !s.sinceKnownLocked() {
+	rec.clearCursor()
+	if s.cur.next == 0 || dropped > 0 || !s.sinceKnownLocked() {
 		return
 	}
 	v := s.cursorViewLocked()
+	if s.cur.base != 0 {
+		rec.RestartCursor, rec.RestartBase, rec.RestartHoles = v.next, s.cur.base, v.stored()
+		return
+	}
 	rec.ReplayCursor, rec.ReplayHoles = v.next, v.stored()
 }
 
@@ -1448,8 +1455,9 @@ func (s *session) lateCopy(from *conn, seq uint64, id string) (successor *conn, 
 		s.addHoleLocked(seq, id)
 		holed = len(s.cur.holes) != before
 	}
-	// A restarted cursor is not in the record (cursor.go), so what the record
-	// says of a late copy follows the rule without one.
+	// A restarted cursor is kept in the record under its own keys, which a broker
+	// that predates them ignores, so what that broker's record says of a late copy
+	// follows the rule without a cursor.
 	safe := s.lateSeqSafeLocked(seq)
 	if s.cur.base != 0 {
 		safe = s.windowSafeLocked(seq)

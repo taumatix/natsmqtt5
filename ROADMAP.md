@@ -25,7 +25,7 @@ in Tier 2.
 # Tier 2: MUST statements on rare or optional paths
 
 Nothing open. Every entry that was here is implemented; their records, with what each left behind, are under
-"Implemented, with what each left behind" below, and what still needs a decision is in "Decisions for a major version".
+"Implemented, with what each left behind" below.
 
 # Decisions for a major version
 
@@ -47,15 +47,6 @@ What flipping would change for users:
 - **`QueuePlainPublishes` on:** a plain NATS subscriber sees a queued message twice (the original without
   `Mqtt5-Msg-Id`, then the broker's copy with one); the liveness subject would move for everyone, so v1.x and v2
   brokers could not share a fleet with `DurableWills` or `PersistentSessions`, and NATS ACLs must allow the new subject.
-
-## The restarted replay cursor lives only in memory (a v2 decision)
-
-**Blocked by:** a format change, and a major version.
-
-A cursor started by a restart scan (`restartCursor`) is kept in memory, not in the session record, because a broker of
-an earlier version would read it without its base and send what the rewind would not. A session restored on another
-broker falls back to the time rewind until its replay starts a cursor. Taking the cursor into the record needs a field
-older brokers refuse, or a v2.0.0 with a `MIGRATION.md` "v1 to v2" section.
 
 # Tier 3: SHOULD statements
 
@@ -248,8 +239,7 @@ granted QoS 1.
 
 ## The replay cursor: what falls back to the time rewind, and what waits for a resume
 
-**Done.** What is left is a design that needs a major version (see "Decisions for a major version") and costs not yet
-measured (see "Operations and robustness").
+**Done.** What is left is costs not yet measured (see "Operations and robustness").
 
 **Measured (2026-11-01, `TestClusterReplayCursorCostPerSubscribeAndPerDelivery_MQTT_4_4_0_1`, three `nats:2-alpine`
 servers in Apple containers, an R3 queue):** a SUBSCRIBE costs one stream info request (3-7 ms). 4496 deliveries
@@ -287,9 +277,13 @@ first two removed; it keeps every id, so the third is a unit test:
 A subscription made or replaced while any scan reads (the plain scan included, since 2026-10-31) makes it throw its
 result away: the new filter may be owed what the scan read past without looking.
 
-**Left:** a restarted cursor stays in memory, not in the record, because a broker of an earlier version would read it
-without its base; a session restored elsewhere falls back to the rewind until its replay starts a cursor. Taking it
-into the record needs a field older brokers refuse, or a major version. The other half of (3), a filter that cannot be narrowed, still never scans. Each restart
+**Done (2026-11-25):** a restarted cursor is in the record, under keys of its own (`RestartCursor`, `RestartBase`,
+`RestartHoles`), so a broker restart or a session restored elsewhere replays the hole the time rewind no longer reaches
+(`replay_cursor_restarted_record_test.go`, which fails without it: a broker killed after the scan, a new one on the
+same NATS). It needed no major version: `ReplayCursor` is never written for it, which is what an older broker would
+have misread (it trusts that cursor for everything below it, and a restarted one does not), and an older broker
+ignores the new keys and uses the time rewind as before. **Left:** a record an older broker rewrites loses the keys
+(a rolling upgrade), so the session is on the time rewind again until its next scan. The other half of (3), a filter that cannot be narrowed, still never scans. Each restart
 scan reads up to one rewind of the session's subjects per 1024 deliveries while it keeps being refused (a session
 with more than 1024 holes inside one rewind); not measured.
 

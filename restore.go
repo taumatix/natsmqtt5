@@ -106,7 +106,7 @@ func (b *Broker) restoreDeliveredSpill(ctx context.Context, s *session, rec *ses
 	ids, unreadable := b.store.loadDeliveredSpill(ctx, rec.deliveredSpillWas)
 	rec.deliveredWas = append(append([]storedDelivered(nil), rec.deliveredWas...), ids...)
 	if unreadable > 0 {
-		rec.replayCursorWas, rec.replayHolesWas = 0, nil
+		rec.replayCursorWas, rec.replayHolesWas, rec.replayBaseWas = 0, nil, 0
 		b.logger.Warn("some delivered ids of a restored session could not be read; "+
 			"its replay starts at the time rewind and may repeat a QoS 2 message",
 			"client_id", s.clientID, "values", unreadable)
