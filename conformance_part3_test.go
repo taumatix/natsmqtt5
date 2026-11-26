@@ -875,7 +875,7 @@ func TestConformance_MQTT_4_8_2_3_DeliveryRespectsTheGrantedQoS(t *testing.T) {
 // of: a QoS 2 PUBLISH reaches a member as QoS 1. This test pins that default. With the
 // option on the statements apply and are tested in shared_qos2_killed_test.go.
 func TestConformance_MQTT_4_8_2_4_SharedSubscriptionsAreGrantedAtMostQoS1(t *testing.T) {
-	addr := p3Broker(t)
+	addr := p3Broker(t, sharedQoS2Off)
 	member := p3Client(t, addr, "share-q2")
 	member.writeRaw(p3SubscribeBytes(1, "$share/g/sq/#", 0x02))
 	ack, ok := member.read().(*packet.Suback)

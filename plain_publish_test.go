@@ -28,6 +28,9 @@ import (
 
 func queuePlain(o *natsmqtt5.Options) { o.QueuePlainPublishes = true }
 
+// queuePlainOff is the pre-v1.3.0 behaviour, which is a pin now that on is the default.
+func queuePlainOff(o *natsmqtt5.Options) { o.PinQueuePlainPublishes = natsmqtt5.Ptr(false) }
+
 // plainPublish publishes payload on mqtt.<subject> as a NATS client with no broker in the path,
 // with an Mqtt5-Qos header when qos is not negative.
 func plainPublish(t *testing.T, nc *nats.Conn, subject string, qos int, payload string) {
@@ -72,7 +75,7 @@ func TestAPlainNATSPublishAtQoS1IsQueuedForASessionThatWasAway_MQTT_4_5_0_1(t *t
 func TestWithoutQueuePlainPublishesAPlainPublishIsNotQueued(t *testing.T) {
 	natsURL := startNATS(t)
 	var logs syncBuffer
-	addr := startBroker(t, natsURL, loggingBroker(t, &logs))
+	addr := startBroker(t, natsURL, loggingBroker(t, &logs), queuePlainOff)
 
 	live, _ := connectClient(t, addr, connectOpts("plain-v1-live"))
 	live.subscribe(paho.SubscribeOptions{Topic: "plain/v1", QoS: 1})

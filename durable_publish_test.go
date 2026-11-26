@@ -123,7 +123,7 @@ func TestDurablePublishQoS2RecIsAcknowledgedAfterStorageAndDeliveredOnce(t *test
 // still reached subscribers would be delivered again when the client resends.
 func TestDurablePublishWithoutTheStreamRefusesInsteadOfAcknowledging(t *testing.T) {
 	natsURL := startNATS(t)
-	addr := durableBroker(t, natsURL)
+	addr := startBroker(t, natsURL, queuePlainOff, func(o *natsmqtt5.Options) { o.DurablePublish = true })
 
 	sub, _ := connectClient(t, addr, connectOpts("dpx-sub"))
 	_, err := sub.Subscribe(context.Background(), &paho.Subscribe{

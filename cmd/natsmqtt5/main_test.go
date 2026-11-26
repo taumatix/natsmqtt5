@@ -252,20 +252,6 @@ func TestRetainedVerifyIntervalFlag(t *testing.T) {
 	assert.Zero(t, cfg.broker.RetainedVerifyInterval, "off unless asked for")
 }
 
-func TestQueuePlainPublishesFlag(t *testing.T) {
-	cfg, err := parseConfig([]string{"-queue-plain-publishes"}, env(nil), io.Discard)
-	require.NoError(t, err)
-	assert.True(t, cfg.broker.QueuePlainPublishes)
-
-	cfg, err = parseConfig(nil, env(map[string]string{"NATSMQTT5_QUEUE_PLAIN_PUBLISHES": "true"}), io.Discard)
-	require.NoError(t, err)
-	assert.True(t, cfg.broker.QueuePlainPublishes)
-
-	cfg, err = parseConfig(nil, env(nil), io.Discard)
-	require.NoError(t, err)
-	assert.False(t, cfg.broker.QueuePlainPublishes, "off unless asked for")
-}
-
 func TestNATSIngestFlag(t *testing.T) {
 	cfg, err := parseConfig([]string{"-nats-ingest"}, env(nil), io.Discard)
 	require.NoError(t, err)
@@ -294,7 +280,7 @@ func TestReconnectCatchUpFlag(t *testing.T) {
 	assert.False(t, cfg.broker.ReconnectCatchUp, "off unless asked for")
 }
 
-// The three defaults that flipped in v1.0.0 (MIGRATION.md): a flag or its
+// The defaults that flipped in v1.0.0 and v1.3.0 (MIGRATION.md): a flag or its
 // environment variable, given either way, pins the option; left out, it pins nothing.
 func TestFlippingDefaultsCanBePinnedEitherWay(t *testing.T) {
 	for _, tc := range []struct {
@@ -304,6 +290,8 @@ func TestFlippingDefaultsCanBePinnedEitherWay(t *testing.T) {
 		{"durable-wills", func(c *config) *bool { return c.broker.PinDurableWills }},
 		{"restrict-dollar-topics", func(c *config) *bool { return c.broker.PinRestrictDollarTopics }},
 		{"outbound-topic-aliases", func(c *config) *bool { return c.broker.PinOutboundTopicAliases }},
+		{"shared-qos2", func(c *config) *bool { return c.broker.PinSharedQoS2 }},
+		{"queue-plain-publishes", func(c *config) *bool { return c.broker.PinQueuePlainPublishes }},
 	} {
 		t.Run(tc.flag, func(t *testing.T) {
 			cfg, err := parseConfig(nil, env(nil), io.Discard)

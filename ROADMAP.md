@@ -29,24 +29,9 @@ Nothing open. Every entry that was here is implemented; their records, with what
 
 # Decisions for a major version
 
-## Enable SharedQoS2 and QueuePlainPublishes by default (a v2 decision, to be discussed)
-
-**Blocked by:** a decision, and a major version.
-
-Both options ship opt-in in v1.2.0. Flipping them to on by default changes what existing deployments see, so it
-needs a v2.0.0 (module path `/v2`) and a `MIGRATION.md` "v1 to v2" section. The finished preparation (module path,
-both defaults flipped with `PinSharedQoS2` / `PinQueuePlainPublishes` to turn them back off, tests, docs) lives on
-the branch `release/v2-prep` (PR #240); keep that branch.
-
-What flipping would change for users:
-
-- **`SharedQoS2` on:** a QoS 2 request on a `$share/` filter is granted QoS 2 in the SUBACK, not QoS 1, and members are
-  sent QoS 2 through the four-step exchange. A shared QoS 1 message held for a dead session stays held until
-  `SharedHoldLimit` instead of going back to the group after the AckWait. With `PersistentSessions` the brokers read
-  the session records every AckWait/3.
-- **`QueuePlainPublishes` on:** a plain NATS subscriber sees a queued message twice (the original without
-  `Mqtt5-Msg-Id`, then the broker's copy with one); the liveness subject would move for everyone, so v1.x and v2
-  brokers could not share a fleet with `DurableWills` or `PersistentSessions`, and NATS ACLs must allow the new subject.
+Nothing open. `SharedQoS2` and `QueuePlainPublishes` were the last two entries; both became the default in v1.3.0
+(2026-11-26, CHANGELOG [Unreleased], MIGRATION.md) without a major version, on the maintainer's decision that the
+current adoption allows it. Each has a pin (`PinSharedQoS2`, `PinQueuePlainPublishes`) for the old behaviour.
 
 # Tier 3: SHOULD statements
 
@@ -126,13 +111,9 @@ worse on the skewed mix (256: 26%).
 
 ## QoS 2 on shared subscriptions
 
-**Blocked by:** a decision about a wire-visible default, no longer by duplicates (checked 2026-11-01). Every duplicate
-window below is closed, or is the same as what QoS 2 without a shared subscription has; what is left is whether to
-change what a v1 client is granted. Granting QoS 2 on `$share/` by default changes the SUBACK and the QoS of every
-message a v1 deployment's shared members are sent (a QoS 2 request that was answered QoS 1 starts a four-step exchange
-the client's library may not expect), which is a behaviour change in a major version's sense (MIGRATION.md has the three
-v1.0.0 flips as the precedent). It is not additive, so it stays opt-in until a major release or a decision to take it as
-a documented default flip with a pin.
+**Blocked by:** nothing; the default flip is done (2026-11-26, v1.3.0, taken as a documented default flip with
+a pin, `PinSharedQoS2`, as v1.0.0 did). Every duplicate window below is closed, or is the same as what QoS 2 without a
+shared subscription has.
 
 1. **Closed (2026-11-01).** The late backlog (*A default queue that failed at startup*): a message the group acknowledged
    from the backlog before its live copy reached this broker was delivered live as well. A group consumer now carries the
@@ -227,9 +208,9 @@ either): it stays the session's until the exchange ends. Not covered then: a bro
 killed after the PUBREC is read and before its record is written. Closed for a client
 back within the AckWait (**Blocked by**, window 3); one away past it is window 4.
 
-### 3. Grant QoS 2 on `$share/`
+### 3. Done (2026-11-26): grant QoS 2 on `$share/` by default
 
-Make `Options.SharedQoS2` (added by entry 1, off) the default once the duplicates under **Blocked by** are settled,
+Done in v1.3.0 (pins, flag, CHANGELOG and MIGRATION.md as described). It asked to make `Options.SharedQoS2` the default once the duplicates under **Blocked by** are settled,
 keep an explicit opt-out (an `Options` field and a flag, since `false` is the zero value), add a CHANGELOG line that
 names the SUBACK change, and document it in the README. The SUBACK test moves from QoS 1 to the
 requested QoS ([MQTT-3.8.4-7]); with the switch off a QoS 2 request is still

@@ -31,6 +31,9 @@ import (
 
 func sharedQoS2(o *natsmqtt5.Options) { o.SharedQoS2 = true }
 
+// sharedQoS2Off is the pre-v1.3.0 behaviour, which is a pin now that on is the default.
+func sharedQoS2Off(o *natsmqtt5.Options) { o.PinSharedQoS2 = natsmqtt5.Ptr(false) }
+
 func (f sharedFleet) publishQoS2(t *testing.T, payload string) {
 	t.Helper()
 	pub, _ := connectClient(t, f.a, connectOpts("producer-q2"))
@@ -46,13 +49,14 @@ func (c *rawClient) completeQoS2(p *packet.Publish) {
 
 // [MQTT-3.8.4-7]: a QoS 2 request on a shared filter is granted QoS 1 unless
 // the broker was told otherwise, and the SUBACK says which.
-func TestASharedSubscriptionIsGrantedQoS1UnlessSharedQoS2IsOn_MQTT_3_8_4_7(t *testing.T) {
+func TestASharedSubscriptionIsGrantedQoS2UnlessPinnedOff_MQTT_3_8_4_7(t *testing.T) {
 	for name, tc := range map[string]struct {
 		opts []func(*natsmqtt5.Options)
 		want packet.ReasonCode
 	}{
-		"off": {nil, packet.GrantedQoS1},
-		"on":  {[]func(*natsmqtt5.Options){sharedQoS2}, packet.GrantedQoS2},
+		"off":     {[]func(*natsmqtt5.Options){sharedQoS2Off}, packet.GrantedQoS1},
+		"default": {nil, packet.GrantedQoS2},
+		"on":      {[]func(*natsmqtt5.Options){sharedQoS2}, packet.GrantedQoS2},
 	} {
 		t.Run(name, func(t *testing.T) {
 			addr := startBroker(t, startNATS(t), append([]func(*natsmqtt5.Options){persistentWithQueue}, tc.opts...)...)

@@ -444,12 +444,13 @@ must differ.
 A NATS message with no `Mqtt5-*` headers is delivered as a QoS 0 message with
 no properties, which is what makes plain `nats pub` reach MQTT subscribers.
 
-### Queueing plain NATS publishes (opt-in)
+### Queueing plain NATS publishes
 
 A message a plain NATS client publishes on a live subject, `<prefix>.<subject>`, with an
 `Mqtt5-Qos` header of 1 or 2 is queued when `Options.QueuePlainPublishes`
-(`-queue-plain-publishes`, `NATSMQTT5_QUEUE_PLAIN_PUBLISHES=true`) is on. It is off by default, and
-then nothing below applies. Every broker with an offline queue leaves the first copy to plain NATS
+(`-queue-plain-publishes`, `NATSMQTT5_QUEUE_PLAIN_PUBLISHES=true`) is on, which it is by default since v1.3.0
+(`Options.PinQueuePlainPublishes: Ptr(false)` or `-queue-plain-publishes=false` turns it off, and
+then nothing below applies). Every broker with an offline queue leaves the first copy to plain NATS
 subscribers and one broker, chosen by a NATS queue group on `<prefix>.>`, handles it as it handles an
 ingest message (below): the queue copy is stored and the live copy is published again with
 `Mqtt5-Msg-Id` and `Mqtt5-Queue-Seq`, which is the copy MQTT sessions are delivered. A session that
@@ -701,9 +702,9 @@ one with fewer features:
   unacknowledged, with their original Packet Identifiers [MQTT-4.4.0-1]. A
   session restored from the store instead — after a restart, or on another
   broker — has nothing to resend.
-- **Shared subscriptions are granted QoS 1 by default; `SharedQoS2` is opt-in.** A QoS 2 request on a
-  `$share/` filter is answered with `Granted QoS 1` in the SUBACK, which
-  [MQTT-3.8.4-7] permits. `Options.SharedQoS2` (`-shared-qos2`) grants QoS 2: the
+- **Shared subscriptions are granted QoS 2 by default since v1.3.0.** A QoS 2 request on a
+  `$share/` filter is answered with `Granted QoS 2` in the SUBACK. `Options.PinSharedQoS2: Ptr(false)`
+  (`-shared-qos2=false`) grants QoS 1 as v1.2 did, which [MQTT-3.8.4-7] permits. With QoS 2: the
   member that is sent a message owns it from then on, a held message survives a
   killed broker and a takeover (also for a client that stays away longer than the
   group's 30 s AckWait: the surviving brokers keep saying the message is being

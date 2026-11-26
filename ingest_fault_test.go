@@ -23,7 +23,7 @@ import (
 // and nothing is published live: a requester that retries would otherwise deliver twice.
 func TestNATSIngestAnswersWithAnErrorWhenTheQueueCopyCannotBeStored(t *testing.T) {
 	natsURL := startNATS(t)
-	addr := startBroker(t, natsURL, withNATSIngest)
+	addr := startBroker(t, natsURL, withNATSIngest, queuePlainOff)
 	sub, _ := connectClient(t, addr, connectOpts("ingest-nostore"))
 	sub.subscribe(paho.SubscribeOptions{Topic: "ingest/nostore", QoS: 1})
 	nc := plainNATS(t, natsURL)
