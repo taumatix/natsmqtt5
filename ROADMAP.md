@@ -10,10 +10,10 @@ today and cites the statements it touches.
 **No known MUST violation is open.** The table in `conformance/mqtt5-statements.tsv` has no VIOLATED
 or UNSURE row (a test enforces it). Tiers 1 and 2 are windows inside MUSTs the table counts as met:
 each needs a particular failure (a broker killed at one instant, a payload near `max_payload`) and
-names it. Entries are checked against the code each time the review is re-run (last: 2026-10-09; the Receive Maximum entry, which §4.13.1-1 made a MUST, was done in v0.11.3).
+names it. Entries are checked against the code each time the review is re-run (last: 2026-11-26; the Receive Maximum entry, which §4.13.1-1 made a MUST, was done in v0.11.3).
 Every entry opens with a **Blocked by:** line saying what stops it: *nothing* (a pass can take it), *a decision*,
 *a release*, *a major version*, *a cross-broker design*, or *real deployments* (evidence only a user's workload gives).
-The whole file was audited against `main` on 2026-10-31.
+The whole file was audited against `main` on 2026-11-26 (Tier 2 closed 2026-11-25, #264-#268).
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
