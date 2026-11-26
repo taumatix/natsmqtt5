@@ -1,3 +1,44 @@
+# Migrating from v1.2 to v1.3.0
+
+v1.3.0 turns two opt-in options on by default. The module path is unchanged and no exported
+identifier was removed, but a deployment that left both unset sees different behaviour, so read this
+before upgrading. Both were opt-in since v1.2.0.
+
+| Option | v1.2 default | v1.3.0 default | Keep the old behaviour with |
+|---|---|---|---|
+| QoS 2 on shared subscriptions | off (QoS 1 granted) | on | `Options.PinSharedQoS2: natsmqtt5.Ptr(false)`, `-shared-qos2=false` |
+| Queueing plain NATS publishes | off | on | `Options.PinQueuePlainPublishes: natsmqtt5.Ptr(false)`, `-queue-plain-publishes=false` |
+
+A pin beats the plain option (`SharedQoS2`, `QueuePlainPublishes`) when both are set. Because the
+defaults are now on, the plain bools can no longer say "off": a Go program that left one out to mean
+off must use the pin. The binary reads `NATSMQTT5_SHARED_QOS2` and `NATSMQTT5_QUEUE_PLAIN_PUBLISHES`;
+a variable or flag set either way pins.
+
+**What changes with `SharedQoS2` on.** A QoS 2 request on a `$share/` filter is granted QoS 2 in the
+SUBACK, not QoS 1, and members are sent QoS 2 through the four-step exchange. A shared QoS 1 message
+held for a dead session stays held until `SharedHoldLimit` instead of going back to the group after
+the AckWait. With `PersistentSessions` the brokers read the session records every AckWait/3.
+
+**What changes with `QueuePlainPublishes` on.**
+
+- A plain NATS subscriber sees a queued message twice: the original without `Mqtt5-Msg-Id`, then the
+  broker's copy with one.
+- The broker liveness subject moves from `<prefix>.$broker.<id>.ping` to `<prefix>$broker.<id>.ping`.
+  NATS permissions must allow the new subject.
+- **Rolling upgrades.** Brokers on the two sides of this change do not see each other's liveness
+  pings. With `DurableWills` or `PersistentSessions`, a v1.2 broker and a v1.3 broker sharing a
+  bucket take each other's sessions and Wills for dead. Either upgrade with
+  `PinQueuePlainPublishes: Ptr(false)` on every broker first and unpin after the fleet is on v1.3.0,
+  or stop the old brokers before starting the new ones.
+- Brokers sharing a `SubjectPrefix` must agree on the setting.
+
+## Checklist before you upgrade
+
+1. On v1.2, pin both options to what you run today.
+2. Upgrade to v1.3.0; nothing should change.
+3. Unpin one option at a time when you want the new behaviour (the whole fleet at once for
+   `QueuePlainPublishes`).
+
 # Migrating from v0.x to v1.0.0
 
 v1.0.0 flips the default of three options, all of which were deprecated in v0.14.0. The Go module

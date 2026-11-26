@@ -67,9 +67,8 @@ These are features the specification lets a Server leave out. A statement behind
 NOT-APPLICABLE, and the row names the feature's [ROADMAP.md](ROADMAP.md) entry and a test that
 shows the broker refusing or not advertising it the way the specification requires.
 
-- **QoS 2 on shared subscriptions.** A QoS 2 request on a `$share/` filter is granted QoS 1,
-  reported in the SUBACK, which [MQTT-3.8.4-7] permits. `Options.SharedQoS2` (off) grants QoS 2 and
-  is tested (`shared_qos2_test.go`, `shared_qos2_killed_test.go`, `shared_qos2_late_test.go`); the
+- **QoS 2 on shared subscriptions.** A QoS 2 request on a `$share/` filter is granted QoS 2 (since v1.3.0;
+  `PinSharedQoS2: Ptr(false)` grants QoS 1, reported in the SUBACK, which [MQTT-3.8.4-7] permits). QoS 2 is tested (`shared_qos2_test.go`, `shared_qos2_killed_test.go`, `shared_qos2_late_test.go`); the
   duplicate windows are closed or no wider than QoS 2 without a shared subscription has (ROADMAP.md),
   and the default stays because granting QoS 2 there changes what a v1 client is told.
 - **Server-to-client Topic Aliases** are sent since v1.0.0 to a Client that offered a Topic Alias

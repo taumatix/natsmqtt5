@@ -210,7 +210,7 @@ func TestNATSIngestRefusesDollarTopics(t *testing.T) {
 // Off by default: no broker answers on the ingest subject.
 func TestNATSIngestIsOffByDefault(t *testing.T) {
 	natsURL := startNATS(t)
-	startBroker(t, natsURL)
+	startBroker(t, natsURL, queuePlainOff)
 
 	msg := nats.NewMsg("mqtt.$ingest.ingest.off")
 	_, err := plainNATS(t, natsURL).RequestMsg(msg, 2*time.Second)

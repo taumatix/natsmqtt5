@@ -333,8 +333,8 @@ func TestSharedSubscriptionDeliversToOneMember(t *testing.T) {
 // A QoS 2 shared subscription is granted QoS 1 instead, which the server is
 // permitted to do [MQTT-3.8.4-7]. Delivery affinity for a half-finished QoS 2
 // exchange cannot be expressed with a NATS queue group.
-func TestSharedSubscriptionDowngradesQoS2(t *testing.T) {
-	addr := startBroker(t, startNATS(t))
+func TestSharedSubscriptionDowngradesQoS2WhenPinnedOff(t *testing.T) {
+	addr := startBroker(t, startNATS(t), sharedQoS2Off)
 	c, _ := connectClient(t, addr, connectOpts("worker"))
 
 	ack := c.subscribe(paho.SubscribeOptions{Topic: "$share/g/jobs/#", QoS: 2})
