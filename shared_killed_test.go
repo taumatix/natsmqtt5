@@ -45,15 +45,16 @@ const killedAckWait = 30 * time.Second
 
 // killedSharedMember starts a member on a broker binary, has it be sent job-k
 // (checkpointed as in flight), puts a second member on a surviving broker, and
-// kills the binary. keepalive is off on the raw clients, which send no pings.
+// kills the binary. SharedQoS2 is pinned off, the behaviour this file pins (with it on a held message
+// is not handed back to the group after the AckWait). keepalive is off on the raw clients, which send no pings.
 func killedSharedMember(t *testing.T) (survivor string, sent *packet.Publish, other *rawClient, natsURL string) {
 	t.Helper()
 	if os.Getenv("NATSMQTT5_SLOW_TESTS") == "" {
 		t.Skip("waits out the 30 s AckWait of the broker binary; set NATSMQTT5_SLOW_TESTS=1")
 	}
 	natsURL = startNATS(t)
-	child := startBrokerBinary(t, natsURL, "-persistent-sessions", "-session-checkpoint-interval", killedBrokerCheckpoint)
-	survivor = startBroker(t, natsURL, persistentWithQueue)
+	child := startBrokerBinary(t, natsURL, "-persistent-sessions", "-shared-qos2=false", "-session-checkpoint-interval", killedBrokerCheckpoint)
+	survivor = startBroker(t, natsURL, persistentWithQueue, sharedQoS2Off)
 
 	victim := dialRaw(t, child.addr)
 	victim.connect(noKeepAlive(rawConnect("killed-member", 300)))
