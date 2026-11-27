@@ -13,7 +13,7 @@ each needs a particular failure (a broker killed at one instant, a payload near 
 names it. Entries are checked against the code each time the review is re-run (last: 2026-11-26; the Receive Maximum entry, which §4.13.1-1 made a MUST, was done in v0.11.3).
 Every entry opens with a **Blocked by:** line saying what stops it: *nothing* (a pass can take it), *a decision*,
 *a release*, *a major version*, *a cross-broker design*, or *real deployments* (evidence only a user's workload gives).
-The whole file was audited against `main` on 2026-11-26 (Tier 2 closed 2026-11-25, #264-#268).
+The whole file was audited against `main` on 2026-11-26 (Tier 2 closed 2026-11-25, #264-#268; the v1.3.0 defaults, #270, left the entries under Operations).
 
 # Tier 1: MUST statements a conforming client hits in normal use
 
@@ -142,7 +142,8 @@ shared subscription has.
    `SharedHoldLimit` from the first sighting, after which the message goes back to the group once
    (`TestAKilledBrokersSharedQoS2MessageIsHeldForAClientAwayPastTheAckWait_MQTT_4_8_2_4_MQTT_4_8_2_5`, which failed
    before: the other member was given the message). The scan reads every session record each interval, which is why it
-   runs only with `SharedQoS2`.
+   runs only with `SharedQoS2` (on by default since v1.3.0, so for every deployment with persistent sessions: see
+   "The v1.3.0 defaults" under Operations).
 5. **Closed for a held shared message (2026-11-01); the rest is a documented limit.** `checkpointNow` dropped the record
    write's error, so a PUBLISH could go out after a failed write. For a message held in a shared group (`recordQoS2`,
    `subscribe.go`) the delivery now fails when the write does: the message is not sent but handed back to the group, the
@@ -187,7 +188,7 @@ first two change nothing a client sees.
 
 ### 1. Done (2026-10-31): a held QoS 2 message survives a killed broker and a takeover
 
-`Options.SharedQoS2` (`-shared-qos2`, off) lifts the cap; with it a message held
+`Options.SharedQoS2` (`-shared-qos2`, on by default since v1.3.0) lifts the cap; with it a message held
 before its PUBREC is resent with DUP and its original identifier after a SIGKILL
 and after a takeover, and the group's other member is not given it
 (`shared_qos2_test.go`). Found on the way: a broker that lost a session to another
@@ -370,6 +371,32 @@ twice (QoS 1 allows both).
 
 # Operations and robustness (not conformance)
 
+## The v1.3.0 defaults: a mixed fleet, a cost and a slower failure
+
+`SharedQoS2` and `QueuePlainPublishes` became the default without a major version (CHANGELOG [Unreleased],
+MIGRATION.md). What that left, in the order it limits a deployment:
+
+1. **A rolling upgrade across the liveness subject. Blocked by:** nothing. A v1.2 broker answers liveness checks on
+   `<prefix>.$broker.<id>.ping` and a v1.3 one on `<prefix>$broker.<id>.ping` (`livenessBase`, `sessionstore.go`), so each
+   side finds the other dead and, with `DurableWills` or `PersistentSessions`, adopts its Wills and takes its sessions.
+   The upgrade note says to pin `QueuePlainPublishes` off first, which every operator has to read and do. A v1.3.x
+   broker could subscribe to both subjects, and ask on both, which makes the mixed fleet safe by construction; the pin
+   then only matters for brokers older than that release. Test: two brokers on one NATS, one pinned to the old subject.
+2. **The hold-orphans scan, now on by default. Blocked by:** a measurement. `Broker.holdOrphans` reads every session
+   record every AckWait/3 (10 s) whenever `SharedQoS2` and persistent sessions are both on, which is now every deployment
+   with persistent sessions. The cost per record count is not measured; a bucket of a few hundred thousand sessions may
+   want a longer interval or an index of the sessions that hold a message.
+3. **A request to a subject nothing serves now times out. Blocked by:** nothing. The plain-publish queue group
+   subscribes to `<prefix>.>`, so a request to a subject only a broker would serve (`$ingest` with the option off, a
+   JetStream publish to a missing offline-queue stream) is no longer answered "no responders" at once but after the
+   client's timeout. Visible in `TestNATSIngestIsOffByDefault` and `TestDurablePublishWithoutTheStreamRefuses...`, which
+   pin the option off for that reason. The broker could answer such a request itself, or the queue group could
+   subscribe to narrower subjects.
+4. **Held shared QoS 1 messages are not handed back after the AckWait. Blocked by:** a decision. With `SharedQoS2` on, a
+   shared QoS 1 message held for a dead session stays held until `SharedHoldLimit` (the AckWait-then-hand-back of v1.2 is
+   `PinSharedQoS2: Ptr(false)`). Whether the default limit suits an operator whose members are often away is for
+   real deployments to say.
+
 ## The replay cursor and the hole loop: costs and paths not yet measured
 
 Not MUST statements; what the Tier 2 work left unmeasured or untested:
@@ -425,9 +452,11 @@ default cannot do better without paying a lookup per entry on a timer for every 
 
 ## Offline queue for messages published by plain NATS clients
 
-**Blocked by:** a major version, for what is left: queueing a message published *unchanged* on a live subject
-without a second delivery needs the brokers to be the first to see it, which is a subject layout change (MQTT
-subscribers on subjects only brokers publish to), a wire break for every broker and plain NATS subscriber.
+**Blocked by:** a major version, for what is left only: `Options.QueuePlainPublishes` (v1.2.0, on by default since
+v1.3.0) queues a plain publish, which is most of this entry. What it cannot do is queue one *without* a second delivery:
+a plain NATS subscriber sees the original and then the broker's copy. Avoiding that needs the brokers to be the first to
+see the message, which is a subject layout change (MQTT subscribers on subjects only brokers publish to), a wire break
+for every broker and plain NATS subscriber.
 
 Only messages that pass through a broker are copied to the queue. They also
 reach a shared subscription only through its NATS queue group, as QoS 0
